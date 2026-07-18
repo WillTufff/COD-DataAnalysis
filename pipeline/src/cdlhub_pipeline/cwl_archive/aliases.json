@@ -1,0 +1,16 @@
+{
+  "_comment": "Identity corrections for the CWL 2017-2019 archive (Activision cwl-data). Owner-editable. 'players' maps archive spellings to canonical handles (the archive title-cases stylized gamertags); 'teams' merges names the archive uses inconsistently for the same team. Archive spellings are preserved in player_aliases.",
+  "players": {
+    "Abezy": "aBeZy",
+    "Formal": "FormaL",
+    "Zoomaa": "ZooMaa",
+    "Slasher": "SlasheR",
+    "TJHaly": "TJHaLy"
+  },
+  "teams": {
+    "Team EnVyUs": "Team Envy",
+    "Complexity Gaming": "Complexity",
+    "Luminosity Gaming": "Luminosity",
+    "ExcelerateGG": "Excelerate"
+  }
+}

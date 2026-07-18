@@ -1,0 +1,1 @@
+"""Team rating systems."""

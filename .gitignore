@@ -1,0 +1,22 @@
+# deps / builds
+node_modules/
+.next/
+out/
+dist/
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.log
+coverage/
+.turbo/

@@ -1,0 +1,17 @@
+# Stub: becomes the nightly incremental ingest once the LPDB client lands.
+# Kept manual-only until then so it can't fire without credentials.
+#
+# When activated:
+#   schedule: - cron: "0 9 * * *"
+#   secrets: DATABASE_URL, CDLHUB_UA, LPDB_API_KEY, REVALIDATE_TOKEN
+#   steps: ingest incremental -> quality gate -> refresh MVs -> revalidate webhook
+name: Ingest (nightly)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Phase 2 (Liquipedia LPDB ingest) not implemented yet" && exit 1

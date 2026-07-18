@@ -1,0 +1,20 @@
+# Stub: parameterized historical backfill, checkpointed and resumable.
+# 6h timeout once it does real work.
+name: Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_year:
+        description: "First season year"
+        required: true
+      to_year:
+        description: "Last season year"
+        required: true
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - run: echo "Phase 2 (Liquipedia LPDB ingest) not implemented yet" && exit 1

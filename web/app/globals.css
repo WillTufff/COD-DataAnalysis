@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+/*
+ * cdlhub — dark broadcast-telemetry theme (single mode, deliberate).
+ * Chart series colors are the validated dark-mode categorical palette
+ * (dataviz reference instance, validated against #1a1a19-class surfaces).
+ */
+:root {
+  --background: #0d0e10; /* page plane */
+  --surface: #16181b; /* cards, chart surface */
+  --surface-raised: #1d2024;
+  --ink: #f2f1ec; /* primary, warm white */
+  --ink-secondary: #b9b8ae;
+  --ink-muted: #8a8881;
+  --hairline: #2c2c2a;
+  --baseline: #383835;
+  --accent: #eda100; /* CWL broadcast amber — links, eyebrows */
+  --accent-dim: #c98500;
+
+  /* categorical series (dark steps, fixed order — never cycled) */
+  --series-1: #3987e5;
+  --series-2: #008300;
+  --series-3: #d55181;
+  --series-4: #c98500;
+  --series-5: #199e70;
+  --series-6: #d95926;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --good: #0ca30c;
+  --critical: #d03b3b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-hairline: var(--hairline);
+  --color-baseline: var(--baseline);
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
+  --color-good: var(--good);
+  --color-critical: var(--critical);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--background);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: #0d0e10;
+}
+
+/* Broadcast eyebrow: the structural label used for insight kinds & sections */
+.eyebrow {
+  font-family: var(--font-display), var(--font-geist-sans), sans-serif;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Lower-third: section headers styled like a broadcast overlay tag — amber
+   tick, condensed caps, hairline rule running out to the right margin.
+   Sections sit on the page plane; only charts get a surface. */
+.lower-third {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-family: var(--font-display), var(--font-geist-sans), sans-serif;
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.lower-third::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.9em;
+  background: var(--accent);
+  flex: none;
+}
+.lower-third::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+.lower-third .lt-note {
+  font-family: var(--font-geist-mono), monospace;
+  font-weight: 400;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--ink-muted);
+}
