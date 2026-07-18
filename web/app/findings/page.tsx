@@ -12,6 +12,9 @@ const KIND_META: Record<string, { label: string; dot: string }> = {
   milestone: { label: "Milestone", dot: "var(--series-4)" },
   era_context: { label: "Era context", dot: "var(--series-7)" },
   h2h_edge: { label: "Head-to-head", dot: "var(--series-5)" },
+  what_wins: { label: "What wins maps", dot: "var(--series-2)" },
+  rating_top: { label: "Top rated", dot: "var(--series-3)" },
+  model_null: { label: "Model null", dot: "var(--series-8)" },
 };
 
 function Chips({ detail }: { detail: Record<string, unknown> }) {
@@ -29,6 +32,11 @@ function Chips({ detail }: { detail: Record<string, unknown> }) {
     chips.push(
       `${detail.pct_change > 0 ? "+" : ""}${Math.round(detail.pct_change * 100)}% pace`,
     );
+  if (typeof detail.rating === "number" && typeof detail.rating_sd === "number")
+    chips.push(`${detail.rating.toFixed(2)} ±${detail.rating_sd.toFixed(2)}`);
+  if (typeof detail.obj_vs_slay === "number")
+    chips.push(`obj ${detail.obj_vs_slay.toFixed(1)}× slay`);
+  if (typeof detail.n_maps === "number") chips.push(`${detail.n_maps} maps`);
   if (chips.length === 0) return null;
   return (
     <span className="ml-3 space-x-2 font-mono text-[11px] text-ink-muted">
@@ -122,7 +130,15 @@ export default async function FindingsPage({
                   <Chips detail={item.detail} />
                 </p>
                 <Link
-                  href={item.subjectSlug ? `/players/${item.subjectSlug}` : "/ratings"}
+                  href={
+                    item.subjectSlug
+                      ? `/players/${item.subjectSlug}`
+                      : item.kind === "what_wins"
+                        ? "/methodology#player-rating"
+                        : item.kind === "model_null"
+                          ? "/methodology#winprob"
+                          : "/ratings"
+                  }
                   className="ml-auto flex-none font-mono text-xs text-accent underline underline-offset-2 hover:text-ink"
                 >
                   evidence

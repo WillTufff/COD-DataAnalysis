@@ -14,7 +14,7 @@ import sys
 
 from . import backtest, era, insights
 from .db import connect
-from .ratings import fit
+from .ratings import fit, player_rating, winprob
 
 ELO_K = 32.0
 GLICKO_TAU = 0.5
@@ -61,14 +61,64 @@ def main(argv: list[str] | None = None) -> int:
             f"accuracy {report.accuracy:.3f}"
         )
 
+        pr_run = open_run(
+            conn,
+            "player_rating",
+            "1.0.0",
+            {
+                "l2": player_rating.L2,
+                "shrink_maps": player_rating.SHRINK_MAPS,
+                "rating_scale": player_rating.RATING_SCALE,
+                "min_train_games": player_rating.MIN_TRAIN_GAMES,
+                "bootstrap_b": player_rating.BOOTSTRAP_B,
+            },
+            through,
+        )
+        n, pr_preds, _ = player_rating.compute_and_write(conn, pr_run)
+        report = backtest.evaluate(pr_preds)
+        backtest.write(conn, pr_run, report)
+        print(
+            f"player_rating run {pr_run}: {n} rating rows; map-level walk-forward: "
+            f"{report.n} predictions, brier {report.brier:.4f}, "
+            f"accuracy {report.accuracy:.3f}"
+        )
+
+        wp_run = open_run(
+            conn,
+            "winprob",
+            "1.0.0",
+            {
+                "l2": winprob.L2,
+                "min_train": winprob.MIN_TRAIN,
+                "refit_every": winprob.REFIT_EVERY,
+                "form_window": winprob.FORM_WINDOW,
+            },
+            through,
+        )
+        wp_preds, wp_artifact = winprob.fit_walk_forward(series)
+        winprob.write_artifact(conn, wp_run, wp_artifact)
+        report = backtest.evaluate(wp_preds)
+        backtest.write(conn, wp_run, report)
+        print(
+            f"winprob run {wp_run}: {len(wp_preds)} predictions, "
+            f"brier {report.brier:.4f}, log-loss {report.log_loss:.4f}, "
+            f"accuracy {report.accuracy:.3f}"
+        )
+
         ins_run = open_run(
             conn,
             "insights",
-            "1.0.0",
-            {"era_run_id": era_run, "elo_run_id": elo_run},
+            "1.1.0",
+            {
+                "era_run_id": era_run,
+                "elo_run_id": elo_run,
+                "glicko_run_id": glicko_run,
+                "player_rating_run_id": pr_run,
+                "winprob_run_id": wp_run,
+            },
             through,
         )
-        n = insights.generate(conn, ins_run, era_run, elo_run)
+        n = insights.generate(conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run)
         print(f"insights run {ins_run}: {n} atoms")
 
         conn.commit()

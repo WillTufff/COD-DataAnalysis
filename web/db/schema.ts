@@ -335,3 +335,15 @@ export const backtests = pgTable("backtests", {
   accuracy: real("accuracy"),
   calibration: jsonb("calibration").notNull(),
 });
+
+export const modelArtifacts = pgTable(
+  "model_artifacts",
+  {
+    runId: integer("run_id")
+      .notNull()
+      .references(() => modelRuns.id),
+    name: text("name").notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.name] })],
+);

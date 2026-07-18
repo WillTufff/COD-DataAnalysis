@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import { Calibration } from "@/components/charts/Calibration";
-import { getBacktestCards, getCoverage, latestRun } from "@/lib/analytics";
+import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
+import {
+  getBacktestCards,
+  getCoverage,
+  getModeWeights,
+  getWinprobArtifact,
+  latestRun,
+} from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +22,39 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+const MODEL_LABEL: Record<string, string> = {
+  elo: "Elo",
+  glicko2: "Glicko-2",
+  winprob: "winprob_v1",
+  player_rating: "player_rating_v1",
+};
+
 export default async function MethodologyPage() {
-  const [eloRun, glickoRun, eraRun, insightsRun] = await Promise.all([
-    latestRun("elo"),
-    latestRun("glicko2"),
-    latestRun("era_adjust"),
-    latestRun("insights"),
-  ]);
-  const cards = await getBacktestCards(
-    [eloRun?.id, glickoRun?.id].filter((x): x is number => x !== undefined && x !== null),
+  const [eloRun, glickoRun, eraRun, insightsRun, ratingRun, winprobRun] =
+    await Promise.all([
+      latestRun("elo"),
+      latestRun("glicko2"),
+      latestRun("era_adjust"),
+      latestRun("insights"),
+      latestRun("player_rating"),
+      latestRun("winprob"),
+    ]);
+  const seriesCards = await getBacktestCards(
+    [eloRun?.id, glickoRun?.id, winprobRun?.id].filter(
+      (x): x is number => x !== undefined && x !== null,
+    ),
   );
-  const coverage = await getCoverage();
+  const [ratingCards, modeWeights, winprobArt, coverage] = await Promise.all([
+    getBacktestCards(
+      [ratingRun?.id].filter((x): x is number => x !== undefined && x !== null),
+    ),
+    ratingRun ? getModeWeights(ratingRun.id) : Promise.resolve([]),
+    winprobRun ? getWinprobArtifact(winprobRun.id) : Promise.resolve(null),
+    getCoverage(),
+  ]);
+  const cards = [...seriesCards].sort(
+    (a, b) => (a.brier ?? 1) - (b.brier ?? 1),
+  );
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
@@ -95,6 +124,153 @@ export default async function MethodologyPage() {
         </div>
       </section>
 
+      <section id="player-rating" className="mt-12">
+        <h2 className="font-display text-2xl font-semibold uppercase">
+          Open player rating (player_rating_v1)
+        </h2>
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+          <p>
+            The composite rating shown on{" "}
+            <a className="underline" href="/ratings">
+              /ratings
+            </a>{" "}
+            is built in four auditable steps. <strong className="text-ink">First</strong>,
+            for every (season × mode) each map becomes one observation — the
+            difference between the two teams’ per-10-minute stat profiles (kills,
+            deaths, assists, mode objective), standardized and regressed against
+            which team won the map (L2 logistic, λ=1, fit by IRLS in ~40 lines of
+            published numpy). The coefficients are data-derived answers to “how
+            much was a one-SD edge in hill time worth against the same edge in
+            kills, in this title?” <strong className="text-ink">Second</strong>,
+            each player-season-mode aggregate is z-scored within its qualified
+            cohort and dotted with those weights.{" "}
+            <strong className="text-ink">Third</strong>, scores shrink toward the
+            league mean by m/(m+15) in maps played — partial pooling, so a hot
+            12-map cameo cannot outrank a great 200-map season.{" "}
+            <strong className="text-ink">Fourth</strong>, mode scores blend by
+            maps played and scale so the qualified league averages 1.00; the ±sd
+            is a 200-draw map-resampling bootstrap.
+          </p>
+          <p>
+            One reading caveat: in respawn modes a team’s kills mirror its
+            opponent’s deaths almost exactly, so those two coefficients are
+            near-collinear and the ridge penalty splits their shared weight — read
+            them jointly as slaying.
+            {ratingRun && (
+              <span className="text-ink-muted">
+                {" "}
+                Current run: v{ratingRun.version}, code {ratingRun.codeRef ?? "n/a"},
+                data through {ratingRun.dataThrough}.
+              </span>
+            )}
+          </p>
+        </div>
+        {modeWeights.length > 0 && (
+          <div className="mt-4 rounded border border-hairline bg-surface p-4">
+            <h3 className="eyebrow text-ink-secondary">
+              What the regression learned: what wins maps
+            </h3>
+            <div className="mt-3">
+              <WhatWinsMaps cohorts={modeWeights} />
+            </div>
+          </div>
+        )}
+        {ratingCards.map((c) => (
+          <div key={c.runId} className="mt-4 rounded border border-hairline bg-surface p-4">
+            <div className="flex items-baseline justify-between">
+              <h3 className="font-display text-xl font-semibold uppercase">
+                Weight validation — walk-forward by event
+              </h3>
+              <span className="font-mono text-xs text-ink-muted">
+                v{c.version} · {c.windowFrom} → {c.windowTo}
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <Stat label="Brier score" value={c.brier?.toFixed(4) ?? "—"} />
+              <Stat label="Log loss" value={c.logLoss?.toFixed(4) ?? "—"} />
+              <Stat
+                label="Accuracy"
+                value={c.accuracy !== null ? `${(c.accuracy * 100).toFixed(1)}%` : "—"}
+              />
+              <Stat label="Maps predicted" value={String(c.n)} />
+            </div>
+            <p className="mt-3 text-xs text-ink-muted">
+              Each event’s maps are classified using weights trained only on
+              earlier events in the same (season × mode). Read this for what it
+              is: a <em>value</em> model scored on same-map box scores, not a
+              forecast — it establishes that the learned weights generalize
+              across events instead of memorizing them, which is the property the
+              rating stands on.
+            </p>
+          </div>
+        ))}
+      </section>
+
+      <section id="winprob" className="mt-12">
+        <h2 className="font-display text-2xl font-semibold uppercase">
+          The momentum test (winprob_v1)
+        </h2>
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+          <p>
+            Glicko-2 is the strongest baseline below, so instead of another
+            rating system this model asks a sharper question: <em>given</em> the
+            ratings, does anything else carry information about who wins a
+            series? Its features — all computed strictly before each series — are
+            the walk-forward Glicko-2 and Elo probabilities, combined rating
+            deviation, each team’s last-{winprobArt?.formWindow ?? 10} win rate,
+            and a shrunken head-to-head record, in an expanding-window logistic
+            regression refit every {winprobArt?.refitEvery ?? 50} series. Until{" "}
+            {winprobArt?.minTrain ?? 200} series of history exist it passes
+            Glicko-2 through unchanged, so its backtest is directly comparable.
+          </p>
+          <p>
+            The answer over 2017–2019 is no: the Brier difference in the report
+            cards below is noise, and the learned form coefficient is
+            approximately zero. Recent form and head-to-head history add nothing
+            beyond team strength — the first published test of the momentum
+            narrative on this record. A null, backtested and reported, is a
+            result.
+            {winprobRun && (
+              <span className="text-ink-muted">
+                {" "}
+                Current run: v{winprobRun.version}, code {winprobRun.codeRef ?? "n/a"}.
+              </span>
+            )}
+          </p>
+          {winprobArt && (
+            <div className="overflow-x-auto rounded border border-hairline bg-surface p-4">
+              <h3 className="eyebrow text-ink-secondary">
+                Final learned coefficients (log-odds per unit)
+              </h3>
+              <table className="mt-2 w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-1.5 pr-4 font-normal">Feature</th>
+                    <th className="py-1.5 text-right font-normal">Weight</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(winprobArt.finalWeights).map(([f, w]) => (
+                    <tr key={f} className="border-b border-hairline/60">
+                      <td className="py-1.5 pr-4 font-mono text-xs">{f}</td>
+                      <td className="py-1.5 text-right font-mono tabular-nums">
+                        {w.toFixed(3)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-xs text-ink-muted">
+                The rating logits carry the prediction; the rest hover near zero.
+                Coefficients are correlated (both rating systems measure the same
+                thing), so read the non-rating rows as “nothing left to add,” not
+                as precise effects.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
       <section id="backtests" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Backtest report cards
@@ -110,7 +286,7 @@ export default async function MethodologyPage() {
             <div key={c.runId} className="rounded border border-hairline bg-surface p-4">
               <div className="flex items-baseline justify-between">
                 <h3 className="font-display text-xl font-semibold uppercase">
-                  {c.model === "glicko2" ? "Glicko-2" : "Elo"}
+                  {MODEL_LABEL[c.model] ?? c.model}
                 </h3>
                 <span className="font-mono text-xs text-ink-muted">
                   v{c.version} · {c.windowFrom} → {c.windowTo}
@@ -139,8 +315,9 @@ export default async function MethodologyPage() {
       <section id="insights" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">Insights</h2>
         <p className="mt-3 text-sm leading-relaxed text-ink-secondary">
-          Feed items are generated, not written: five kinds (outlier, trend,
-          milestone, era context, head-to-head edge), each computed from model
+          Feed items are generated, not written: eight kinds (outlier, trend,
+          milestone, era context, head-to-head edge, what-wins-maps weights, top
+          rated seasons, and published model nulls), each computed from model
           output or the raw record with fixed eligibility thresholds (e.g.
           outliers require ≥ 30 maps and |z| ≥ 2). Every number in a headline is
           read back from the database — nothing is estimated for narrative

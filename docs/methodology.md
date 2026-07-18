@@ -10,10 +10,11 @@ figure published here is meant to arrive with its context: percentile, era adjus
 uncertainty, and trend.
 
 **Status.** Sections are marked shipped or planned. As of now the era adjustment,
-the two team rating systems, the backtest harness, and the finding generator are
-running on real data. Career modeling and meta analysis are specified but not yet
-implemented, and the site covers 2017 to 2019 because CDL-era data needs Liquipedia
-API access that is not yet in place.
+the two team rating systems, the open player rating, the series win-probability
+model, the backtest harness, and the finding generator are running on real data.
+Career modeling and meta analysis are specified but not yet implemented, and the
+site covers 2017 to 2019 because CDL-era data needs Liquipedia API access that is
+not yet in place.
 
 ## Principles
 
@@ -93,6 +94,22 @@ continuously through rebrands rather than resetting. Glicko-2's rating deviation
 the uncertainty bands shown on the ratings page. A map-margin-weighted variant is
 planned as a sensitivity check.
 
+**Series win probability, `winprob_v1` (shipped).** Glicko-2 is the strongest
+baseline in the table below, so rather than another rating system this model asks a
+sharper question: given the ratings, does anything else carry information about who
+wins a series? Its features, all computed strictly before each series, are the
+walk-forward Glicko-2 and Elo win probabilities (as logits), the combined Glicko-2
+rating deviation, each team's win rate over its last ten series, and a shrunken
+head-to-head record. The model is L2-regularized logistic regression, refit on an
+expanding window every 50 series; until 200 series of history exist it passes the
+Glicko-2 probability through unchanged, so its backtest covers the same series as the
+baselines and any improvement is attributable to the added features.
+
+The answer, over 2017-2019, is no: recent form and head-to-head history do not
+improve on team strength (see the table below — the difference is noise). The learned
+form coefficient is approximately zero, which is this site's first published test of
+the momentum narrative. A null, backtested and reported, is a result.
+
 **Validation (shipped).** Models are evaluated by walk-forward backtest, which is to
 say each prediction is made using only data available before that series. Current
 results, over the full 2017-2019 record:
@@ -100,6 +117,7 @@ results, over the full 2017-2019 record:
 | Model | Brier | Accuracy |
 |---|---|---|
 | Glicko-2 | 0.2215 | 65.4% |
+| winprob_v1 | 0.2217 | 64.4% |
 | Elo | 0.2228 | 63.7% |
 
 Glicko-2 is ahead on both, though the margin is narrow enough that it should not be
@@ -111,11 +129,36 @@ hyperparameters, and training window. A rerun replaces a whole run rather than e
 rows in place, so any published number can be traced back to the exact code and data
 window that generated it.
 
-**Open player rating, `player_rating_v1` (planned).** The intended design: mode-specific
-z-scores of engagement and objective stats, blended with map outcome via regularized
-regression against team map wins, with hierarchical partial pooling so a 40-map season
-does not swamp a 400-map career, normalized to a 1.0 average. It ships only when its
-backtest ships with it.
+**Open player rating, `player_rating_v1` (shipped).** The composite rating, built in
+four steps, each of them auditable:
+
+1. *Learn what wins maps.* For every (season × mode), each map is one observation:
+   the difference between the two teams' per-10-minute profiles (kills, deaths,
+   assists, mode objective), standardized, regressed against which team won the map.
+   The regression is L2 logistic (λ=1 on standardized features), fit by iteratively
+   reweighted least squares in ~40 lines of published numpy — no black box. Cohorts
+   with fewer than 40 maps are not fit. The learned weights are stored with the run
+   and published: they are data-derived answers to "how much was a one-SD edge in
+   hill time worth, against the same edge in kills, in this title?" One caveat for
+   reading them: in respawn modes a team's kills mirror its opponent's deaths almost
+   exactly, so those two coefficients are near-collinear and the ridge penalty splits
+   their shared weight — read them jointly as slaying.
+2. *Score players with those weights.* Each player-season-mode aggregate is z-scored
+   against its qualified cohort (≥ 8 maps, as in the era adjustment) and dotted with
+   the mode's weights, then standardized so modes land on a common scale.
+3. *Shrink small samples.* Scores are pulled toward the league mean by
+   m / (m + 15), where m is maps played — empirical-Bayes partial pooling, so a hot
+   12-map season cannot outrank a great 200-map one.
+4. *Normalize.* The season rating blends mode scores weighted by maps played, scaled
+   so the qualified cohort averages 1.00 with a league SD near 0.15. The published
+   uncertainty is a map-resampling bootstrap (200 draws, fixed seed).
+
+Its validation is walk-forward within each (season × mode): every event's maps are
+predicted using weights trained only on earlier events (4,204 predictions, Brier
+0.054, accuracy 92.5%). Read that number for what it is: this is a *value* model
+scored on same-map box scores, not a forecast — the backtest establishes that the
+learned weights generalize across events rather than memorizing them, which is the
+property the rating stands on.
 
 ## Tier 3: Career modeling (planned)
 
@@ -147,11 +190,13 @@ The tables exist; the models are not yet written.
 ## Tier 5: Finding generation (shipped)
 
 A layer of rules and statistics scans model outputs after every run and emits ranked,
-plain-English findings in five kinds: trends, outliers, milestones, era context, and
-head-to-head edges. There are currently 136. Each carries the numbers backing it and a
-link into the evidence view, so any claim on the site can be traced to the data that
-produced it. These are generated from model output by fixed rules, not written by hand
-and not written by a language model.
+plain-English findings in eight kinds: trends, outliers, milestones, era context,
+head-to-head edges, and — reading the newer models' outputs directly — what-wins-maps
+weight comparisons per (season × mode), the top open-rating seasons, and published
+model nulls such as the momentum test. There are currently 151. Each carries the
+numbers backing it and a link into the evidence view, so any claim on the site can be
+traced to the data that produced it. These are generated from model output by fixed
+rules, not written by hand and not written by a language model.
 
 ## Publishing rules
 

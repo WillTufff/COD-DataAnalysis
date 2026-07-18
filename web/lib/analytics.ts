@@ -596,3 +596,131 @@ export async function getCoverage(): Promise<CoverageRow[]> {
     extrasPct: Number(r.extras_pct),
   }));
 }
+
+// ---------- Open player rating (player_rating_v1) ----------
+
+export type RatingRow = {
+  playerId: number;
+  handle: string;
+  slug: string;
+  year: number;
+  title: string;
+  mapsPlayed: number;
+  rating: number;
+  ratingSd: number | null;
+  kdRaw: number | null; // context from the era run, same season
+};
+
+// Blended (all-mode) season ratings from the player_rating run, with the era
+// run's raw K/D joined on for context — the rating and the stat it re-weighs,
+// side by side.
+export async function getRatingLeaderboard(
+  ratingRunId: number,
+  eraRunId: number,
+  minMaps = 30,
+  limit = 20,
+): Promise<RatingRow[]> {
+  const rows = await db.execute(sql`
+    SELECT pr.player_id, p.handle, se.year, t.short_name AS title,
+           pr.maps_played, pr.rating, pr.rating_sd, era.kd_raw
+    FROM player_season_adjusted pr
+    JOIN players p ON p.id = pr.player_id
+    JOIN seasons se ON se.id = pr.season_id
+    JOIN titles t ON t.id = se.title_id
+    LEFT JOIN player_season_adjusted era
+      ON era.run_id = ${eraRunId} AND era.player_id = pr.player_id
+     AND era.season_id = pr.season_id AND era.mode_id IS NULL
+    WHERE pr.run_id = ${ratingRunId} AND pr.mode_id IS NULL
+      AND pr.rating IS NOT NULL AND pr.maps_played >= ${minMaps}
+    ORDER BY pr.rating DESC
+    LIMIT ${limit}
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    playerId: Number(r.player_id),
+    handle: String(r.handle),
+    slug: playerSlug(String(r.handle)),
+    year: Number(r.year),
+    title: String(r.title),
+    mapsPlayed: Number(r.maps_played),
+    rating: Number(r.rating),
+    ratingSd: r.rating_sd === null ? null : Number(r.rating_sd),
+    kdRaw: r.kd_raw === null ? null : Number(r.kd_raw),
+  }));
+}
+
+export type ModeWeightCohort = {
+  year: number;
+  title: string;
+  mode: string;
+  nMaps: number;
+  weights: Record<string, number>;
+  objVsSlay: number; // objective weight / mean |slaying| weight
+};
+
+// The learned map-outcome regression weights, one cohort per (season × mode).
+// objVsSlay reads the kills/deaths pair jointly (they are near-collinear in
+// respawn modes, so ridge splits their shared weight).
+export async function getModeWeights(ratingRunId: number): Promise<ModeWeightCohort[]> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'mode_weights'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | {
+        cohorts: {
+          year: number;
+          title: string;
+          mode: string;
+          n_maps: number;
+          weights: Record<string, number>;
+        }[];
+      }
+    | undefined;
+  if (!payload) return [];
+  return payload.cohorts.map((c) => {
+    const slay =
+      (Math.abs(c.weights.kills_p10 ?? 0) + Math.abs(c.weights.deaths_p10 ?? 0)) / 2;
+    return {
+      year: c.year,
+      title: c.title,
+      mode: c.mode,
+      nMaps: c.n_maps,
+      weights: c.weights,
+      objVsSlay: slay > 0 ? Math.max(c.weights.obj_p10 ?? 0, 0) / slay : 0,
+    };
+  });
+}
+
+export type WinprobArtifact = {
+  finalWeights: Record<string, number>;
+  finalIntercept: number;
+  minTrain: number;
+  refitEvery: number;
+  formWindow: number;
+};
+
+export async function getWinprobArtifact(
+  winprobRunId: number,
+): Promise<WinprobArtifact | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${winprobRunId} AND name = 'coefficients'
+  `);
+  const p = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | {
+        final_weights: Record<string, number>;
+        final_intercept: number;
+        min_train: number;
+        refit_every: number;
+        form_window: number;
+      }
+    | undefined;
+  if (!p) return null;
+  return {
+    finalWeights: p.final_weights,
+    finalIntercept: p.final_intercept,
+    minTrain: p.min_train,
+    refitEvery: p.refit_every,
+    formWindow: p.form_window,
+  };
+}

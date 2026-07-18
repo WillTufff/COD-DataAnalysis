@@ -10,6 +10,12 @@ the spine.
   milestone    career maps-played thresholds; team all-time peak rating (Elo run)
   era_context  league slaying pace shifts between consecutive seasons per mode
   h2h_edge     lopsided head-to-head records (>= 8 decided series, >= 70%)
+
+Three more kinds read the newer models' outputs (player_rating, winprob):
+
+  what_wins    per (season x mode): learned objective-vs-slaying map weights
+  rating_top   highest open-player-rating seasons in the archive
+  model_null   backtested non-results worth publishing (e.g. momentum)
 """
 
 from __future__ import annotations
@@ -280,8 +286,169 @@ def h2h_edges(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
     return out
 
 
+def what_wins(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list[Atom]:
+    """One finding per (season × mode): what the map-outcome regression says
+    a one-SD team edge is worth, objective play vs slaying."""
+    row = conn.execute(
+        "SELECT payload FROM model_artifacts WHERE run_id = %s AND name = 'mode_weights'",
+        (pr_run,),
+    ).fetchone()
+    if row is None:
+        return []
+    payload = cast("dict[str, Any]", row[0])
+    out = []
+    for cohort in payload["cohorts"]:
+        w = cohort["weights"]
+        # Respawn team kills mirror opponent deaths, so the two columns are
+        # near-collinear and ridge splits them; read them jointly as slaying.
+        slay = (abs(w["kills_p10"]) + abs(w["deaths_p10"])) / 2.0
+        obj = max(float(w["obj_p10"]), 0.0)
+        if slay <= 0.0:
+            continue
+        ratio = obj / slay
+        year, title, mode = cohort["year"], cohort["title"], cohort["mode"]
+        if ratio >= 1.3:
+            reading = (
+                f"the objective, not the gunfight, carried maps: a one-SD team edge in "
+                f"objective play was worth {ratio:.1f}x the same edge in slaying"
+            )
+        elif ratio <= 0.6:
+            reading = (
+                f"slaying decided maps: a one-SD objective edge was worth only "
+                f"{ratio:.1f}x the equivalent slaying edge"
+            )
+        else:
+            reading = (
+                f"objective play and slaying carried nearly equal weight "
+                f"({ratio:.1f}x) — balanced map-win drivers"
+            )
+        out.append(
+            Atom(
+                "season",
+                cast(int, cohort["season_id"]),
+                "what_wins",
+                f"In {year} {title} {mode}, {reading} (regression over {cohort['n_maps']} maps).",
+                {
+                    "year": year,
+                    "title": title,
+                    "mode": mode,
+                    "n_maps": cohort["n_maps"],
+                    "weights": w,
+                    "obj_vs_slay": round(ratio, 2),
+                    "player_rating_run_id": pr_run,
+                },
+                min(0.45 + abs(ratio - 1.0) * 0.3, 1.0),
+            )
+        )
+    return out
+
+
+def rating_top(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list[Atom]:
+    sql = """
+    SELECT psa.player_id, p.handle, se.year, t.short_name,
+           psa.rating, psa.rating_sd, psa.maps_played
+    FROM player_season_adjusted psa
+    JOIN players p ON p.id = psa.player_id
+    JOIN seasons se ON se.id = psa.season_id
+    JOIN titles t ON t.id = se.title_id
+    WHERE psa.run_id = %(run)s AND psa.mode_id IS NULL
+      AND psa.rating IS NOT NULL AND psa.maps_played >= %(min_maps)s
+    ORDER BY psa.rating DESC LIMIT 5
+    """
+    out = []
+    for rank, r in enumerate(
+        _rows(conn, sql, {"run": pr_run, "min_maps": MIN_MAPS_SEASON}), start=1
+    ):
+        pid, handle, year, title = (
+            cast(int, r[0]),
+            cast(str, r[1]),
+            cast(int, r[2]),
+            cast(str, r[3]),
+        )
+        rating, sd, maps = (
+            float(cast(float, r[4])),
+            float(cast(float, r[5])),
+            cast(int, r[6]),
+        )
+        out.append(
+            Atom(
+                "player",
+                pid,
+                "rating_top",
+                f"{handle}'s {year} {title} season rates {rating:.2f} ± {sd:.2f} on the "
+                f"open player rating — the #{rank} qualified season in the archive "
+                f"(league average 1.00).",
+                {
+                    "year": year,
+                    "title": title,
+                    "rating": round(rating, 3),
+                    "rating_sd": round(sd, 3),
+                    "maps_played": maps,
+                    "rank": rank,
+                    "player_rating_run_id": pr_run,
+                },
+                0.9 - 0.08 * (rank - 1),
+            )
+        )
+    return out
+
+
+def model_null(
+    conn: psycopg.Connection[tuple[object, ...]], wp_run: int, glicko_run: int
+) -> list[Atom]:
+    """The momentum test: does anything beat Glicko-2 at series prediction?"""
+    sql = "SELECT brier, n_predictions FROM backtests WHERE run_id = %s"
+    wp = conn.execute(sql, (wp_run,)).fetchone()
+    gl = conn.execute(sql, (glicko_run,)).fetchone()
+    art = conn.execute(
+        "SELECT payload FROM model_artifacts WHERE run_id = %s AND name = 'coefficients'",
+        (wp_run,),
+    ).fetchone()
+    if wp is None or gl is None or art is None:
+        return []
+    wp_brier, n = float(cast(float, wp[0])), cast(int, wp[1])
+    gl_brier = float(cast(float, gl[0]))
+    payload = cast("dict[str, Any]", art[0])
+    edge = gl_brier - wp_brier  # positive = challenger actually better
+    if edge > 0.005:
+        headline = (
+            f"Adding recent form, head-to-head history, and rating uncertainty to "
+            f"Glicko-2 improved series prediction: Brier {wp_brier:.4f} vs "
+            f"{gl_brier:.4f} over {n} series."
+        )
+    else:
+        headline = (
+            f"Momentum, tested: adding recent form and head-to-head history to "
+            f"Glicko-2 did not improve series prediction (Brier {wp_brier:.4f} vs "
+            f"{gl_brier:.4f} over {n} series) — team strength already contains "
+            f"the signal."
+        )
+    return [
+        Atom(
+            "league",
+            0,
+            "model_null",
+            headline,
+            {
+                "winprob_brier": round(wp_brier, 4),
+                "glicko2_brier": round(gl_brier, 4),
+                "n_series": n,
+                "final_weights": payload.get("final_weights"),
+                "winprob_run_id": wp_run,
+            },
+            0.85,
+        )
+    ]
+
+
 def generate(
-    conn: psycopg.Connection[tuple[object, ...]], run_id: int, era_run: int, elo_run: int
+    conn: psycopg.Connection[tuple[object, ...]],
+    run_id: int,
+    era_run: int,
+    elo_run: int,
+    pr_run: int,
+    wp_run: int,
+    glicko_run: int,
 ) -> int:
     atoms = (
         outliers(conn, era_run)
@@ -289,6 +456,9 @@ def generate(
         + milestones(conn, elo_run)
         + era_context(conn)
         + h2h_edges(conn)
+        + what_wins(conn, pr_run)
+        + rating_top(conn, pr_run)
+        + model_null(conn, wp_run, glicko_run)
     )
     conn.cursor().executemany(
         "INSERT INTO insights (run_id, subject_type, subject_id, kind, headline, detail, score)"
