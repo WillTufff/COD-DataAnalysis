@@ -12,12 +12,22 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Any, cast
 
 import psycopg
 
 _DEFAULT_DSN = "postgres://cdlhub:cdlhub@localhost:54329/cdlhub"
+
+# The kill feed reconciles a player-map when its box-score deaths equal its
+# NORMAL feed deaths. WWII lands at exactly 100% under this rule (see
+# kill_feed_recon in 0007); IW carries a residual, mostly from feed deaths the
+# archive box never recorded. The residual is data, not error: those player-maps
+# are excluded from kill-feed metrics via the view, never patched.
+RECON_MODEL = "kill_feed_reconciliation"
+RECON_VERSION = "1.0.0"
 
 
 @dataclass
@@ -92,6 +102,12 @@ HARD_CHECKS: tuple[Check, ...] = (
         JOIN players p ON lower(p.handle) = lower(pa.alias) AND p.id <> pa.player_id
         """,
     ),
+    Check(
+        # WWII reconciles perfectly; a break means the importer or the death
+        # classification regressed. IW's residual is expected and not gated.
+        "kill_feed_wwii_fully_reconciled",
+        "SELECT game_id, player_id FROM kill_feed_recon WHERE title = 'WWII' AND NOT reconciled",
+    ),
 )
 
 SOFT_CHECKS: tuple[Check, ...] = (
@@ -127,6 +143,103 @@ ORDER BY se.year
 """
 
 
+_RECON_BREAKDOWN = """
+SELECT {dims},
+       count(*)                                    AS player_maps,
+       count(*) FILTER (WHERE reconciled)          AS reconciled,
+       sum(box_deaths)                             AS box_deaths,
+       sum(feed_deaths)                            AS feed_deaths,
+       round(avg(reconciled::int)::numeric, 4)     AS rate
+FROM kill_feed_recon
+GROUP BY {dims}
+ORDER BY {dims}
+"""
+
+
+def _breakdown(conn: psycopg.Connection[tuple[object, ...]], dims: str) -> list[dict[str, Any]]:
+    cur = conn.execute(_RECON_BREAKDOWN.format(dims=dims))  # noqa: S608 (dims is a literal)
+    cols = [d.name for d in cur.description or []]
+    return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+
+def reconciliation_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any]:
+    """The kill_feed_reconciliation artifact: overall plus per-tier breakdowns.
+
+    Per-event (title tier), per-mode, and per-tournament rollups, each carrying
+    both the player-map match rate and the raw death totals behind it.
+    """
+    overall = _breakdown(conn, "1")  # single group; the constant collapses to all rows
+    return {
+        "rule": (
+            "a player-map reconciles when box-score deaths equal its normal "
+            "kill-feed deaths; suicides and team kills are excluded from both"
+        ),
+        "overall": overall[0] if overall else {},
+        "by_title": _breakdown(conn, "title"),
+        "by_mode": _breakdown(conn, "title, mode"),
+        "by_tournament": _tournament_breakdown(conn),
+    }
+
+
+def _tournament_breakdown(conn: psycopg.Connection[tuple[object, ...]]) -> list[dict[str, Any]]:
+    cur = conn.execute(
+        """
+        SELECT e.name AS event, r.title,
+               count(*)                               AS player_maps,
+               round(avg(r.reconciled::int)::numeric, 4) AS rate
+        FROM kill_feed_recon r
+        JOIN games g   ON g.id = r.game_id
+        JOIN series s  ON s.id = g.series_id
+        JOIN events e  ON e.id = s.event_id
+        GROUP BY e.name, r.title
+        ORDER BY r.title, e.name
+        """
+    )
+    cols = [d.name for d in cur.description or []]
+    return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+
+
+def store_reconciliation(
+    conn: psycopg.Connection[tuple[object, ...]], payload: dict[str, Any]
+) -> None:
+    """Persist the reconciliation summary as a model_artifacts row.
+
+    Replaces any prior run for (model, version, data_through) in place, matching
+    the analytics writeback convention.
+    """
+    row = conn.execute(
+        "SELECT max(ended_at)::date FROM games g "
+        "WHERE EXISTS (SELECT 1 FROM kill_events k WHERE k.game_id = g.id)"
+    ).fetchone()
+    data_through = row[0] if row else None
+
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        sha = None
+
+    existing = conn.execute(
+        "SELECT id FROM model_runs WHERE model = %s AND version = %s AND data_through = %s",
+        (RECON_MODEL, RECON_VERSION, data_through),
+    ).fetchone()
+    if existing is not None:
+        conn.execute("DELETE FROM model_runs WHERE id = %s", (existing[0],))
+    run_id = cast(
+        int,
+        conn.execute(
+            "INSERT INTO model_runs (model, version, code_ref, params, data_through) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (RECON_MODEL, RECON_VERSION, sha, json.dumps({}), data_through),
+        ).fetchone()[0],  # type: ignore[index]
+    )
+    conn.execute(
+        "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+        (run_id, RECON_MODEL, json.dumps(payload, default=str)),
+    )
+
+
 def run(dsn: str) -> int:
     failures = 0
     with psycopg.connect(dsn) as conn:
@@ -150,6 +263,13 @@ def run(dsn: str) -> int:
         report = [dict(zip(cols, r, strict=True)) for r in cov.fetchall()]
         for row in report:
             print("  " + json.dumps(row, default=str))
+
+        print("== kill-feed reconciliation ==")
+        payload = reconciliation_payload(conn)
+        for title_row in payload["by_title"]:
+            print("  " + json.dumps(title_row, default=str))
+        store_reconciliation(conn, payload)
+        conn.commit()
     if failures:
         print(f"{failures} hard check(s) failed")
         return 1

@@ -38,12 +38,21 @@ explain them.
 | Source | Coverage | License |
 |---|---|---|
 | [Activision `cwl-data` archive](https://github.com/Activision/cwl-data) | CWL 2017-2019 box scores, 44,552 player-game rows across 18 tournaments | BSD 3-Clause, © Activision Publishing 2017 |
+| Same archive, structured event feeds | 2017-2018 kill feeds (Infinite Warfare, WWII); BO4 games carry no events | BSD 3-Clause (same repository) |
 | [Liquipedia](https://liquipedia.net/callofduty) via LPDB API | CDL-era results and metadata (not yet ingested) | CC-BY-SA 3.0 |
 
 The CWL archive was captured live from tournament host consoles, then cleaned and
 published by Activision, which makes it about as close to a primary source as this
 sport has. The upstream license and README are retained verbatim alongside the data in
-`pipeline/snapshots/cwl-archive/`.
+`pipeline/snapshots/cwl-archive/`. Both the box scores and the structured event feeds
+come from that one repository and fall under its BSD 3-Clause licence.
+
+The upstream repository was later taken down, so both tiers are recovered from Software
+Heritage and pinned to snapshot `c5ee2cd04d10971b39685fc55da4747d04a0ba04` and revision
+`5b7eb907b63ab4a53ed7fd2987459f3bf28c9c21` of `github.com/Activision/cwl-data`.
+`pipeline/scripts/fetch_structured.py` re-fetches the event tarballs and re-hashes the
+box-score CSVs against that same revision, so both tiers are reproducibly one version of
+the source.
 
 Liquipedia data will be accessed only through the LPDB API, never by scraping HTML,
 within the published rate limits (1 request per 2 seconds; `parse` and `ask` 1 per 30
@@ -85,6 +94,94 @@ adjustment stays visible instead of disappearing inside a number.
 
 Splitting cohorts further by LAN versus online is a planned refinement. It needs the
 2019-2022 span to be meaningful, which the current dataset does not cover.
+
+## Tier 1b: Metric layer (shipped)
+
+The archive measures far more than kills and deaths. The metric layer turns every
+measured column into a published, era-scored metric, so a player's season can be read
+across roughly eighty different lenses instead of four.
+
+Metrics are stored in long form, one row per player, season, mode, and metric, each
+carrying its own qualification denominator. That denominator is the honest sample size
+for that metric: maps for rate-per-map statistics, rounds for Search and Destroy round
+rates, kills for kill-denominated shares, shots for accuracy. Qualification thresholds
+are 8 maps, 50 rounds, 100 kills, and 1,000 shots. Rows below the threshold are still
+written and still scored against the qualified cohort, so a small sample can be shown
+and labelled rather than hidden.
+
+Two rules keep the numbers honest. First, numerators and denominators are summed across
+a player's maps and divided once, so a season rate is never the average of per-map
+rates. A player with one quiet twenty-minute map and one loud five-minute map has one
+true rate, not the mean of two. Second, a metric is only published for a title whose
+data actually supports it.
+
+That second rule is enforced by measurement, not by a hand-written table. Each metric
+declares the source columns it reads, and the pipeline counts how many rows carry a
+non-zero value for each column in each title. A column counts as tracked once at least
+twenty of its rows are non-zero. The threshold is an absolute floor rather than a
+percentage on purpose: genuinely rare events, like four-kill rounds at roughly one
+percent of rounds, must stay published, while a column that exists in the file but was
+never populated must not. Several columns fall into that second group. Black Ops 4
+records fields for time alive and for kills that were not immediately answered, but both
+are zero on all 19,120 of its rows; WWII does the same for hill captures and sneak
+defuses; Black Ops 4 shots and hits are populated on five rows out of 19,120. Treating
+those as data would publish a whole season of zeros as though it were a finding. They
+are listed on the methodology page instead, and the metrics that depend on them simply
+do not exist for those seasons.
+
+The catalog itself, including each metric's formula, unit, direction, threshold, and
+measured season coverage, ships as an artifact of the same run that computes the values.
+The stat explorer and the metric glossary both render from it, so a definition and a
+number cannot drift apart.
+
+Team metrics use the same machinery with the roster as the subject, and cover map and
+round win rates, average Hardpoint margin, and three measures of how a roster spreads
+its work: the Gini coefficient of hill time across the four players, the Herfindahl
+index of first bloods, and the spread of kill shares. Those describe style, not quality.
+A roster that shares hill duty evenly is not thereby better than one that assigns a
+specialist.
+
+## Tier 1c: Structured event tier (shipped)
+
+Underneath every box score for 2017 and 2018 sits a full event feed: every kill with its
+attacker, victim, weapon, position and game clock, plus round-boundary scores. The 2019
+Black Ops 4 season shipped box scores with empty event lists, so this tier is a
+2017-2018 story and nothing here is published for BO4.
+
+Two death-event shapes are normalized into one kill feed. Infinite Warfare spreads the
+attacker across flat fields with three-dimensional positions and a per-kill distance;
+WWII nests the attacker in an object with two-dimensional positions and no distance. The
+importer reads both from the compressed tarballs in place and resolves every handle
+against that game's own box-score roster, which also supplies the team membership used to
+tell a team kill from a real one.
+
+Nothing from the feed is trusted until it reconciles with the box score. For every
+(game, player) the feed's normal-death count — suicides and team kills excluded — must
+equal the box-score death total. WWII reconciles exactly, at 100.00% of 22,728
+player-maps; the same rule holds Infinite Warfare to 94.97% of 2,384, the residual being
+feed deaths the box never recorded. Player-maps that fail are excluded from every
+kill-feed metric through a single queryable set, never patched. The full summary ships as
+an artifact, and the WWII figure is a hard check in CI, so a regression in the importer
+or the death classification fails the build.
+
+On the reconciled feed the layer measures what the box score cannot. A death is *traded*
+when a teammate kills the attacker within five seconds — the archive's own window — and
+the untraded deaths are the ones that actually cost a numbers advantage. A *clutch* is
+being the last player alive, scored 1vN by how many opponents remain. *Man-advantage
+conversion* is whether the team that draws the round's first blood goes on to win it; its
+mirror is the *steal*, winning a round opened a man down. The round-based measures are
+Search and Destroy only; trades cover both feed titles, Uplink included. Round winners
+come from the feed's own round scores, except the deciding round, which resets its score
+— its winner is recovered by matching the box-score map result.
+
+Two limits are stated rather than papered over. The per-kill distance field is Infinite
+Warfare only and, despite the box column's metres label, is in engine units: it
+correlates with that column at r = 0.97 per player-season but on a fixed ~5.75x scale, so
+it is reported as engine space, not metric. And while every Hardpoint game lists its hill
+names and rotation count, the events carry no per-hill timing, so kills cannot be
+attributed to a specific hill and hill-by-hill analysis is not claimed. Headshots are
+likewise left to the box score, whose headshot column the feed's cause-of-death matches
+only about 69% of the time.
 
 ## Tier 2: Rating systems
 
@@ -173,8 +270,14 @@ The tables exist; the models are not yet written.
   (engagement share, objective share, first-blood rate, hill-time share), producing
   named archetypes per era and letting a career's archetype drift be tracked.
 
-## Tier 4: Meta and environment analysis (planned)
+## Tier 4: Meta and environment analysis (partly shipped)
 
+- **Loadout meta (shipped).** Usage share and map win rate for every loadout choice the
+  archive records, by season and mode: weapons across all three titles, WWII divisions
+  and basic training, Infinite Warfare rigs, payloads and traits, and Black Ops 4
+  specialists. Choices under 30 player-maps are suppressed. Win rates sit near 50% for
+  every widely used option, which is the expected result when both teams field the same
+  meta, and worth stating plainly rather than dressing up as an edge.
 - **Map and mode analysis.** Scoring environments per map, side and streak effects
   where derivable, map-pool comparisons across eras.
 - **LAN versus online.** A paired within-player comparison across the 2020-2022 online

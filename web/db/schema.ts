@@ -347,3 +347,41 @@ export const modelArtifacts = pgTable(
   },
   (t) => [primaryKey({ columns: [t.runId, t.name] })],
 );
+
+export const playerMetricSeason = pgTable("player_metric_season", {
+  runId: integer("run_id")
+    .notNull()
+    .references(() => modelRuns.id),
+  playerId: integer("player_id")
+    .notNull()
+    .references(() => players.id),
+  seasonId: integer("season_id")
+    .notNull()
+    .references(() => seasons.id),
+  modeId: smallint("mode_id").references(() => gameModes.id),
+  metric: text("metric").notNull(),
+  value: real("value").notNull(),
+  denom: real("denom").notNull(),
+  z: real("z"),
+  pctl: real("pctl"),
+  qualified: boolean("qualified").notNull(),
+});
+
+export const teamMetricSeason = pgTable("team_metric_season", {
+  runId: integer("run_id")
+    .notNull()
+    .references(() => modelRuns.id),
+  teamId: integer("team_id")
+    .notNull()
+    .references(() => teams.id),
+  seasonId: integer("season_id")
+    .notNull()
+    .references(() => seasons.id),
+  modeId: smallint("mode_id").references(() => gameModes.id),
+  metric: text("metric").notNull(),
+  value: real("value").notNull(),
+  denom: real("denom").notNull(),
+  z: real("z"),
+  pctl: real("pctl"),
+  qualified: boolean("qualified").notNull(),
+});

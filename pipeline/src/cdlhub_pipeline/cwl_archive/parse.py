@@ -9,16 +9,23 @@ rates are recomputable and dropped). Empty cells stay absent — never zero.
 from __future__ import annotations
 
 import csv
-import json
-from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from importlib import resources
 from pathlib import Path
 
 from pydantic import BaseModel, model_validator
 
+from ..identity import Aliases, canonical_spellings
 from .manifest import EVENTS, MODE_SLUGS, ArchiveEvent
+
+__all__ = [
+    "Aliases",
+    "ArchiveStatLine",
+    "ParsedEvent",
+    "canonical_handles",
+    "parse_archive",
+    "parse_row",
+]
 
 # Archive columns mapped to typed game_player_stats columns.
 _MAPPED = {
@@ -163,25 +170,6 @@ def parse_row(row: dict[str, str]) -> ArchiveStatLine:
 
 
 @dataclass
-class Aliases:
-    players: dict[str, str]  # archive spelling -> canonical handle
-    teams: dict[str, str]  # archive name -> canonical team name
-
-    @classmethod
-    def load(cls) -> Aliases:
-        raw = json.loads(
-            resources.files("cdlhub_pipeline.cwl_archive").joinpath("aliases.json").read_text()
-        )
-        return cls(players=dict(raw["players"]), teams=dict(raw["teams"]))
-
-    def team(self, name: str) -> str:
-        return self.teams.get(name, name)
-
-    def player(self, handle: str) -> str:
-        return self.players.get(handle, handle)
-
-
-@dataclass
 class ParsedEvent:
     event: ArchiveEvent
     lines: list[ArchiveStatLine] = field(default_factory=list)
@@ -204,13 +192,5 @@ def parse_archive(archive_dir: Path, aliases: Aliases) -> list[ParsedEvent]:
 
 
 def canonical_handles(events: list[ParsedEvent]) -> dict[str, str]:
-    """Case-insensitive canonicalization: for each lowercased handle, the most
-    frequent spelling wins (ties broken lexicographically for determinism)."""
-    spellings: dict[str, Counter[str]] = defaultdict(Counter)
-    for pe in events:
-        for line in pe.lines:
-            spellings[line.player.lower()][line.player] += 1
-    return {
-        low: max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
-        for low, counts in spellings.items()
-    }
+    """One spelling per handle across every parsed box score."""
+    return canonical_spellings(line.player for pe in events for line in pe.lines)

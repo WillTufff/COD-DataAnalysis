@@ -11,10 +11,12 @@ import {
   insights,
   modelRuns,
   players,
+  playerMetricSeason,
   playerSeasonAdjusted,
   rosterStints,
   seasons,
   series,
+  teamMetricSeason,
   teamRatings,
   teams,
   titles,
@@ -1000,4 +1002,371 @@ export async function getWinprobArtifact(
     refitEvery: p.refit_every,
     formWindow: p.form_window,
   };
+}
+
+// ---------- Metric layer ----------
+
+export type MetricCatalogEntry = {
+  key: string;
+  label: string;
+  category: string;
+  tier: string;
+  unit: string;
+  higher_is_better: boolean;
+  formula: string;
+  denom_kind: string;
+  min_denom: number;
+  sources: string[];
+  titles: string[];
+  modes: string[];
+  note: string | null;
+};
+
+export type UntrackedColumn = {
+  title: string;
+  column: string;
+  rows: number;
+  nonzero: number;
+};
+
+export type KillFeedConstants = {
+  trade_window_ms: number;
+  trade: string;
+  advantage_state: string;
+  clutch: string;
+  reconciliation: string;
+};
+
+export type MetricCatalog = {
+  version: string;
+  min_nonzero_rows: number;
+  metrics: MetricCatalogEntry[];
+  untracked_columns: UntrackedColumn[];
+  kill_feed_constants?: KillFeedConstants;
+};
+
+export type ReconciliationTitle = {
+  title: string;
+  player_maps: number;
+  reconciled: number;
+  box_deaths: number;
+  feed_deaths: number;
+  rate: number;
+};
+
+export async function getKillFeedReconciliation(): Promise<
+  { dataThrough: string | null; byTitle: ReconciliationTitle[] } | null
+> {
+  const run = await latestRun("kill_feed_reconciliation");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${run.id} AND name = 'kill_feed_reconciliation'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | { by_title?: ReconciliationTitle[] }
+    | undefined;
+  if (!payload) return null;
+  return { dataThrough: run.dataThrough, byTitle: payload.by_title ?? [] };
+}
+
+export async function getMetricCatalog(
+  metricRunId: number,
+): Promise<MetricCatalog | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${metricRunId} AND name = 'metric_catalog'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | MetricCatalog
+    | undefined;
+  return payload ?? null;
+}
+
+export type MetricRow = {
+  playerId: number;
+  handle: string;
+  slug: string;
+  year: number;
+  title: string;
+  mode: string | null;
+  value: number;
+  denom: number;
+  z: number | null;
+  pctl: number | null;
+  qualified: boolean;
+};
+
+export type MetricQuery = {
+  metric: string;
+  year?: number;
+  modeSlug?: string;
+  qualifiedOnly: boolean;
+  dir: "asc" | "desc";
+  limit: number;
+};
+
+export async function queryMetric(
+  metricRunId: number,
+  q: MetricQuery,
+): Promise<MetricRow[]> {
+  const conditions = [
+    eq(playerMetricSeason.runId, metricRunId),
+    eq(playerMetricSeason.metric, q.metric),
+  ];
+  if (q.year !== undefined) conditions.push(eq(seasons.year, q.year));
+  if (q.modeSlug !== undefined) {
+    conditions.push(eq(gameModes.slug, q.modeSlug));
+  } else {
+    conditions.push(sql`${playerMetricSeason.modeId} IS NULL`);
+  }
+  if (q.qualifiedOnly) conditions.push(eq(playerMetricSeason.qualified, true));
+
+  const rows = await db
+    .select({
+      playerId: playerMetricSeason.playerId,
+      handle: players.handle,
+      year: seasons.year,
+      title: titles.shortName,
+      mode: gameModes.slug,
+      value: playerMetricSeason.value,
+      denom: playerMetricSeason.denom,
+      z: playerMetricSeason.z,
+      pctl: playerMetricSeason.pctl,
+      qualified: playerMetricSeason.qualified,
+    })
+    .from(playerMetricSeason)
+    .innerJoin(players, eq(players.id, playerMetricSeason.playerId))
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(and(...conditions))
+    .orderBy(
+      q.dir === "asc" ? playerMetricSeason.value : desc(playerMetricSeason.value),
+    )
+    .limit(q.limit);
+  return rows.map((r) => ({ ...r, slug: playerSlug(r.handle) }));
+}
+
+/** Seasons and modes that actually have rows for a metric, for the pickers. */
+export async function getMetricScope(
+  metricRunId: number,
+  metric: string,
+): Promise<{ years: number[]; modes: string[] }> {
+  const rows = await db
+    .select({ year: seasons.year, mode: gameModes.slug })
+    .from(playerMetricSeason)
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(
+      and(
+        eq(playerMetricSeason.runId, metricRunId),
+        eq(playerMetricSeason.metric, metric),
+      ),
+    )
+    .groupBy(seasons.year, gameModes.slug);
+  const years = [...new Set(rows.map((r) => r.year))].sort();
+  const modes = [
+    ...new Set(rows.map((r) => r.mode).filter((m): m is string => m !== null)),
+  ].sort();
+  return { years, modes };
+}
+
+export type MetaEntry = {
+  name: string;
+  share: number;
+  map_win_rate: number | null;
+  n_player_maps: number;
+};
+
+export type MetaGroup = {
+  season_id: number;
+  title: string;
+  mode: string;
+  n_player_maps: number;
+  entries: MetaEntry[];
+};
+
+export type MetaArtifact = {
+  name: string;
+  key: string;
+  min_player_maps: number;
+  groups: MetaGroup[];
+};
+
+const META_ARTIFACT_NAMES = [
+  "meta_weapons",
+  "meta_specialists",
+  "meta_divisions",
+  "meta_training",
+  "meta_scorestreaks",
+  "meta_rigs",
+  "meta_payloads",
+  "meta_traits",
+] as const;
+
+export async function getMetaArtifacts(
+  metricRunId: number,
+): Promise<MetaArtifact[]> {
+  const rows = await db.execute(sql`
+    SELECT name, payload FROM model_artifacts
+    WHERE run_id = ${metricRunId} AND name = ANY(${sql.param(
+      META_ARTIFACT_NAMES as unknown as string[],
+    )})
+  `);
+  const list = rows as unknown as { name: string; payload: unknown }[];
+  const byName = new Map(list.map((r) => [r.name, r.payload]));
+  return META_ARTIFACT_NAMES.flatMap((name) => {
+    const payload = byName.get(name) as Omit<MetaArtifact, "name"> | undefined;
+    return payload ? [{ name, ...payload }] : [];
+  });
+}
+
+// ---------- Rounds (kill-feed) ----------
+
+export type ClutchByN = {
+  n: number;
+  attempts: number;
+  wins: number;
+  rate: number | null;
+};
+
+export type RoundsGroup = {
+  year: number;
+  title: string;
+  mode: string;
+  deaths: number;
+  traded_share: number | null;
+  ttfb: number[];
+  advantage?: {
+    adv_rounds: number;
+    adv_conversion: number | null;
+    disadv_rounds: number;
+    disadv_steal: number | null;
+  };
+  clutch?: ClutchByN[];
+};
+
+export type RoundsOverview = {
+  trade_window_ms: number;
+  ttfb_edges_s: number[];
+  groups: RoundsGroup[];
+};
+
+export async function getRoundsOverview(
+  metricRunId: number,
+): Promise<RoundsOverview | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${metricRunId} AND name = 'rounds_overview'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | RoundsOverview
+    | undefined;
+  return payload ?? null;
+}
+
+export type DensityMap = {
+  title: string;
+  map: string;
+  n_kills: number;
+  bins: number;
+  peak: number;
+  grid: number[][];
+};
+
+export type KillDensity = {
+  bins: number;
+  min_kills: number;
+  maps: DensityMap[];
+};
+
+export async function getKillDensity(
+  metricRunId: number,
+): Promise<KillDensity | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${metricRunId} AND name = 'kill_density'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | KillDensity
+    | undefined;
+  return payload ?? null;
+}
+
+export type PlayerMetricValue = {
+  metric: string;
+  mode: string | null;
+  year: number;
+  title: string;
+  value: number;
+  denom: number;
+  z: number | null;
+  pctl: number | null;
+  qualified: boolean;
+};
+
+export async function getPlayerMetrics(
+  metricRunId: number,
+  playerId: number,
+): Promise<PlayerMetricValue[]> {
+  return db
+    .select({
+      metric: playerMetricSeason.metric,
+      mode: gameModes.slug,
+      year: seasons.year,
+      title: titles.shortName,
+      value: playerMetricSeason.value,
+      denom: playerMetricSeason.denom,
+      z: playerMetricSeason.z,
+      pctl: playerMetricSeason.pctl,
+      qualified: playerMetricSeason.qualified,
+    })
+    .from(playerMetricSeason)
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(
+      and(
+        eq(playerMetricSeason.runId, metricRunId),
+        eq(playerMetricSeason.playerId, playerId),
+      ),
+    );
+}
+
+export type TeamMetricValue = {
+  metric: string;
+  mode: string | null;
+  year: number;
+  value: number;
+  denom: number;
+  z: number | null;
+  pctl: number | null;
+  qualified: boolean;
+};
+
+export async function getTeamMetrics(
+  metricRunId: number,
+  teamId: number,
+): Promise<TeamMetricValue[]> {
+  return db
+    .select({
+      metric: teamMetricSeason.metric,
+      mode: gameModes.slug,
+      year: seasons.year,
+      value: teamMetricSeason.value,
+      denom: teamMetricSeason.denom,
+      z: teamMetricSeason.z,
+      pctl: teamMetricSeason.pctl,
+      qualified: teamMetricSeason.qualified,
+    })
+    .from(teamMetricSeason)
+    .innerJoin(seasons, eq(seasons.id, teamMetricSeason.seasonId))
+    .leftJoin(gameModes, eq(gameModes.id, teamMetricSeason.modeId))
+    .where(
+      and(
+        eq(teamMetricSeason.runId, metricRunId),
+        eq(teamMetricSeason.teamId, teamId),
+      ),
+    );
 }

@@ -19,8 +19,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-import numpy as np
 import psycopg
+
+from .cohort import z_and_pctl
 
 MIN_MAPS = 8
 
@@ -130,21 +131,6 @@ def load_aggregates(conn: psycopg.Connection[tuple[object, ...]]) -> list[Aggreg
     return out
 
 
-def _z_and_pctl(values: dict[int, float], cohort_ids: list[int]) -> dict[int, tuple[float, float]]:
-    """Per player: z-score and percentile vs the qualified cohort distribution."""
-    cohort = np.array([values[i] for i in cohort_ids], dtype=float)
-    if len(cohort) < 2 or float(cohort.std()) == 0.0:
-        return {}
-    mean, sd = float(cohort.mean()), float(cohort.std(ddof=1))
-    sorted_c = np.sort(cohort)
-    out: dict[int, tuple[float, float]] = {}
-    for pid, v in values.items():
-        z = (v - mean) / sd
-        pctl = float(np.searchsorted(sorted_c, v, side="right")) / len(sorted_c)
-        out[pid] = (z, pctl)
-    return out
-
-
 def compute_and_write(conn: psycopg.Connection[tuple[object, ...]], run_id: int) -> int:
     """Compute cohort z-scores/percentiles and write player_season_adjusted."""
     by_cohort: dict[tuple[int, int | None], list[Aggregate]] = {}
@@ -167,10 +153,10 @@ def compute_and_write(conn: psycopg.Connection[tuple[object, ...]], run_id: int)
     rows: list[Row] = []
     for _, members in sorted(by_cohort.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
         qualified = [a.player_id for a in members if a.maps >= MIN_MAPS]
-        kd_stats = _z_and_pctl({a.player_id: a.kd for a in members}, qualified)
-        eng_stats = _z_and_pctl({a.player_id: a.engagement for a in members}, qualified)
+        kd_stats = z_and_pctl({a.player_id: a.kd for a in members}, qualified)
+        eng_stats = z_and_pctl({a.player_id: a.engagement for a in members}, qualified)
         obj_values = {a.player_id: a.obj for a in members if a.obj is not None}
-        obj_stats = _z_and_pctl(obj_values, [p for p in qualified if p in obj_values])
+        obj_stats = z_and_pctl(obj_values, [p for p in qualified if p in obj_values])
         for a in members:
             kd = kd_stats.get(a.player_id)
             eng = eng_stats.get(a.player_id)

@@ -209,13 +209,15 @@ class Loader:
                 grow = self.conn.execute(
                     """
                     INSERT INTO games (series_id, ordinal, map_id, mode_id, team1_score,
-                                       team2_score, winner_team_id, duration_s, ended_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                       team2_score, winner_team_id, duration_s, ended_at,
+                                       source_uid)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (series_id, ordinal) DO UPDATE SET
                       map_id = EXCLUDED.map_id, mode_id = EXCLUDED.mode_id,
                       team1_score = EXCLUDED.team1_score, team2_score = EXCLUDED.team2_score,
                       winner_team_id = EXCLUDED.winner_team_id,
-                      duration_s = EXCLUDED.duration_s, ended_at = EXCLUDED.ended_at
+                      duration_s = EXCLUDED.duration_s, ended_at = EXCLUDED.ended_at,
+                      source_uid = EXCLUDED.source_uid
                     RETURNING id
                     """,
                     (
@@ -228,6 +230,7 @@ class Loader:
                         winner_id,
                         gk.duration_s,
                         gk.ended_at,
+                        gk.match_id,  # structured-feed game id; the events importer joins on this
                     ),
                 ).fetchone()
                 assert grow is not None

@@ -61,6 +61,17 @@ def main(argv: list[str] | None = None) -> int:
             loader.load_event(pe, player_ids)
             print(f"  {pe.event.slug}: loaded")
         derive_roster_stints(events, player_ids, loader)
+
+        # Every archive game must carry its structured-feed id (source_uid), or
+        # the events importer has nothing to join kill feeds onto. The loader is
+        # idempotent, so a plain re-run backfills existing rows; assert the
+        # result rather than trusting it. Uniqueness is held by the column
+        # constraint — a duplicate would have already failed the INSERT.
+        missing = conn.execute("SELECT count(*) FROM games WHERE source_uid IS NULL").fetchone()
+        assert missing is not None
+        if missing[0]:
+            raise SystemExit(f"source_uid backfill incomplete: {missing[0]} games missing a uid")
+
         counts = dict(sorted(loader.counts.items()))
         conn.execute(
             "INSERT INTO ingest_runs (kind, params, status, rows_upserted) "

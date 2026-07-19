@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Calibration } from "@/components/charts/Calibration";
 import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
 import {
   getBacktestCards,
   getCoverage,
+  getKillFeedReconciliation,
+  getMetricCatalog,
   getModeWeights,
   getPaceByMode,
   getSeasonKdSpread,
@@ -109,7 +112,7 @@ function PaceTable({ cells }: { cells: PaceCell[] }) {
 }
 
 export default async function MethodologyPage() {
-  const [eloRun, glickoRun, eraRun, insightsRun, ratingRun, winprobRun] =
+  const [eloRun, glickoRun, eraRun, insightsRun, ratingRun, winprobRun, metricRun] =
     await Promise.all([
       latestRun("elo"),
       latestRun("glicko2"),
@@ -117,7 +120,9 @@ export default async function MethodologyPage() {
       latestRun("insights"),
       latestRun("player_rating"),
       latestRun("winprob"),
+      latestRun("metric_layer"),
     ]);
+  const metricCatalog = metricRun ? await getMetricCatalog(metricRun.id) : null;
   const seriesCards = await getBacktestCards(
     [eloRun?.id, glickoRun?.id, winprobRun?.id].filter(
       (x): x is number => x !== undefined && x !== null,
@@ -133,6 +138,7 @@ export default async function MethodologyPage() {
       getCoverage(),
       getPaceByMode(),
     ]);
+  const reconciliation = await getKillFeedReconciliation();
   // Qualified all-mode cohort sizes per title (≥ 8 maps), for the era section.
   const cohorts = eraRun ? await getSeasonKdSpread(eraRun.id, 8) : [];
   const cohortSizes = [...cohorts].sort((a, b) => a.year - b.year);
@@ -511,6 +517,189 @@ export default async function MethodologyPage() {
         </div>
       </section>
 
+      <section id="rounds" className="mt-12">
+        <h2 className="font-display text-2xl font-semibold uppercase">
+          Structured event tier
+        </h2>
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+          <p>
+            Underneath the 2017 and 2018 box scores sits a full event feed — every
+            kill with its attacker, victim, weapon, position and game clock, plus
+            round-boundary scores. Black Ops 4 (2019) shipped box scores with empty
+            event lists, so this tier is a 2017–2018 story: the{" "}
+            <Link href="/rounds" className="underline">
+              rounds page
+            </Link>{" "}
+            and the trade, clutch and man-advantage cards do not exist for BO4.
+          </p>
+          <p>
+            Nothing from the feed is trusted until it reconciles with the box score.
+            For every (game, player) the feed&rsquo;s normal-death count — suicides and
+            team kills excluded — must equal the box-score death total. Player-maps
+            that fail are excluded from every kill-feed metric through a single
+            queryable set, never patched; the WWII figure below is a hard check in CI.
+          </p>
+        </div>
+
+        {reconciliation && reconciliation.byTitle.length > 0 && (
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full max-w-xl text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-4 font-normal">Title</th>
+                  <th className="py-2 pr-4 text-right font-normal">Player-maps</th>
+                  <th className="py-2 pr-4 text-right font-normal">Reconciled</th>
+                  <th className="py-2 text-right font-normal">Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reconciliation.byTitle.map((t) => (
+                  <tr key={t.title} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-4">{t.title}</td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {t.player_maps.toLocaleString()}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {t.reconciled.toLocaleString()}
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular-nums">
+                      {(t.rate * 100).toFixed(2)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-ink-muted">
+              Infinite Warfare&rsquo;s residual is feed deaths the box never recorded,
+              not an error. Those player-maps are dropped from kill-feed metrics.
+            </p>
+          </div>
+        )}
+
+        {metricCatalog?.kill_feed_constants && (
+          <dl className="mt-6 max-w-3xl space-y-3 text-sm">
+            {(
+              [
+                ["Trade window", metricCatalog.kill_feed_constants.trade],
+                ["Man advantage", metricCatalog.kill_feed_constants.advantage_state],
+                ["Clutch", metricCatalog.kill_feed_constants.clutch],
+                ["Reconciliation", metricCatalog.kill_feed_constants.reconciliation],
+              ] as const
+            ).map(([term, def]) => (
+              <div key={term}>
+                <dt className="font-semibold text-ink">{term}</dt>
+                <dd className="text-ink-secondary">{def}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
+        <p className="mt-6 max-w-3xl text-sm leading-relaxed text-ink-secondary">
+          Two limits are stated rather than papered over. The per-kill distance field
+          is Infinite Warfare only and, despite the box column&rsquo;s metres label, is
+          in engine units — it correlates with that column at r&nbsp;=&nbsp;0.97 per
+          player-season but on a fixed ~5.75&times; scale, so it is reported as engine
+          space, not metric. Every Hardpoint game lists its hill names and rotation
+          count, but the events carry no per-hill timing, so kills cannot be attributed
+          to a specific hill and hill-by-hill analysis is not claimed. Headshots stay
+          with the box score, whose headshot column the feed&rsquo;s cause-of-death
+          matches only about 69% of the time.
+        </p>
+      </section>
+
+      <section id="metrics" className="mt-12">
+        <h2 className="font-display text-2xl font-semibold uppercase">
+          Metric glossary
+        </h2>
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+          <p>
+            Every published metric, generated from the same catalog the{" "}
+            <Link href="/stats" className="underline">
+              stat explorer
+            </Link>{" "}
+            reads, so a definition here and a number there can never disagree.
+            Numerators and denominators are summed over a player&rsquo;s maps and
+            divided once; a season rate is never the average of per-map rates.
+          </p>
+          <p>
+            Which seasons a metric covers is measured, not assumed. A column that
+            a title records but never populated is treated as absent, so the
+            metric simply does not exist for that season rather than reading zero.
+            Those columns are listed at the end of this section.
+          </p>
+        </div>
+        {metricCatalog && (
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-3 font-normal">Metric</th>
+                  <th className="py-2 pr-3 font-normal">Definition</th>
+                  <th className="py-2 pr-3 font-normal">Seasons</th>
+                  <th className="py-2 font-normal">Qualifies at</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metricCatalog.metrics.map((m) => (
+                  <tr key={m.key} className="border-b border-hairline/60 align-top">
+                    <td className="py-2 pr-3">
+                      <div className="font-medium text-ink">{m.label}</div>
+                      <div className="font-mono text-[10px] text-ink-muted">{m.key}</div>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <div className="font-mono text-xs text-ink-secondary">{m.formula}</div>
+                      {m.note && (
+                        <div className="mt-1 text-xs text-ink-muted">{m.note}</div>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-xs text-ink-secondary">
+                      {m.titles.join(", ") || "—"}
+                    </td>
+                    <td className="py-2 font-mono text-xs text-ink-secondary">
+                      {m.min_denom} {m.denom_kind}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {metricCatalog && metricCatalog.untracked_columns.length > 0 && (
+          <div className="mt-8">
+            <h3 className="eyebrow text-[10px] text-ink-secondary">
+              Columns recorded but never populated
+            </h3>
+            <p className="mt-2 text-sm text-ink-secondary">
+              These appear in the source data for the season shown but hold no
+              values, so nothing is published from them. A column counts as
+              tracked once at least {metricCatalog.min_nonzero_rows} of its rows
+              are non-zero, which keeps genuinely rare events in and empty
+              columns out.
+            </p>
+            <table className="mt-3 w-full max-w-xl text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-4 font-normal">Season</th>
+                  <th className="py-2 pr-4 font-normal">Column</th>
+                  <th className="py-2 text-right font-normal">Non-zero rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metricCatalog.untracked_columns.map((c) => (
+                  <tr key={`${c.title}-${c.column}`} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-4 text-ink-secondary">{c.title}</td>
+                    <td className="py-1.5 pr-4 font-mono text-xs">{c.column}</td>
+                    <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                      {c.nonzero} of {c.rows}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       <section id="attribution" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Data & attribution
@@ -519,11 +708,20 @@ export default async function MethodologyPage() {
           <p>
             Box scores are Activision Publishing’s official CWL data release
             (the <code className="font-mono text-xs">cwl-data</code> repository,
-            BSD-3-Clause), recovered via Software Heritage after the original
-            repository was taken down. Event metadata and roster context come
-            from Liquipedia contributors (CC-BY-SA 3.0). Handles are normalized
-            across seasons with an alias map maintained in the repository;
-            corrections are welcome.
+            BSD-3-Clause). The 2017–2018 structured event feeds behind this tier
+            come from the same repository under the same licence. Event metadata
+            and roster context come from Liquipedia contributors (CC-BY-SA 3.0).
+            Handles are normalized across seasons with an alias map maintained in
+            the repository; corrections are welcome.
+          </p>
+          <p>
+            The upstream repository was taken down, so both tiers are recovered
+            from Software Heritage and pinned to snapshot{" "}
+            <code className="font-mono text-xs">c5ee2cd0</code> and revision{" "}
+            <code className="font-mono text-xs">5b7eb907</code> of{" "}
+            <code className="font-mono text-xs">github.com/Activision/cwl-data</code>.
+            The fetch script re-hashes the box-score CSVs against that revision, so
+            the box scores and the event feeds are provably one version of the source.
           </p>
         </div>
       </section>

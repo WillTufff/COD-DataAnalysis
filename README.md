@@ -16,12 +16,19 @@ The full loop runs end to end on real data, locally:
   player-map rows across 1,310 decided series, covering 2017 Champs (IW), the 2018 WWII
   season, and the 2019 BO4 season.
 - **Models.** Era adjustment (cohort z-scores and percentiles per season and mode,
-  minimum 8 maps), Elo (K=32), and Glicko-2 (τ=0.5). Walk-forward backtests put Glicko-2
-  at 0.2215 Brier / 65.4% accuracy and Elo at 0.2228 / 63.7%. Every model write is
-  versioned through `model_runs` and replaced on rerun.
-- **Site.** An analysis overview, a query explorer over player-season cohorts, a ratings
-  page (Elo race, Glicko standings with RD, raw vs. adjusted leaderboard), a findings
-  ledger, and the methodology write-up.
+  minimum 8 maps), Elo (K=32), Glicko-2 (τ=0.5), an open composite player rating fit on
+  what actually wins maps, and a win-probability model whose result was a published null.
+  Walk-forward backtests put Glicko-2 at 0.2215 Brier / 65.4% accuracy and Elo at 0.2228
+  / 63.7%. Every model write is versioned through `model_runs` and replaced on rerun.
+- **Metric layer.** Around eighty derived metrics per player, season and mode, plus team
+  style metrics and loadout meta aggregates, all era-scored against their own cohort.
+  Which seasons a metric covers is measured from the data rather than declared, so
+  columns the archive records but never populated are reported as gaps instead of being
+  published as zeros.
+- **Site.** An analysis overview, a query explorer over player-season cohorts, a stat
+  explorer across every published metric, a loadout meta page, a ratings page (Elo race,
+  Glicko standings with RD, raw vs. adjusted leaderboard), a findings ledger, and the
+  methodology write-up with an auto-generated metric glossary.
 
 Two things are still open. CDL-era data needs Liquipedia LPDB API access, which is not yet in
 place, so the site currently covers 2017 to 2019 only. And
@@ -32,8 +39,8 @@ archetype clustering are the next modeling work.
 
 1. CDL-era ingestion once LPDB access lands, followed by a first real rating run across
    both eras.
-2. Career modeling: aging curves and archetypes, plus a `player_rating_v1` that ships
-   with its backtest.
+2. Career modeling: aging curves and archetype clustering, both of which build on the
+   metric layer.
 3. Public query API and player comparison.
 4. CWL backfill to 2016 and cross-title era recalibration, which also unlocks the
    LAN-vs-online study since that needs the 2019 to 2022 span.
@@ -90,6 +97,13 @@ what you have.
 
 - CWL 2017-2019 box scores come from the Activision `cwl-data` archive (BSD 3-Clause,
   © Activision Publishing 2017; license retained in `pipeline/snapshots/cwl-archive/`).
+- The 2017-2018 structured event feeds (the kill feed behind the trade, clutch, and
+  man-advantage metrics) come from the same repository under the same BSD 3-Clause
+  licence, in `pipeline/snapshots/cwl-structured/`. BO4 2019 ships box scores with no
+  events, so that tier is 2017-2018 only. The upstream repo was taken down, so both
+  tiers are pinned to Software Heritage snapshot `c5ee2cd04d10971b39685fc55da4747d04a0ba04`
+  and revision `5b7eb907b63ab4a53ed7fd2987459f3bf28c9c21`; `pipeline/scripts/fetch_structured.py`
+  re-fetches and re-verifies against those ids.
 - CDL-era statistics will come from [Liquipedia](https://liquipedia.net/callofduty)
   (CC-BY-SA 3.0) through the LPDB API, within the published rate limits and with an
   identifying User-Agent. No HTML scraping. Derived data is shared under CC-BY-SA 3.0.

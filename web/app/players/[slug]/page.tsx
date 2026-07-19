@@ -8,12 +8,16 @@ import {
 import { PctlBar } from "@/components/PctlBar";
 import { Tabs } from "@/components/Tabs";
 import {
+  getMetricCatalog,
   getPlayerAdjusted,
   getPlayerBySlug,
   getPlayerInsights,
+  getPlayerMetrics,
   getPlayerStints,
   latestRun,
   teamSlug,
+  type MetricCatalog,
+  type PlayerMetricValue,
   type SeasonAdjusted,
 } from "@/lib/analytics";
 
@@ -37,6 +41,209 @@ function zToPctl(z: number): number {
       Math.exp(-z * z);
   const p = 0.5 * (1 + (z < 0 ? -erf : erf));
   return Math.max(0, Math.min(1, p));
+}
+
+const MODE_LABELS: Record<string, string> = {
+  hardpoint: "Hardpoint",
+  "search-and-destroy": "Search & Destroy",
+  control: "Control",
+  "capture-the-flag": "Capture the Flag",
+  uplink: "Uplink",
+};
+
+type MetricCard = {
+  key: string;
+  heading: string;
+  sample: string;
+  qualified: boolean;
+  stats: ProfileStat[];
+};
+
+function formatMetric(value: number, unit: string): string {
+  if (unit.startsWith("share")) return `${(value * 100).toFixed(1)}%`;
+  if (Math.abs(value) >= 100) return value.toFixed(0);
+  if (Math.abs(value) >= 10) return value.toFixed(2);
+  return value.toFixed(3);
+}
+
+// One card per (season, mode) the player appeared in, carrying that slice's
+// gold-tier metrics as percentiles. Metrics where low is good are flipped so a
+// full track always reads as "good".
+function buildMetricCards(
+  values: PlayerMetricValue[],
+  catalog: MetricCatalog | null,
+): MetricCard[] {
+  if (!catalog) return [];
+  // Phase B (kill-feed) metrics get their own dedicated cards below, so keep
+  // them out of the general mode profiles.
+  const gold = new Map(
+    catalog.metrics
+      .filter((m) => m.tier.startsWith("gold") && !FEED_CATEGORIES.has(m.category))
+      .map((m) => [m.key, m]),
+  );
+  const cards = new Map<string, MetricCard>();
+  for (const v of values) {
+    const entry = gold.get(v.metric);
+    if (!entry || v.pctl === null) continue;
+    const key = `${v.year}-${v.mode ?? "all"}`;
+    let card = cards.get(key);
+    if (!card) {
+      card = {
+        key,
+        heading: `${v.year} ${v.title} · ${v.mode ? (MODE_LABELS[v.mode] ?? v.mode) : "All modes"}`,
+        sample: "",
+        qualified: v.qualified,
+        stats: [],
+      };
+      cards.set(key, card);
+    }
+    card.qualified = card.qualified || v.qualified;
+    // Label the sample in maps wherever a maps-based metric exists, so cards
+    // stay comparable regardless of which metric was read first.
+    if (entry.denom_kind === "maps") {
+      card.sample = `${Math.round(v.denom)} maps`;
+    } else if (card.sample === "") {
+      card.sample = `${Math.round(v.denom)} ${entry.denom_kind}`;
+    }
+    card.stats.push({
+      label: entry.label,
+      pctl: entry.higher_is_better ? v.pctl : 1 - v.pctl,
+      value: formatMetric(v.value, entry.unit),
+    });
+  }
+  return [...cards.values()]
+    .filter((c) => c.stats.length >= 2)
+    .map((c) => ({ ...c, stats: c.stats.sort((a, b) => a.label.localeCompare(b.label)) }))
+    .sort((a, b) => a.heading.localeCompare(b.heading));
+}
+
+// ---------- Phase B (kill-feed) cards ----------
+
+const FEED_CATEGORIES = new Set(["trades", "clutch", "advantage"]);
+
+// Trades read the all-modes slice; clutch and advantage are Search & Destroy.
+const TRADE_KEYS = ["untraded_death_rate", "trade_kills_p10", "kill_answered_rate"];
+const ADV_KEYS = ["snd_adv_conversion", "snd_adv_rounds_lost", "snd_disadv_steal_rate"];
+const CLUTCH_N_KEYS = [
+  "clutch_1v1_win_rate",
+  "clutch_1v2_win_rate",
+  "clutch_1v3_win_rate",
+  "clutch_1v4_win_rate",
+];
+
+type ClutchLine = { n: number; wins: number; losses: number };
+
+type FeedCard = {
+  stats: ProfileStat[];
+  qualified: boolean;
+  sample: string;
+} | null;
+
+type FeedSeason = {
+  key: string;
+  year: number;
+  title: string;
+  trades: FeedCard;
+  advantage: FeedCard;
+  clutch: {
+    lines: ClutchLine[];
+    rate: ProfileStat | null;
+    qualified: boolean;
+    sample: string;
+  } | null;
+};
+
+/** A percentile card from a fixed metric list within one (year, mode) slice. */
+function feedCard(
+  byKey: Map<string, PlayerMetricValue>,
+  catalog: MetricCatalog,
+  keys: string[],
+): FeedCard {
+  const entries = new Map(catalog.metrics.map((m) => [m.key, m]));
+  const stats: ProfileStat[] = [];
+  let qualified = false;
+  let denom = 0;
+  let denomKind = "";
+  for (const key of keys) {
+    const v = byKey.get(key);
+    const entry = entries.get(key);
+    if (!v || !entry || v.pctl === null) continue;
+    qualified = qualified || v.qualified;
+    denom = Math.max(denom, v.denom);
+    denomKind = entry.denom_kind;
+    stats.push({
+      label: entry.label,
+      pctl: entry.higher_is_better ? v.pctl : 1 - v.pctl,
+      value: formatMetric(v.value, entry.unit),
+    });
+  }
+  if (stats.length === 0) return null;
+  return { stats, qualified, sample: `${Math.round(denom)} ${denomKind}` };
+}
+
+function buildFeedSeasons(
+  values: PlayerMetricValue[],
+  catalog: MetricCatalog | null,
+): FeedSeason[] {
+  if (!catalog) return [];
+  // Index by (year, mode-slug) so each slice's metrics can be looked up by key.
+  const bySlice = new Map<string, Map<string, PlayerMetricValue>>();
+  const titleOf = new Map<number, string>();
+  for (const v of values) {
+    if (!FEED_CATEGORIES.has(catalog.metrics.find((m) => m.key === v.metric)?.category ?? "")) {
+      continue;
+    }
+    titleOf.set(v.year, v.title);
+    const sliceKey = `${v.year}:${v.mode ?? "all"}`;
+    const slice = bySlice.get(sliceKey) ?? new Map<string, PlayerMetricValue>();
+    slice.set(v.metric, v);
+    bySlice.set(sliceKey, slice);
+  }
+
+  const years = [...titleOf.keys()].sort((a, b) => a - b);
+  const seasons: FeedSeason[] = [];
+  for (const year of years) {
+    const allSlice = bySlice.get(`${year}:all`) ?? new Map();
+    const sndSlice = bySlice.get(`${year}:search-and-destroy`) ?? new Map();
+
+    const clutchLines: ClutchLine[] = [];
+    for (let n = 1; n <= 4; n++) {
+      const v = sndSlice.get(CLUTCH_N_KEYS[n - 1]);
+      if (!v) continue;
+      const wins = Math.round(v.value * v.denom);
+      clutchLines.push({ n, wins, losses: Math.round(v.denom) - wins });
+    }
+    const rateVal = sndSlice.get("clutch_win_rate");
+    const clutchCard =
+      clutchLines.length > 0
+        ? {
+            lines: clutchLines,
+            rate:
+              rateVal && rateVal.pctl !== null
+                ? {
+                    label: "Clutch win rate",
+                    pctl: rateVal.pctl,
+                    value: `${(rateVal.value * 100).toFixed(1)}%`,
+                  }
+                : null,
+            qualified: rateVal?.qualified ?? false,
+            sample: `${clutchLines.reduce((s, c) => s + c.wins + c.losses, 0)} clutches`,
+          }
+        : null;
+
+    const trades = feedCard(allSlice, catalog, TRADE_KEYS);
+    const advantage = feedCard(sndSlice, catalog, ADV_KEYS);
+    if (!trades && !advantage && !clutchCard) continue;
+    seasons.push({
+      key: String(year),
+      year,
+      title: titleOf.get(year) ?? "",
+      trades,
+      advantage,
+      clutch: clutchCard,
+    });
+  }
+  return seasons;
 }
 
 function seasonProfile(a: SeasonAdjusted): ProfileStat[] {
@@ -80,17 +287,26 @@ export default async function PlayerPage({
   const player = await getPlayerBySlug(slug.toLowerCase());
   if (!player) notFound();
 
-  const [eraRun, insightsRun] = await Promise.all([
+  const [eraRun, insightsRun, metricRun] = await Promise.all([
     latestRun("era_adjust"),
     latestRun("insights"),
+    latestRun("metric_layer"),
   ]);
-  const [adjusted, stints, playerInsights] = await Promise.all([
-    eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
-    getPlayerStints(player.id),
-    insightsRun ? getPlayerInsights(player.id, insightsRun.id) : Promise.resolve([]),
-  ]);
+  const [adjusted, stints, playerInsights, metricValues, metricCatalog] =
+    await Promise.all([
+      eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
+      getPlayerStints(player.id),
+      insightsRun ? getPlayerInsights(player.id, insightsRun.id) : Promise.resolve([]),
+      metricRun ? getPlayerMetrics(metricRun.id, player.id) : Promise.resolve([]),
+      metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
+    ]);
+  const metricCards = buildMetricCards(metricValues, metricCatalog);
+  const feedSeasons = buildFeedSeasons(metricValues, metricCatalog);
 
   const allModes = adjusted.filter((a) => a.modeId === null);
+  // BO4 (2019) has box scores but no event feed, so the kill-feed cards can
+  // never populate for it. Surface that as a reason, not silent absence.
+  const bo4Seasons = allModes.filter((a) => a.title === "BO4").map((a) => a.year);
   const byMode = adjusted.filter((a) => a.modeId !== null);
   const careerMaps = allModes.reduce((s, a) => s + a.mapsPlayed, 0);
 
@@ -158,6 +374,136 @@ export default async function PlayerPage({
             K/D percentile is exact within the cohort. Engagement and objective
             are cohort z-scores placed on the percentile track through a normal
             approximation.
+          </p>
+        </section>
+      )}
+
+      {metricCards.length > 0 && (
+        <section className="mt-10">
+          <h2 className="lower-third">
+            Mode profiles
+            <span className="lt-note">percentile within season-and-mode cohort</span>
+          </h2>
+          <div className="mt-4 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
+            {metricCards.map((card) => (
+              <div key={card.key}>
+                <div className="mb-2 flex items-baseline justify-between">
+                  <span className="font-display text-lg font-semibold uppercase">
+                    {card.heading}
+                  </span>
+                  <span className="font-mono text-xs text-ink-muted">
+                    {card.qualified ? card.sample : `${card.sample} · below minimum`}
+                  </span>
+                </div>
+                <div className={card.qualified ? "" : "opacity-50"}>
+                  <PercentileProfile stats={card.stats} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-ink-muted">
+            Gold-tier metrics only, shown as percentile within the qualified players
+            of the same season and mode. Seasons below the sample minimum are dimmed.
+            The full definitions are in the{" "}
+            <Link href="/methodology#metrics" className="underline">
+              metric glossary
+            </Link>
+            .
+          </p>
+        </section>
+      )}
+
+      {(feedSeasons.length > 0 || bo4Seasons.length > 0) && (
+        <section className="mt-10">
+          <h2 className="lower-third">
+            Kill feed
+            <span className="lt-note">trades, clutches and man advantage · IW and WWII</span>
+          </h2>
+          {feedSeasons.map((s) => (
+            <div key={s.key} className="mt-5">
+              <div className="mb-2 font-display text-lg font-semibold uppercase">
+                {s.year} {s.title}
+              </div>
+              <div className="grid grid-cols-1 gap-x-10 gap-y-6 md:grid-cols-2">
+                {s.trades && (
+                  <div>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-sm font-semibold text-ink-secondary">Trades</span>
+                      <span className="font-mono text-xs text-ink-muted">
+                        {s.trades.qualified ? s.trades.sample : `${s.trades.sample} · below minimum`}
+                      </span>
+                    </div>
+                    <div className={s.trades.qualified ? "" : "opacity-50"}>
+                      <PercentileProfile stats={s.trades.stats} />
+                    </div>
+                  </div>
+                )}
+                {s.advantage && (
+                  <div>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-sm font-semibold text-ink-secondary">
+                        Man advantage · S&amp;D
+                      </span>
+                      <span className="font-mono text-xs text-ink-muted">
+                        {s.advantage.qualified
+                          ? s.advantage.sample
+                          : `${s.advantage.sample} · below minimum`}
+                      </span>
+                    </div>
+                    <div className={s.advantage.qualified ? "" : "opacity-50"}>
+                      <PercentileProfile stats={s.advantage.stats} />
+                    </div>
+                  </div>
+                )}
+                {s.clutch && (
+                  <div>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-sm font-semibold text-ink-secondary">
+                        Clutch record · S&amp;D
+                      </span>
+                      <span className="font-mono text-xs text-ink-muted">{s.clutch.sample}</span>
+                    </div>
+                    <div className={s.clutch.qualified ? "" : "opacity-50"}>
+                      {s.clutch.rate && <PercentileProfile stats={[s.clutch.rate]} />}
+                      <table className="mt-2 w-full max-w-xs text-left text-sm">
+                        <tbody>
+                          {s.clutch.lines.map((c) => (
+                            <tr key={c.n} className="border-b border-hairline/60">
+                              <td className="py-1 font-mono text-xs text-ink-secondary">1v{c.n}</td>
+                              <td className="py-1 text-right font-mono text-xs tabular-nums">
+                                {c.wins}
+                                <span className="text-ink-muted">–{c.losses}</span>
+                              </td>
+                              <td className="py-1 pl-3 text-right font-mono text-xs tabular-nums text-ink-muted">
+                                {c.wins + c.losses > 0
+                                  ? `${((c.wins / (c.wins + c.losses)) * 100).toFixed(0)}%`
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {bo4Seasons.length > 0 && (
+            <p className="mt-5 text-xs text-ink-muted">
+              {bo4Seasons.join(", ")} Black Ops 4 has box scores but no event feed, so
+              trade, clutch and man-advantage cards do not apply to those seasons.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-ink-muted">
+            Trade, clutch and advantage percentiles are within the qualified players of
+            the same season and mode; low-is-better metrics are flipped so a full track
+            reads well. Clutch W–L is raw. Seasons below the sample minimum are dimmed.
+            Definitions on the{" "}
+            <Link href="/methodology#rounds" className="underline">
+              methodology
+            </Link>{" "}
+            page.
           </p>
         </section>
       )}

@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import backtest, era, insights
+from . import backtest, era, insights, metrics
 from .db import connect
 from .ratings import fit, player_rating, winprob
 
@@ -38,6 +38,26 @@ def main(argv: list[str] | None = None) -> int:
         era_run = open_run(conn, "era_adjust", "1.0.0", {"min_maps": era.MIN_MAPS}, through)
         n = era.compute_and_write(conn, era_run)
         print(f"era_adjust run {era_run}: {n} player-season-mode rows")
+
+        metric_run = open_run(
+            conn,
+            metrics.MODEL,
+            metrics.VERSION,
+            {
+                "min_maps": era.MIN_MAPS,
+                "min_snd_rounds": metrics.MIN_SND_ROUNDS,
+                "min_ctrl_rounds": metrics.MIN_CTRL_ROUNDS,
+                "min_shots": metrics.MIN_SHOTS,
+                "min_kills": metrics.MIN_KILLS,
+                "trade_window_ms": metrics.TRADE_WINDOW_MS,
+                "min_feed_deaths": metrics.MIN_FEED_DEATHS,
+                "min_clutch_attempts": metrics.MIN_CLUTCH_ATTEMPTS,
+                "n_metrics": len(metrics.CATALOG),
+            },
+            through,
+        )
+        n = metrics.compute_and_write(conn, metric_run)
+        print(f"metric_layer run {metric_run}: {n} player-metric rows")
 
         elo_run = open_run(conn, "elo", "1.0.0", {"k": ELO_K, "level": "series"}, through)
         preds = fit.fit_elo(conn, elo_run, series, k=ELO_K)
