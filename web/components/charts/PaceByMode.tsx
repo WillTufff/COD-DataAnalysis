@@ -115,12 +115,34 @@ export function PaceByMode({ cells }: { cells: PaceCell[] }) {
               {rowCells.map((c, ci) => {
                 const yBar = top + ci * (BAR + BAR_GAP);
                 const w = Math.max(x(c.killsPer10) - x(0), 2);
+                // Full-width hover bands tile the chart with no dead space:
+                // each extends halfway into the neighboring gap, so moving
+                // the pointer between bars hands hover off without a flicker.
+                const bandTop =
+                  ci === 0
+                    ? mi === 0
+                      ? 0
+                      : yBar - ROW_GAP / 2
+                    : yBar - BAR_GAP / 2;
+                const bandBottom =
+                  ci === rowCells.length - 1
+                    ? mi === rows.length - 1
+                      ? H
+                      : yBar + BAR + ROW_GAP / 2
+                    : yBar + BAR + BAR_GAP / 2;
                 return (
                   <g
                     key={c.year}
                     onMouseEnter={() => setHover(c)}
                     onMouseLeave={() => setHover(null)}
                   >
+                    <rect
+                      x={0}
+                      y={bandTop}
+                      width={W}
+                      height={bandBottom - bandTop}
+                      fill="transparent"
+                    />
                     {/* rounded data-end only — flat edge stays on the baseline */}
                     <path
                       d={`M${x(0)},${yBar} h${w - 4} a4,4 0 0 1 4,4 v${BAR - 8} a4,4 0 0 1 -4,4 h${4 - w} Z`}
@@ -151,9 +173,9 @@ export function PaceByMode({ cells }: { cells: PaceCell[] }) {
           </span>
         ) : (
           <>
-            Kills per player per 10 minutes of map time. Uplink, CTF, and Control
-            each existed in only one title — cross-era comparison needs cohort
-            scoring, not raw stats.
+            Kills per player per 10 minutes of map time. Uplink, CTF, and
+            Control each existed in only one title, which is why cross-era
+            comparison uses cohort scoring.
           </>
         )}
       </figcaption>

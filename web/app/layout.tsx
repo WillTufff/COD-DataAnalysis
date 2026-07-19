@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
-import { Barlow_Condensed, Geist, Geist_Mono } from "next/font/google";
+import { Barlow, Barlow_Condensed, IBM_Plex_Mono } from "next/font/google";
 import Link from "next/link";
+import { NavLinks } from "@/components/NavLinks";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const body = Barlow({
+  variable: "--font-body",
+  weight: ["400", "500", "600"],
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const mono = IBM_Plex_Mono({
+  variable: "--font-mono-data",
+  weight: ["400", "500"],
   subsets: ["latin"],
 });
 
@@ -21,7 +24,7 @@ const display = Barlow_Condensed({
 
 export const metadata: Metadata = {
   title: {
-    default: "cdlhub — competitive Call of Duty analytics",
+    default: "cdlhub · competitive Call of Duty analytics",
     template: "%s · cdlhub",
   },
   description:
@@ -30,8 +33,9 @@ export const metadata: Metadata = {
 
 const nav = [
   { href: "/", label: "Overview" },
+  { href: "/teams", label: "Teams" },
   { href: "/players", label: "Players" },
-  { href: "/ratings", label: "Ratings" },
+  { href: "/ratings", label: "Models" },
   { href: "/findings", label: "Findings" },
   { href: "/methodology", label: "Methodology" },
 ];
@@ -44,33 +48,23 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${display.variable} h-full antialiased`}
+      className={`${body.variable} ${mono.variable} ${display.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <header className="border-b border-hairline">
-          <div className="mx-auto flex max-w-5xl items-baseline gap-8 px-6 py-4">
+          <div className="mx-auto flex max-w-6xl items-baseline gap-8 px-6 py-4">
             <Link
               href="/"
               className="font-display text-2xl font-bold uppercase tracking-tight"
             >
               cdl<span className="text-accent">hub</span>
             </Link>
-            <nav className="flex gap-5 text-sm">
-              {nav.map((n) => (
-                <Link
-                  key={n.href}
-                  href={n.href}
-                  className="text-ink-secondary transition-colors hover:text-ink"
-                >
-                  {n.label}
-                </Link>
-              ))}
-            </nav>
+            <NavLinks items={nav} />
           </div>
         </header>
         <div className="flex-1">{children}</div>
         <footer className="mt-16 border-t border-hairline">
-          <div className="mx-auto max-w-5xl space-y-1 px-6 py-6 text-xs text-ink-muted">
+          <div className="mx-auto max-w-6xl space-y-1 px-6 py-6 text-xs text-ink-muted">
             <p>
               Box scores: Call of Duty World League archive data ©{" "}
               <a
@@ -89,11 +83,11 @@ export default function RootLayout({
               (CC-BY-SA 3.0).
             </p>
             <p>
-              All models are educational analysis of historical play — see{" "}
+              All models are educational analysis of historical play; the{" "}
               <Link className="underline hover:text-ink-secondary" href="/methodology">
                 methodology
               </Link>{" "}
-              for specs, backtests, and coverage.
+              page has specs, backtests, and coverage.
             </p>
           </div>
         </footer>

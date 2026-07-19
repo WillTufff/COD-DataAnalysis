@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DistributionStrip } from "@/components/charts/DistributionStrip";
 import { PctlBar } from "@/components/PctlBar";
 import {
   type ExplorerFilters,
+  getCohortZValues,
   latestRun,
   queryPlayerSeasons,
 } from "@/lib/analytics";
@@ -62,6 +64,36 @@ function z(v: number | null): string {
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 }
 
+// Signed z-score as a small bar from the cohort mean, clipped at ±3σ.
+function ZBar({ v }: { v: number | null }) {
+  if (v === null) return <>—</>;
+  const W = 64;
+  const mid = W / 2;
+  const w = Math.min(Math.abs(v) / 3, 1) * mid;
+  return (
+    <span className="inline-flex items-center justify-end gap-2">
+      <svg
+        width={W}
+        height={10}
+        viewBox={`0 0 ${W} 10`}
+        role="img"
+        aria-label={`${z(v)} standard deviations from cohort mean`}
+      >
+        <rect x={0} y={4} width={W} height={2} fill="var(--baseline)" />
+        <rect
+          x={v >= 0 ? mid : mid - w}
+          y={2.5}
+          width={Math.max(1.5, w)}
+          height={5}
+          fill={v >= 0 ? "var(--series-1)" : "var(--series-6)"}
+        />
+        <rect x={mid - 0.5} y={1} width={1} height={8} fill="var(--ink-muted)" />
+      </svg>
+      <span className="font-mono tabular-nums">{z(v)}</span>
+    </span>
+  );
+}
+
 export default async function PlayersPage({
   searchParams,
 }: {
@@ -69,10 +101,19 @@ export default async function PlayersPage({
 }) {
   const f = parseFilters(await searchParams);
   const eraRun = await latestRun("era_adjust");
-  const rows = eraRun ? await queryPlayerSeasons(eraRun.id, f) : [];
+  const [rows, cohortZ] = eraRun
+    ? await Promise.all([
+        queryPlayerSeasons(eraRun.id, f),
+        getCohortZValues(eraRun.id, {
+          year: f.year,
+          modeSlug: f.modeSlug,
+          minMaps: f.minMaps,
+        }),
+      ])
+    : [[], []];
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <p className="font-mono text-xs text-ink-muted">
         Every qualified player-season in the archive, era-adjusted · run v
         {eraRun?.version ?? "—"}
@@ -81,8 +122,9 @@ export default async function PlayersPage({
         Player-season explorer
       </h1>
       <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
-        Each row is one player’s season in one title, scored against its own
-        cohort. Filters are the query — the URL is shareable.
+        Each row is one player&rsquo;s season in one title, scored against its
+        own cohort. The filters are held in the URL, so any view can be shared
+        as a link.
       </p>
 
       <form
@@ -94,7 +136,7 @@ export default async function PlayersPage({
           <select
             name="year"
             defaultValue={f.year?.toString() ?? ""}
-            className="rounded border border-hairline bg-surface px-2 py-1.5"
+            className="border border-hairline bg-surface px-2 py-1.5"
           >
             <option value="">All</option>
             <option value="2017">2017 · IW</option>
@@ -107,7 +149,7 @@ export default async function PlayersPage({
           <select
             name="mode"
             defaultValue={f.modeSlug ?? ""}
-            className="rounded border border-hairline bg-surface px-2 py-1.5"
+            className="border border-hairline bg-surface px-2 py-1.5"
           >
             {MODES.map((m) => (
               <option key={m.value} value={m.value}>
@@ -123,7 +165,7 @@ export default async function PlayersPage({
             name="min_maps"
             min={1}
             defaultValue={f.minMaps}
-            className="w-20 rounded border border-hairline bg-surface px-2 py-1.5 font-mono"
+            className="w-20 border border-hairline bg-surface px-2 py-1.5 font-mono"
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -131,7 +173,7 @@ export default async function PlayersPage({
           <select
             name="sort"
             defaultValue={f.sort}
-            className="rounded border border-hairline bg-surface px-2 py-1.5"
+            className="border border-hairline bg-surface px-2 py-1.5"
           >
             {SORTS.map((s) => (
               <option key={s.value} value={s.value}>
@@ -145,7 +187,7 @@ export default async function PlayersPage({
           <select
             name="dir"
             defaultValue={f.dir}
-            className="rounded border border-hairline bg-surface px-2 py-1.5"
+            className="border border-hairline bg-surface px-2 py-1.5"
           >
             <option value="desc">Best first</option>
             <option value="asc">Worst first</option>
@@ -158,12 +200,12 @@ export default async function PlayersPage({
             name="q"
             placeholder="handle…"
             defaultValue={f.q ?? ""}
-            className="w-32 rounded border border-hairline bg-surface px-2 py-1.5"
+            className="w-32 border border-hairline bg-surface px-2 py-1.5"
           />
         </label>
         <button
           type="submit"
-          className="rounded border border-accent-dim bg-surface-raised px-4 py-1.5 font-display text-sm font-semibold uppercase tracking-wide text-ink hover:border-accent"
+          className="border border-accent-dim bg-surface-raised px-4 py-1.5 font-display text-sm font-semibold uppercase tracking-wide text-ink hover:border-accent"
         >
           Run query
         </button>
@@ -174,10 +216,19 @@ export default async function PlayersPage({
         {f.modeSlug ? " · per-mode cohorts" : " · all modes combined"}
       </div>
 
+      {cohortZ.length > 1 && (
+        <div className="mt-4 max-w-xl">
+          <div className="eyebrow mb-1 text-[10px] text-ink-secondary">
+            K/D z-score spread of the {cohortZ.length} matching player-seasons
+          </div>
+          <DistributionStrip values={cohortZ} unit="K/D z" />
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <p className="mt-8 text-sm text-ink-secondary">
-          No player-seasons match. Lower the minimum maps or clear a filter —
-          per-mode cohorts qualify at 8 maps, all-modes at 30.
+          No player-seasons match. Lower the minimum maps or clear a filter.
+          Per-mode cohorts qualify at 8 maps, all-modes at 30.
         </p>
       ) : (
         <div className="mt-4 overflow-x-auto">
@@ -193,7 +244,9 @@ export default async function PlayersPage({
                 <th className="py-2 pr-4 text-right font-normal">vs cohort</th>
                 <th className="py-2 pr-4 font-normal">Percentile</th>
                 <th className="py-2 pr-4 text-right font-normal">Engage z</th>
-                <th className="py-2 text-right font-normal">Obj z</th>
+                {f.modeSlug && (
+                  <th className="py-2 text-right font-normal">Obj z</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -231,12 +284,14 @@ export default async function PlayersPage({
                   <td className="py-1.5 pr-4">
                     {r.kdPctl !== null ? <PctlBar pctl={r.kdPctl} /> : "—"}
                   </td>
-                  <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
-                    {z(r.engagementZ)}
+                  <td className="py-1.5 pr-4 text-right text-xs text-ink-secondary">
+                    <ZBar v={r.engagementZ} />
                   </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
-                    {z(r.objZ)}
-                  </td>
+                  {f.modeSlug && (
+                    <td className="py-1.5 text-right text-xs text-ink-secondary">
+                      <ZBar v={r.objZ} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -246,11 +301,11 @@ export default async function PlayersPage({
       <p className="mt-3 text-xs text-ink-muted">
         z-scores are standard deviations from the qualified-player mean of the
         same season, title{f.modeSlug ? ", and mode" : ""}; percentile is within
-        that cohort. Missing archive stats stay “—”, never imputed — see{" "}
+        that cohort. Stats the archive lacks are shown as &ldquo;—&rdquo;. The{" "}
         <Link href="/methodology#era" className="underline">
           methodology
-        </Link>
-        .
+        </Link>{" "}
+        page has the full definitions.
       </p>
     </main>
   );

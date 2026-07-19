@@ -33,7 +33,7 @@ export function Leaderboard({
             role="tab"
             aria-selected={mode === m}
             onClick={() => setMode(m)}
-            className={`rounded border px-2.5 py-1 transition-colors ${
+            className={`border px-2.5 py-1 transition-colors ${
               mode === m
                 ? "border-accent-dim bg-surface-raised text-ink"
                 : "border-hairline text-ink-muted hover:text-ink-secondary"
@@ -44,8 +44,8 @@ export function Leaderboard({
         ))}
         <span className="ml-2 text-ink-muted">
           {mode === "adjusted"
-            ? "ranked by cohort z-score — comparable across titles"
-            : "ranked by unadjusted K/D — favors slower-paced titles"}
+            ? "ranked by cohort z-score, comparable across titles"
+            : "ranked by unadjusted K/D, which favors slower-paced titles"}
         </span>
       </div>
       <div className="overflow-x-auto">

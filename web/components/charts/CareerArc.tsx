@@ -181,8 +181,8 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
       </svg>
       <figcaption className="mt-1 text-xs text-ink-muted">
         Season K/D as standard deviations from the qualified cohort mean of that
-        season and title (all modes). Shaded band is ±1.96/√maps sampling noise —
-        an approximation, spec in{" "}
+        season and title (all modes). Shaded band is ±1.96/√maps sampling noise
+        (an approximation), spec in{" "}
         <a href="/methodology#era" className="underline">
           methodology
         </a>

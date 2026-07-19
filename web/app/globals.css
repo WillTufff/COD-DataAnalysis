@@ -14,8 +14,8 @@
   --ink-muted: #8a8881;
   --hairline: #2c2c2a;
   --baseline: #383835;
-  --accent: #eda100; /* CWL broadcast amber — links, eyebrows */
-  --accent-dim: #c98500;
+  --accent: #34a95f; /* tactical green — links, eyebrows, logo */
+  --accent-dim: #277a47;
 
   /* categorical series (dark steps, fixed order — never cycled) */
   --series-1: #3987e5;
@@ -52,15 +52,15 @@
   --color-series-8: var(--series-8);
   --color-good: var(--good);
   --color-critical: var(--critical);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono-data);
   --font-display: var(--font-display);
 }
 
 body {
   background: var(--background);
   color: var(--ink);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
 }
 
 ::selection {
@@ -70,21 +70,21 @@ body {
 
 /* Broadcast eyebrow: the structural label used for insight kinds & sections */
 .eyebrow {
-  font-family: var(--font-display), var(--font-geist-sans), sans-serif;
+  font-family: var(--font-display), var(--font-body), sans-serif;
   font-weight: 600;
   font-size: 0.72rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-/* Lower-third: section headers styled like a broadcast overlay tag — amber
+/* Lower-third: section headers styled like a broadcast overlay tag — accent
    tick, condensed caps, hairline rule running out to the right margin.
    Sections sit on the page plane; only charts get a surface. */
 .lower-third {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  font-family: var(--font-display), var(--font-geist-sans), sans-serif;
+  font-family: var(--font-display), var(--font-body), sans-serif;
   font-weight: 600;
   font-size: 0.82rem;
   letter-spacing: 0.14em;
@@ -105,7 +105,7 @@ body {
   background: var(--hairline);
 }
 .lower-third .lt-note {
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono-data), monospace;
   font-weight: 400;
   font-size: 0.68rem;
   letter-spacing: 0.02em;

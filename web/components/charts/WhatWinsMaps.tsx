@@ -128,12 +128,34 @@ export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
                 const d = objSide
                   ? `M${x0},${yBar} h${w - 4} a4,4 0 0 1 4,4 v${BAR - 8} a4,4 0 0 1 -4,4 h${4 - w} Z`
                   : `M${x0},${yBar} h${4 - w} a4,4 0 0 0 -4,4 v${BAR - 8} a4,4 0 0 0 4,4 h${w - 4} Z`;
+                // Full-width hover bands tile the chart with no dead space:
+                // each extends halfway into the neighboring gap, so moving
+                // the pointer between bars hands hover off without a flicker.
+                const bandTop =
+                  ci === 0
+                    ? mi === 0
+                      ? 0
+                      : yBar - ROW_GAP / 2
+                    : yBar - BAR_GAP / 2;
+                const bandBottom =
+                  ci === rowCells.length - 1
+                    ? mi === rows.length - 1
+                      ? H
+                      : yBar + BAR + ROW_GAP / 2
+                    : yBar + BAR + BAR_GAP / 2;
                 return (
                   <g
                     key={`${c.year}-${c.mode}`}
                     onMouseEnter={() => setHover(c)}
                     onMouseLeave={() => setHover(null)}
                   >
+                    <rect
+                      x={0}
+                      y={bandTop}
+                      width={W}
+                      height={bandBottom - bandTop}
+                      fill="transparent"
+                    />
                     <path
                       d={d}
                       fill={ERA_COLOR[c.year]}

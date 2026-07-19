@@ -5,6 +5,8 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   backtests,
+  eventPlacements,
+  events,
   gameModes,
   insights,
   modelRuns,
@@ -53,7 +55,7 @@ export type FeedItem = {
   subjectType: string;
   subjectId: number;
   subjectName: string | null;
-  subjectSlug: string | null; // players only — teams have no page yet
+  subjectSlug: string | null; // player or team page slug, by subjectType
 };
 
 export async function getFeed(
@@ -97,7 +99,11 @@ export async function getFeed(
     subjectType: r.subjectType,
     subjectId: r.subjectId,
     subjectName: r.playerHandle ?? r.teamName,
-    subjectSlug: r.playerHandle ? playerSlug(r.playerHandle) : null,
+    subjectSlug: r.playerHandle
+      ? playerSlug(r.playerHandle)
+      : r.teamName
+        ? teamSlug(r.teamName)
+        : null,
   }));
 }
 
@@ -168,6 +174,34 @@ export async function getEraSpans(): Promise<EraSpan[]> {
     from: new Date(String(r.from_t)).toISOString(),
     to: new Date(String(r.to_t)).toISOString(),
     seriesCount: Number(r.series_count),
+  }));
+}
+
+// One marker per archived event: the span of its rated series, for the event
+// lane on the rating race chart. "Major" = open LANs and Champs; league
+// phases, qualifiers and relegation are context-only (unlabeled, hover for
+// the name).
+export type EventMarker = {
+  name: string;
+  from: string; // ISO timestamps of first/last archived series
+  to: string;
+  major: boolean;
+};
+
+export async function getEventMarkers(): Promise<EventMarker[]> {
+  const rows = await db.execute(sql`
+    SELECT e.name, e.tier, min(s.played_at) AS from_t, max(s.played_at) AS to_t
+    FROM series s
+    JOIN events e ON e.id = s.event_id
+    WHERE s.played_at IS NOT NULL
+    GROUP BY e.id, e.name, e.tier
+    ORDER BY min(s.played_at)
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    name: String(r.name),
+    from: new Date(String(r.from_t)).toISOString(),
+    to: new Date(String(r.to_t)).toISOString(),
+    major: String(r.tier) === "S" || !/pro league/i.test(String(r.name)),
   }));
 }
 
@@ -381,6 +415,7 @@ export async function getPlayerInsights(playerId: number, insightsRunId: number)
 export type TeamStanding = {
   teamId: number;
   team: string;
+  region: string | null;
   finalElo: number;
   peakElo: number;
   glicko: number | null;
@@ -418,7 +453,7 @@ export async function getTeamStandings(
       SELECT team_id, rating_post AS glicko, rating_sd AS glicko_rd
       FROM ordered WHERE run_id = ${glickoRunId} AND rn = 1
     )
-    SELECT t.id AS team_id, t.name AS team,
+    SELECT t.id AS team_id, t.name AS team, t.region,
            elo.final_elo, elo_peak.peak_elo, gl.glicko, gl.glicko_rd,
            elo.n_series, elo.last_played
     FROM elo
@@ -430,6 +465,7 @@ export async function getTeamStandings(
   return (rows as unknown as Record<string, unknown>[]).map((r) => ({
     teamId: Number(r.team_id),
     team: String(r.team),
+    region: r.region === null ? null : String(r.region),
     finalElo: Number(r.final_elo),
     peakElo: Number(r.peak_elo),
     glicko: r.glicko === null ? null : Number(r.glicko),
@@ -698,6 +734,247 @@ export type WinprobArtifact = {
   refitEvery: number;
   formWindow: number;
 };
+
+// ---------- Teams ----------
+
+export function teamSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export async function getTeamBySlug(slug: string) {
+  const rows = await db.select().from(teams);
+  return rows.find((t) => teamSlug(t.name) === slug) ?? null;
+}
+
+export type SeriesRecord = { wins: number; losses: number };
+
+// Decided-series win/loss record per team, whole archive.
+export async function getSeriesRecords(): Promise<Map<number, SeriesRecord>> {
+  const rows = await db.execute(sql`
+    SELECT team_id, sum(win) AS wins, count(*) - sum(win) AS losses FROM (
+      SELECT s.team1_id AS team_id, (s.team1_score > s.team2_score)::int AS win
+      FROM series s
+      WHERE s.team1_id IS NOT NULL AND s.team1_score IS NOT NULL
+        AND s.team2_score IS NOT NULL AND s.team1_score <> s.team2_score
+      UNION ALL
+      SELECT s.team2_id, (s.team2_score > s.team1_score)::int
+      FROM series s
+      WHERE s.team2_id IS NOT NULL AND s.team1_score IS NOT NULL
+        AND s.team2_score IS NOT NULL AND s.team1_score <> s.team2_score
+    ) x GROUP BY team_id
+  `);
+  const m = new Map<number, SeriesRecord>();
+  for (const r of rows as unknown as Record<string, unknown>[]) {
+    m.set(Number(r.team_id), { wins: Number(r.wins), losses: Number(r.losses) });
+  }
+  return m;
+}
+
+export type PlacementRow = {
+  eventId: number;
+  event: string;
+  startDate: string | null;
+  year: number | null;
+  placementMin: number | null;
+  placementMax: number | null;
+  prize: number | null;
+};
+
+export async function getTeamPlacements(teamId: number): Promise<PlacementRow[]> {
+  const rows = await db
+    .select({
+      eventId: eventPlacements.eventId,
+      event: events.name,
+      startDate: events.startDate,
+      year: seasons.year,
+      placementMin: eventPlacements.placementMin,
+      placementMax: eventPlacements.placementMax,
+      prize: eventPlacements.prize,
+    })
+    .from(eventPlacements)
+    .innerJoin(events, eq(events.id, eventPlacements.eventId))
+    .leftJoin(seasons, eq(seasons.id, events.seasonId))
+    .where(eq(eventPlacements.teamId, teamId))
+    .orderBy(events.startDate);
+  return rows.map((r) => ({
+    ...r,
+    placementMin: r.placementMin === null ? null : Number(r.placementMin),
+    placementMax: r.placementMax === null ? null : Number(r.placementMax),
+    prize: r.prize === null ? null : Number(r.prize),
+  }));
+}
+
+export type TeamStint = {
+  playerId: number;
+  handle: string;
+  slug: string;
+  role: string | null;
+  startDate: string;
+  endDate: string | null;
+};
+
+export async function getTeamStints(teamId: number): Promise<TeamStint[]> {
+  const rows = await db
+    .select({
+      playerId: rosterStints.playerId,
+      handle: players.handle,
+      role: rosterStints.role,
+      startDate: rosterStints.startDate,
+      endDate: rosterStints.endDate,
+    })
+    .from(rosterStints)
+    .innerJoin(players, eq(players.id, rosterStints.playerId))
+    .where(eq(rosterStints.teamId, teamId))
+    .orderBy(rosterStints.startDate, players.handle);
+  return rows.map((r) => ({ ...r, slug: playerSlug(r.handle) }));
+}
+
+export type ModeSplit = { mode: string; maps: number; wins: number };
+
+// Map win rate per mode for one team, decided maps only.
+export async function getTeamModeSplits(teamId: number): Promise<ModeSplit[]> {
+  const rows = await db.execute(sql`
+    SELECT gm.name AS mode, count(*) AS maps,
+           sum((g.winner_team_id = ${teamId})::int) AS wins
+    FROM games g
+    JOIN series s ON s.id = g.series_id
+    JOIN game_modes gm ON gm.id = g.mode_id
+    WHERE g.winner_team_id IS NOT NULL
+      AND (s.team1_id = ${teamId} OR s.team2_id = ${teamId})
+    GROUP BY gm.name
+    ORDER BY count(*) DESC
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    mode: String(r.mode),
+    maps: Number(r.maps),
+    wins: Number(r.wins),
+  }));
+}
+
+export type H2HRow = {
+  opponentId: number;
+  opponent: string;
+  opponentSlug: string;
+  wins: number;
+  losses: number;
+};
+
+// Decided-series record vs each opponent, most-played first.
+export async function getTeamH2H(teamId: number, limit = 12): Promise<H2HRow[]> {
+  const rows = await db.execute(sql`
+    SELECT opp.id AS opponent_id, opp.name AS opponent,
+           sum(x.win) AS wins, count(*) - sum(x.win) AS losses
+    FROM (
+      SELECT s.team2_id AS opponent_id, (s.team1_score > s.team2_score)::int AS win
+      FROM series s
+      WHERE s.team1_id = ${teamId} AND s.team2_id IS NOT NULL
+        AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
+        AND s.team1_score <> s.team2_score
+      UNION ALL
+      SELECT s.team1_id, (s.team2_score > s.team1_score)::int
+      FROM series s
+      WHERE s.team2_id = ${teamId} AND s.team1_id IS NOT NULL
+        AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
+        AND s.team1_score <> s.team2_score
+    ) x
+    JOIN teams opp ON opp.id = x.opponent_id
+    GROUP BY opp.id, opp.name
+    ORDER BY count(*) DESC, opp.name
+    LIMIT ${limit}
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    opponentId: Number(r.opponent_id),
+    opponent: String(r.opponent),
+    opponentSlug: teamSlug(String(r.opponent)),
+    wins: Number(r.wins),
+    losses: Number(r.losses),
+  }));
+}
+
+export type H2HCell = { rowId: number; colId: number; wins: number; losses: number };
+
+// Pairwise decided-series records among a set of teams.
+export async function getH2HMatrix(teamIds: number[]): Promise<H2HCell[]> {
+  if (teamIds.length < 2) return [];
+  const rows = await db.execute(sql`
+    SELECT a AS row_id, b AS col_id, sum(win) AS wins, count(*) - sum(win) AS losses
+    FROM (
+      SELECT s.team1_id AS a, s.team2_id AS b,
+             (s.team1_score > s.team2_score)::int AS win
+      FROM series s
+      WHERE s.team1_id IN ${sql.raw(`(${teamIds.join(",")})`)}
+        AND s.team2_id IN ${sql.raw(`(${teamIds.join(",")})`)}
+        AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
+        AND s.team1_score <> s.team2_score
+      UNION ALL
+      SELECT s.team2_id, s.team1_id, (s.team2_score > s.team1_score)::int
+      FROM series s
+      WHERE s.team1_id IN ${sql.raw(`(${teamIds.join(",")})`)}
+        AND s.team2_id IN ${sql.raw(`(${teamIds.join(",")})`)}
+        AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
+        AND s.team1_score <> s.team2_score
+    ) x GROUP BY a, b
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    rowId: Number(r.row_id),
+    colId: Number(r.col_id),
+    wins: Number(r.wins),
+    losses: Number(r.losses),
+  }));
+}
+
+// ---------- Cohort distributions ----------
+
+export type SeasonSpread = { year: number; title: string; values: number[] };
+
+// Raw K/D of every qualified all-modes player-season, grouped by season.
+export async function getSeasonKdSpread(
+  eraRunId: number,
+  minMaps = 30,
+): Promise<SeasonSpread[]> {
+  const rows = await db.execute(sql`
+    SELECT se.year, t.short_name AS title, psa.kd_raw
+    FROM player_season_adjusted psa
+    JOIN seasons se ON se.id = psa.season_id
+    JOIN titles t ON t.id = se.title_id
+    WHERE psa.run_id = ${eraRunId} AND psa.mode_id IS NULL
+      AND psa.maps_played >= ${minMaps} AND psa.kd_raw IS NOT NULL
+    ORDER BY se.year, psa.kd_raw
+  `);
+  const byYear = new Map<number, SeasonSpread>();
+  for (const r of rows as unknown as Record<string, unknown>[]) {
+    const year = Number(r.year);
+    let s = byYear.get(year);
+    if (!s) {
+      s = { year, title: String(r.title), values: [] };
+      byYear.set(year, s);
+    }
+    s.values.push(Number(r.kd_raw));
+  }
+  return [...byYear.values()];
+}
+
+// K/D z-scores of the full cohort matching the explorer filters (no limit).
+export async function getCohortZValues(
+  eraRunId: number,
+  f: { year?: number; modeSlug?: string; minMaps: number },
+): Promise<number[]> {
+  const rows = await db.execute(sql`
+    SELECT psa.kd_z
+    FROM player_season_adjusted psa
+    JOIN seasons se ON se.id = psa.season_id
+    LEFT JOIN game_modes gm ON gm.id = psa.mode_id
+    WHERE psa.run_id = ${eraRunId}
+      AND psa.maps_played >= ${f.minMaps}
+      AND ${f.modeSlug ? sql`gm.slug = ${f.modeSlug}` : sql`psa.mode_id IS NULL`}
+      AND ${f.year ? sql`se.year = ${f.year}` : sql`TRUE`}
+      AND psa.kd_z IS NOT NULL
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => Number(r.kd_z));
+}
 
 export async function getWinprobArtifact(
   winprobRunId: number,

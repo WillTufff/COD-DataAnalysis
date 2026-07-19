@@ -66,23 +66,23 @@ export default async function FindingsPage({
   const total = kinds.reduce((s, k) => s + k.n, 0);
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-12">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <p className="font-mono text-xs text-ink-muted">
-        {total} model-generated findings · fixed thresholds, no hand-written claims
+        {total} findings computed at fixed thresholds
         {insightsRun?.dataThrough && <> · data through {insightsRun.dataThrough}</>}
       </p>
       <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">
         Findings
       </h1>
       <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
-        Everything the current model run flagged, ranked by how far it sits from
-        its cohort. Each line links to the page holding its evidence.
+        What the current model run flagged, ranked by how far each item sits
+        from its cohort. Every line links to its evidence.
       </p>
 
       <div className="mt-8 flex flex-wrap gap-2 border-y border-hairline py-3 text-xs">
         <Link
           href="/findings"
-          className={`rounded border px-2.5 py-1 transition-colors ${
+          className={`border px-2.5 py-1 transition-colors ${
             !kind
               ? "border-accent-dim bg-surface-raised text-ink"
               : "border-hairline text-ink-muted hover:text-ink-secondary"
@@ -94,7 +94,7 @@ export default async function FindingsPage({
           <Link
             key={k.kind}
             href={`/findings?kind=${k.kind}`}
-            className={`flex items-center gap-1.5 rounded border px-2.5 py-1 transition-colors ${
+            className={`flex items-center gap-1.5 border px-2.5 py-1 transition-colors ${
               kind === k.kind
                 ? "border-accent-dim bg-surface-raised text-ink"
                 : "border-hairline text-ink-muted hover:text-ink-secondary"
@@ -132,7 +132,9 @@ export default async function FindingsPage({
                 <Link
                   href={
                     item.subjectSlug
-                      ? `/players/${item.subjectSlug}`
+                      ? item.subjectType === "team"
+                        ? `/teams/${item.subjectSlug}`
+                        : `/players/${item.subjectSlug}`
                       : item.kind === "what_wins"
                         ? "/methodology#player-rating"
                         : item.kind === "model_null"

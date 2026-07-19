@@ -5,8 +5,11 @@ import {
   getBacktestCards,
   getCoverage,
   getModeWeights,
+  getPaceByMode,
+  getSeasonKdSpread,
   getWinprobArtifact,
   latestRun,
+  type PaceCell,
 } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +32,82 @@ const MODEL_LABEL: Record<string, string> = {
   player_rating: "player_rating_v1",
 };
 
+const MODE_ORDER = [
+  "Hardpoint",
+  "Search & Destroy",
+  "Control",
+  "Capture the Flag",
+  "Uplink",
+];
+
+// Pivots getPaceByMode() into a mode × title grid of kills per player per
+// 10 minutes, with the spread across titles that share a mode. This is the
+// direct evidence that raw stats are not comparable between titles.
+function PaceTable({ cells }: { cells: PaceCell[] }) {
+  const titles = [...new Map(cells.map((c) => [c.year, c.title])).entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([year, title]) => ({ year, title }));
+  const modes = [...new Set(cells.map((c) => c.mode))].sort(
+    (a, b) =>
+      (MODE_ORDER.indexOf(a) + 1 || 99) - (MODE_ORDER.indexOf(b) + 1 || 99),
+  );
+  const at = (mode: string, year: number) =>
+    cells.find((c) => c.mode === mode && c.year === year)?.killsPer10 ?? null;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-hairline text-xs text-ink-muted">
+            <th className="py-2 pr-4 font-normal">Mode</th>
+            {titles.map((t) => (
+              <th key={t.year} className="py-2 pr-4 text-right font-normal">
+                {t.year} {t.title}
+              </th>
+            ))}
+            <th className="py-2 text-right font-normal">Spread</th>
+          </tr>
+        </thead>
+        <tbody>
+          {modes.map((mode) => {
+            const vals = titles
+              .map((t) => at(mode, t.year))
+              .filter((v): v is number => v !== null);
+            const spread =
+              vals.length > 1
+                ? Math.round(((Math.max(...vals) - Math.min(...vals)) /
+                    Math.min(...vals)) * 100)
+                : null;
+            return (
+              <tr key={mode} className="border-b border-hairline/60">
+                <td className="py-1.5 pr-4">{mode}</td>
+                {titles.map((t) => {
+                  const v = at(mode, t.year);
+                  return (
+                    <td
+                      key={t.year}
+                      className="py-1.5 pr-4 text-right font-mono tabular-nums"
+                    >
+                      {v !== null ? v.toFixed(1) : <span className="text-ink-muted">—</span>}
+                    </td>
+                  );
+                })}
+                <td className="py-1.5 text-right font-mono tabular-nums">
+                  {spread !== null ? (
+                    `${spread}%`
+                  ) : (
+                    <span className="text-ink-muted">—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default async function MethodologyPage() {
   const [eloRun, glickoRun, eraRun, insightsRun, ratingRun, winprobRun] =
     await Promise.all([
@@ -44,29 +123,39 @@ export default async function MethodologyPage() {
       (x): x is number => x !== undefined && x !== null,
     ),
   );
-  const [ratingCards, modeWeights, winprobArt, coverage] = await Promise.all([
-    getBacktestCards(
-      [ratingRun?.id].filter((x): x is number => x !== undefined && x !== null),
-    ),
-    ratingRun ? getModeWeights(ratingRun.id) : Promise.resolve([]),
-    winprobRun ? getWinprobArtifact(winprobRun.id) : Promise.resolve(null),
-    getCoverage(),
-  ]);
+  const [ratingCards, modeWeights, winprobArt, coverage, pace] =
+    await Promise.all([
+      getBacktestCards(
+        [ratingRun?.id].filter((x): x is number => x !== undefined && x !== null),
+      ),
+      ratingRun ? getModeWeights(ratingRun.id) : Promise.resolve([]),
+      winprobRun ? getWinprobArtifact(winprobRun.id) : Promise.resolve(null),
+      getCoverage(),
+      getPaceByMode(),
+    ]);
+  // Qualified all-mode cohort sizes per title (≥ 8 maps), for the era section.
+  const cohorts = eraRun ? await getSeasonKdSpread(eraRun.id, 8) : [];
+  const cohortSizes = [...cohorts].sort((a, b) => a.year - b.year);
   const cards = [...seriesCards].sort(
     (a, b) => (a.brier ?? 1) - (b.brier ?? 1),
   );
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <p className="eyebrow text-accent">How every number on this site is made</p>
+    // Site grid (6xl) for left-edge alignment with the header; prose keeps
+    // its own narrower reading measure inside.
+    <main className="mx-auto max-w-6xl px-6 py-10">
+      <div className="max-w-3xl">
+      <p className="eyebrow text-accent">
+        Model specifications and backtests
+      </p>
       <h1 className="mt-1 font-display text-5xl font-bold uppercase tracking-tight">
         Methodology
       </h1>
       <p className="mt-3 text-sm text-ink-secondary">
-        Every model output is written through a versioned, immutable run — the
-        pages you’re reading always show one coherent snapshot, and every rerun
-        is reproducible from the commit recorded with it. Nothing here is a
-        wager aid; backtests below are educational model evaluation.
+        Each model writes its output as a versioned, immutable run tagged with
+        the code commit that produced it, so any figure on the site traces back
+        to one rerun. The backtests below evaluate the models on historical play
+        only.
       </p>
 
       <section id="era" className="mt-12">
@@ -75,21 +164,49 @@ export default async function MethodologyPage() {
         </h2>
         <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
           <p>
-            Raw stats are not comparable across titles: league-wide engagement
-            pace differs by double-digit percentages between 2017 Infinite
-            Warfare, 2018 WWII, and 2019 Black Ops 4. So every player-season
-            aggregate is scored <em>within its cohort</em> — all qualified
-            players (≥ 8 maps) in the same season, title, and mode — as a
-            z-score and percentile. A 90th-percentile season means the same
-            thing in any year.
+            Engagement pace changes from title to title, so the same raw stat
+            does not mean the same thing across games. The table below is kills
+            per player per 10 minutes in each season and mode. In the modes
+            played across all three titles it moves by double-digit percentages:
+            Hardpoint by roughly a fifth, Search &amp; Destroy by more than a
+            third.
+          </p>
+          {pace.length > 0 && (
+            <div className="border border-hairline bg-surface p-4">
+              <PaceTable cells={pace} />
+              <p className="mt-2 text-xs text-ink-muted">
+                Kills per player per 10 minutes, from maps with complete
+                duration data. Spread is the gap between the highest and lowest
+                title for that mode; modes played in a single title have none.
+              </p>
+            </div>
+          )}
+          <p>
+            Because of this, each player-season aggregate is scored against its
+            own cohort: every qualified player (≥ 8 maps) in the same season,
+            title, and mode, expressed as a z-score and percentile.
+            {cohortSizes.length > 0 && (
+              <>
+                {" "}
+                The qualified all-mode cohort holds{" "}
+                {cohortSizes.map((c, i) => (
+                  <span key={c.year}>
+                    {i > 0 && (i === cohortSizes.length - 1 ? " and " : ", ")}
+                    {c.values.length} in {c.year} {c.title}
+                  </span>
+                ))}
+                .
+              </>
+            )}{" "}
+            A 90th percentile in one cohort is the same rank as a 90th
+            percentile in any other.
           </p>
           <p>
-            The uncertainty band on career arcs is ±1.96/√maps in z-units — the
-            sampling noise of a season-length average, an intentional
-            approximation (it assumes unit per-map variance). Missing stats are
-            never imputed: if the archive lacks a stat for a season, the cell
-            shows “—” and the row’s coverage percentage says how complete the
-            underlying data is.
+            The uncertainty band on career arcs is ±1.96/√maps in z-units, the
+            sampling noise of a season-length average (an intentional
+            approximation: it assumes unit per-map variance). If the archive
+            lacks a stat for a season, the cell shows “—” and the row’s
+            coverage percentage says how complete the underlying data is.
             {eraRun && (
               <span className="text-ink-muted">
                 {" "}
@@ -111,15 +228,16 @@ export default async function MethodologyPage() {
             order. <strong className="text-ink">Elo</strong>: initial 1500,
             logistic expectation with scale 400, constant K=32, series-level
             (map scores ignored). <strong className="text-ink">Glicko-2</strong>{" "}
-            (Glickman 2013, implemented step-for-step against the paper’s worked
-            example): each series is its own rating period, τ=0.5, so rating
-            deviation (RD) grows when a team is idle and shrinks with evidence —
-            that’s the ±RD you see on <a className="underline" href="/ratings">/ratings</a>.
+            (Glickman 2013, implemented against the worked example in the
+            paper): each series is its own rating period, τ=0.5, so rating
+            deviation (RD) grows when a team is idle and shrinks with evidence.
+            That is the ±RD shown on{" "}
+            <a className="underline" href="/ratings">/ratings</a>.
           </p>
           <p id="glicko2">
-            Undecided series — where the archive is missing the deciding map —
-            are never rated. Predictions are strictly walk-forward: each series
-            is predicted <em>before</em> the model sees its result.
+            Series whose deciding map is missing from the archive are left
+            unrated. Predictions are strictly walk-forward: each series is
+            predicted <em>before</em> the model sees its result.
           </p>
         </div>
       </section>
@@ -134,28 +252,37 @@ export default async function MethodologyPage() {
             <a className="underline" href="/ratings">
               /ratings
             </a>{" "}
-            is built in four auditable steps. <strong className="text-ink">First</strong>,
-            for every (season × mode) each map becomes one observation — the
-            difference between the two teams’ per-10-minute stat profiles (kills,
-            deaths, assists, mode objective), standardized and regressed against
-            which team won the map (L2 logistic, λ=1, fit by IRLS in ~40 lines of
-            published numpy). The coefficients are data-derived answers to “how
-            much was a one-SD edge in hill time worth against the same edge in
-            kills, in this title?” <strong className="text-ink">Second</strong>,
-            each player-season-mode aggregate is z-scored within its qualified
-            cohort and dotted with those weights.{" "}
-            <strong className="text-ink">Third</strong>, scores shrink toward the
-            league mean by m/(m+15) in maps played — partial pooling, so a hot
-            12-map cameo cannot outrank a great 200-map season.{" "}
-            <strong className="text-ink">Fourth</strong>, mode scores blend by
-            maps played and scale so the qualified league averages 1.00; the ±sd
-            is a 200-draw map-resampling bootstrap.
+            is built in four steps, each reproducible from the published code:
           </p>
+          <ol className="list-decimal space-y-2 pl-5 marker:font-mono marker:text-ink-muted">
+            <li>
+              For each (season × mode), every map is one observation: the
+              difference between the two teams’ per-10-minute stat profiles
+              (kills, deaths, assists, mode objective), standardized and
+              regressed against which team won the map (L2 logistic, λ=1, fit by
+              IRLS in ~40 lines of numpy). Each coefficient is how much a one-SD
+              edge in that stat was worth toward winning a map in that title and
+              mode.
+            </li>
+            <li>
+              Each player-season-mode aggregate is z-scored within its qualified
+              cohort and dotted with those weights.
+            </li>
+            <li>
+              Scores shrink toward the league mean by m/(m+15) in maps played
+              (partial pooling), so a 12-map sample cannot outrank a 200-map
+              season.
+            </li>
+            <li>
+              Mode scores blend by maps played, scaled so the qualified league
+              averages 1.00. The ±sd is a 200-draw map-resampling bootstrap.
+            </li>
+          </ol>
           <p>
             One reading caveat: in respawn modes a team’s kills mirror its
             opponent’s deaths almost exactly, so those two coefficients are
-            near-collinear and the ridge penalty splits their shared weight — read
-            them jointly as slaying.
+            near-collinear and the ridge penalty splits their shared weight.
+            Read the two together as slaying.
             {ratingRun && (
               <span className="text-ink-muted">
                 {" "}
@@ -166,9 +293,9 @@ export default async function MethodologyPage() {
           </p>
         </div>
         {modeWeights.length > 0 && (
-          <div className="mt-4 rounded border border-hairline bg-surface p-4">
+          <div className="mt-4 border border-hairline bg-surface p-4">
             <h3 className="eyebrow text-ink-secondary">
-              What the regression learned: what wins maps
+              Learned map-win weights by mode
             </h3>
             <div className="mt-3">
               <WhatWinsMaps cohorts={modeWeights} />
@@ -176,10 +303,10 @@ export default async function MethodologyPage() {
           </div>
         )}
         {ratingCards.map((c) => (
-          <div key={c.runId} className="mt-4 rounded border border-hairline bg-surface p-4">
+          <div key={c.runId} className="mt-4 border border-hairline bg-surface p-4">
             <div className="flex items-baseline justify-between">
               <h3 className="font-display text-xl font-semibold uppercase">
-                Weight validation — walk-forward by event
+                Weight validation, walk-forward by event
               </h3>
               <span className="font-mono text-xs text-ink-muted">
                 v{c.version} · {c.windowFrom} → {c.windowTo}
@@ -196,11 +323,10 @@ export default async function MethodologyPage() {
             </div>
             <p className="mt-3 text-xs text-ink-muted">
               Each event’s maps are classified using weights trained only on
-              earlier events in the same (season × mode). Read this for what it
-              is: a <em>value</em> model scored on same-map box scores, not a
-              forecast — it establishes that the learned weights generalize
-              across events instead of memorizing them, which is the property the
-              rating stands on.
+              earlier events in the same (season × mode). The test scores a
+              value model on same-map box scores, and shows the learned weights
+              generalize to events they were not trained on, which is what the
+              rating relies on.
             </p>
           </div>
         ))}
@@ -208,15 +334,15 @@ export default async function MethodologyPage() {
 
       <section id="winprob" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
-          The momentum test (winprob_v1)
+          Series win probability (winprob_v1)
         </h2>
         <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
           <p>
-            Glicko-2 is the strongest baseline below, so instead of another
-            rating system this model asks a sharper question: <em>given</em> the
-            ratings, does anything else carry information about who wins a
-            series? Its features — all computed strictly before each series — are
-            the walk-forward Glicko-2 and Elo probabilities, combined rating
+            Glicko-2 is the strongest baseline below, so this model tests
+            whether anything <em>beyond</em> the ratings carries information
+            about who wins a series. Its features, all computed strictly before
+            each series, are the walk-forward Glicko-2 and Elo probabilities,
+            combined rating
             deviation, each team’s last-{winprobArt?.formWindow ?? 10} win rate,
             and a shrunken head-to-head record, in an expanding-window logistic
             regression refit every {winprobArt?.refitEvery ?? 50} series. Until{" "}
@@ -224,12 +350,11 @@ export default async function MethodologyPage() {
             Glicko-2 through unchanged, so its backtest is directly comparable.
           </p>
           <p>
-            The answer over 2017–2019 is no: the Brier difference in the report
-            cards below is noise, and the learned form coefficient is
-            approximately zero. Recent form and head-to-head history add nothing
-            beyond team strength — the first published test of the momentum
-            narrative on this record. A null, backtested and reported, is a
-            result.
+            Over 2017–2019 the added features contribute nothing: the Brier
+            difference in the report cards below is within noise, and the
+            learned form coefficient is approximately zero. On this record,
+            recent form and head-to-head history carry no measurable
+            information beyond team strength.
             {winprobRun && (
               <span className="text-ink-muted">
                 {" "}
@@ -238,7 +363,7 @@ export default async function MethodologyPage() {
             )}
           </p>
           {winprobArt && (
-            <div className="overflow-x-auto rounded border border-hairline bg-surface p-4">
+            <div className="overflow-x-auto border border-hairline bg-surface p-4">
               <h3 className="eyebrow text-ink-secondary">
                 Final learned coefficients (log-odds per unit)
               </h3>
@@ -261,10 +386,10 @@ export default async function MethodologyPage() {
                 </tbody>
               </table>
               <p className="mt-2 text-xs text-ink-muted">
-                The rating logits carry the prediction; the rest hover near zero.
-                Coefficients are correlated (both rating systems measure the same
-                thing), so read the non-rating rows as “nothing left to add,” not
-                as precise effects.
+                The rating logits carry the prediction; the rest hover near
+                zero. Coefficients are correlated (both rating systems measure
+                the same thing), so the near-zero non-rating rows indicate an
+                absence of residual signal rather than precise effect sizes.
               </p>
             </div>
           )}
@@ -277,13 +402,14 @@ export default async function MethodologyPage() {
         </h2>
         <p className="mt-2 text-sm text-ink-secondary">
           Walk-forward over every decided series in the archive. Brier and log
-          loss score probability quality (lower is better; 0.25 / 0.693 is the
-          coin-flip baseline). Accuracy alone can flatter a model, so read it
-          with the calibration plot.
+          loss score probability quality (lower is better; 0.25 and 0.693 are
+          the coin-flip baselines). Read accuracy alongside the calibration
+          plot, since a model can be accurate while its probabilities are poorly
+          calibrated.
         </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {cards.map((c) => (
-            <div key={c.runId} className="rounded border border-hairline bg-surface p-4">
+            <div key={c.runId} className="border border-hairline bg-surface p-4">
               <div className="flex items-baseline justify-between">
                 <h3 className="font-display text-xl font-semibold uppercase">
                   {MODEL_LABEL[c.model] ?? c.model}
@@ -315,13 +441,12 @@ export default async function MethodologyPage() {
       <section id="insights" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">Insights</h2>
         <p className="mt-3 text-sm leading-relaxed text-ink-secondary">
-          Feed items are generated, not written: eight kinds (outlier, trend,
-          milestone, era context, head-to-head edge, what-wins-maps weights, top
-          rated seasons, and published model nulls), each computed from model
-          output or the raw record with fixed eligibility thresholds (e.g.
-          outliers require ≥ 30 maps and |z| ≥ 2). Every number in a headline is
-          read back from the database — nothing is estimated for narrative
-          effect.
+          The findings feed is computed directly from model output and the raw
+          record. There are eight kinds (outlier, trend, milestone, era
+          context, head-to-head edge, what-wins-maps weights, top rated
+          seasons, and published model nulls), each with fixed eligibility
+          thresholds (e.g. outliers require ≥ 30 maps and |z| ≥ 2). The numbers
+          in each headline are read from the database, not written by hand.
           {insightsRun && (
             <span className="text-ink-muted">
               {" "}
@@ -333,9 +458,9 @@ export default async function MethodologyPage() {
 
       <section id="coverage" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
-          Coverage — what the archive actually contains
+          Archive coverage
         </h2>
-        <div className="mt-3 overflow-x-auto rounded border border-hairline bg-surface p-4">
+        <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-hairline text-xs text-ink-muted">
@@ -378,10 +503,10 @@ export default async function MethodologyPage() {
           </table>
           <p className="mt-2 text-xs text-ink-muted">
             2017 covers CWL Championship only (the recovered archive begins
-            there); 2018–2019 are full seasons. “Extended stats” is the share of
-            player-map rows carrying the 2019-format extras (EKIA, accuracy,
-            time alive, streaks…) — the earlier spreadsheets never recorded
-            them, so those cells stay empty rather than estimated.
+            there); 2018–2019 are full seasons. “Extended stats” is the share
+            of player-map rows carrying the 2019-format extras (EKIA, accuracy,
+            time alive, streaks). The earlier spreadsheets did not record
+            them, so those cells stay empty.
           </p>
         </div>
       </section>
@@ -397,11 +522,12 @@ export default async function MethodologyPage() {
             BSD-3-Clause), recovered via Software Heritage after the original
             repository was taken down. Event metadata and roster context come
             from Liquipedia contributors (CC-BY-SA 3.0). Handles are normalized
-            across seasons with an alias map maintained in the open — corrections
-            welcome.
+            across seasons with an alias map maintained in the repository;
+            corrections are welcome.
           </p>
         </div>
       </section>
+      </div>
     </main>
   );
 }
