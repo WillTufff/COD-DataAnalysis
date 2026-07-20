@@ -37,8 +37,7 @@ const nav = [
   { href: "/players", label: "Players" },
   { href: "/stats", label: "Stats" },
   { href: "/rounds", label: "Rounds" },
-  { href: "/meta", label: "Meta" },
-  { href: "/ratings", label: "Models" },
+  { href: "/meta", label: "Loadouts" },
   { href: "/findings", label: "Findings" },
   { href: "/methodology", label: "Methodology" },
 ];

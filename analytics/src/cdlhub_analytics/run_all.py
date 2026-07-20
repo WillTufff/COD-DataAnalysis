@@ -10,11 +10,12 @@ outputs. Each model gets its own versioned run; reruns with identical
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from . import backtest, era, insights, metrics
 from .db import connect
-from .ratings import fit, player_rating, winprob
+from .ratings import comparison, fit, player_rating, winprob
 
 ELO_K = 32.0
 GLICKO_TAU = 0.5
@@ -81,26 +82,56 @@ def main(argv: list[str] | None = None) -> int:
             f"accuracy {report.accuracy:.3f}"
         )
 
-        pr_run = open_run(
+        # Every feature-set version is fitted and backtested; the published one
+        # is named in player_rating, never inferred from insertion order.
+        rating_rows, rating_coverage = player_rating.load(conn)
+        rating_runs: dict[str, int] = {}
+        for version in player_rating.ALL_VERSIONS:
+            run = open_run(
+                conn,
+                "player_rating",
+                version,
+                {
+                    "l2": player_rating.L2,
+                    "shrink_maps": player_rating.SHRINK_MAPS,
+                    "rating_scale": player_rating.RATING_SCALE,
+                    "min_train_games": player_rating.MIN_TRAIN_GAMES,
+                    "bootstrap_b": player_rating.BOOTSTRAP_B,
+                    "published": version == player_rating.PUBLISHED_VERSION,
+                },
+                through,
+            )
+            rating_runs[version] = run
+            n, pr_preds, _ = player_rating.compute_and_write(
+                conn, run, version, rating_rows, rating_coverage
+            )
+            report = backtest.evaluate(pr_preds)
+            backtest.write(conn, run, report)
+            flag = " (published)" if version == player_rating.PUBLISHED_VERSION else ""
+            print(
+                f"player_rating {version} run {run}{flag}: {n} rating rows; "
+                f"map-level walk-forward: {report.n} predictions, "
+                f"brier {report.brier:.4f}, accuracy {report.accuracy:.3f}"
+            )
+
+        pr_run = rating_runs[player_rating.PUBLISHED_VERSION]
+        versus = comparison.compare(
             conn,
-            "player_rating",
-            "1.0.0",
-            {
-                "l2": player_rating.L2,
-                "shrink_maps": player_rating.SHRINK_MAPS,
-                "rating_scale": player_rating.RATING_SCALE,
-                "min_train_games": player_rating.MIN_TRAIN_GAMES,
-                "bootstrap_b": player_rating.BOOTSTRAP_B,
-            },
-            through,
+            player_rating.ALL_VERSIONS,
+            player_rating.PUBLISHED_VERSION,
+            rating_rows,
+            rating_coverage,
         )
-        n, pr_preds, _ = player_rating.compute_and_write(conn, pr_run)
-        report = backtest.evaluate(pr_preds)
-        backtest.write(conn, pr_run, report)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (pr_run, "rating_model_comparison", json.dumps(versus)),
+        )
+        best = versus["overall"][player_rating.PUBLISHED_VERSION]
+        base = versus["overall"][versus["baseline"]]
         print(
-            f"player_rating run {pr_run}: {n} rating rows; map-level walk-forward: "
-            f"{report.n} predictions, brier {report.brier:.4f}, "
-            f"accuracy {report.accuracy:.3f}"
+            f"rating comparison over {versus['common_maps']} common maps: "
+            f"{versus['baseline']} brier {base['brier']:.4f} -> "
+            f"{player_rating.PUBLISHED_VERSION} brier {best['brier']:.4f}"
         )
 
         wp_run = open_run(
@@ -128,17 +159,20 @@ def main(argv: list[str] | None = None) -> int:
         ins_run = open_run(
             conn,
             "insights",
-            "1.1.0",
+            "1.2.0",
             {
                 "era_run_id": era_run,
                 "elo_run_id": elo_run,
                 "glicko_run_id": glicko_run,
                 "player_rating_run_id": pr_run,
                 "winprob_run_id": wp_run,
+                "metric_run_id": metric_run,
             },
             through,
         )
-        n = insights.generate(conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run)
+        n = insights.generate(
+            conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run, metric_run
+        )
         print(f"insights run {ins_run}: {n} atoms")
 
         conn.commit()

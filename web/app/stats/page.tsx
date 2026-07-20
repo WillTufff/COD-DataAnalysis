@@ -1,13 +1,23 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Pager } from "@/components/Pager";
 import { PctlBar } from "@/components/PctlBar";
 import {
   type MetricCatalogEntry,
+  type MetricQuery,
+  countMetric,
   getMetricCatalog,
   getMetricScope,
   latestRun,
   queryMetric,
 } from "@/lib/analytics";
+import {
+  DEFAULT_PER,
+  type SearchParams,
+  clampPage,
+  one,
+  parsePaging,
+} from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +45,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   scorestreaks: "Scorestreaks",
 };
 
-function one(sp: Record<string, string | string[] | undefined>, k: string): string {
-  const v = sp[k];
-  return (Array.isArray(v) ? v[0] : v) ?? "";
-}
-
 /** Gold tier first, then by category, so the picker leads with the good stuff. */
 function sortMetrics(metrics: MetricCatalogEntry[]): MetricCatalogEntry[] {
   return [...metrics].sort((a, b) => {
@@ -60,9 +65,9 @@ function formatValue(v: number, entry: MetricCatalogEntry): string {
 export default async function StatsPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const sp = await searchParams;
+  const sp: SearchParams = await searchParams;
   const run = await latestRun("metric_layer");
   const catalog = run ? await getMetricCatalog(run.id) : null;
 
@@ -79,7 +84,9 @@ export default async function StatsPage({
     );
   }
 
-  const metrics = sortMetrics(catalog.metrics);
+  // A metric no title cleared coverage for has no rows in any season, so it is
+  // not a leaderboard. It keeps its glossary entry, which explains the absence.
+  const metrics = sortMetrics(catalog.metrics.filter((m) => m.titles.length > 0));
   const requested = one(sp, "metric");
   const entry =
     metrics.find((m) => m.key === requested) ?? metrics[0];
@@ -100,14 +107,16 @@ export default async function StatsPage({
   const qualifiedOnly = one(sp, "all") !== "1";
   const dir = one(sp, "dir") === "asc" ? "asc" : entry.higher_is_better ? "desc" : "asc";
 
-  const rows = await queryMetric(run.id, {
+  const query: MetricQuery = {
     metric: entry.key,
     year,
     modeSlug,
     qualifiedOnly,
     dir,
-    limit: 100,
-  });
+  };
+  const total = await countMetric(run.id, query);
+  const paging = clampPage(parsePaging(sp), total);
+  const rows = await queryMetric(run.id, query, paging);
 
   const grouped = new Map<string, MetricCatalogEntry[]>();
   for (const m of metrics) {
@@ -127,8 +136,8 @@ export default async function StatsPage({
       </h1>
       <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
         {catalog.metrics.length} published metrics, each scored against its own
-        season-and-mode cohort. Which seasons a metric covers is measured from the
-        data, not assumed. Filters live in the URL, so any leaderboard is a link.
+        season-and-mode cohort. Which seasons a metric covers is measured from
+        the data.
       </p>
 
       <form
@@ -209,6 +218,11 @@ export default async function StatsPage({
             Include below minimum {entry.denom_kind}
           </span>
         </label>
+        {/* The row count is a link in the pager; carry it through so changing a
+            filter does not silently reset it. */}
+        {paging.per !== DEFAULT_PER && (
+          <input type="hidden" name="per" value={paging.per} />
+        )}
         <button
           type="submit"
           className="border border-accent-dim bg-surface-raised px-4 py-1.5 font-display text-sm font-semibold uppercase tracking-wide text-ink hover:border-accent"
@@ -233,8 +247,7 @@ export default async function StatsPage({
       </div>
 
       <div className="mt-4 font-mono text-xs text-ink-muted">
-        {rows.length === 100 ? "first 100 rows" : `${rows.length} rows`}
-        {qualifiedOnly ? " · qualified only" : " · including small samples"}
+        {qualifiedOnly ? "qualified only" : "including small samples"}
       </div>
 
       {rows.length === 0 ? (
@@ -244,76 +257,84 @@ export default async function StatsPage({
           {modeSlug ? ` in ${MODE_LABELS[modeSlug] ?? modeSlug}` : ""}.
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-hairline text-xs text-ink-muted">
-                <th className="py-2 pr-3 font-normal">#</th>
-                <th className="py-2 pr-4 font-normal">Player</th>
-                <th className="py-2 pr-4 font-normal">Season</th>
-                {modeSlug === undefined && (
-                  <th className="py-2 pr-4 font-normal">Mode</th>
-                )}
-                <th className="py-2 pr-4 text-right font-normal">{entry.label}</th>
-                <th className="py-2 pr-4 text-right font-normal">vs cohort</th>
-                <th className="py-2 pr-4 font-normal">Percentile</th>
-                <th className="py-2 text-right font-normal">
-                  {entry.denom_kind}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr
-                  key={`${r.playerId}-${r.year}-${r.mode ?? "all"}`}
-                  className={`border-b border-hairline/60 ${r.qualified ? "" : "text-ink-muted"}`}
-                >
-                  <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
-                    {i + 1}
-                  </td>
-                  <td className="py-1.5 pr-4">
-                    <Link
-                      href={`/players/${r.slug}`}
-                      className="font-medium hover:text-accent"
-                    >
-                      {r.handle}
-                    </Link>
-                    {!r.qualified && (
-                      <span
-                        className="ml-1.5 font-mono text-[10px] text-ink-muted"
-                        title={`Below the ${entry.min_denom} ${entry.denom_kind} minimum`}
-                      >
-                        n low
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-1.5 pr-4 text-ink-secondary">
-                    {r.year} {r.title}
-                  </td>
+        <>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-3 font-normal">#</th>
+                  <th className="py-2 pr-4 font-normal">Player</th>
+                  <th className="py-2 pr-4 font-normal">Season</th>
                   {modeSlug === undefined && (
-                    <td className="py-1.5 pr-4 text-ink-secondary">
-                      {r.mode ? (MODE_LABELS[r.mode] ?? r.mode) : "All"}
-                    </td>
+                    <th className="py-2 pr-4 font-normal">Mode</th>
                   )}
-                  <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                    {formatValue(r.value, entry)}
-                  </td>
-                  <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                    {r.z !== null
-                      ? `${r.z >= 0 ? "+" : ""}${r.z.toFixed(2)}σ`
-                      : "—"}
-                  </td>
-                  <td className="py-1.5 pr-4">
-                    {r.pctl !== null ? <PctlBar pctl={r.pctl} /> : "—"}
-                  </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
-                    {Math.round(r.denom)}
-                  </td>
+                  <th className="py-2 pr-4 text-right font-normal">{entry.label}</th>
+                  <th className="py-2 pr-4 text-right font-normal">vs cohort</th>
+                  <th className="py-2 pr-4 font-normal">Percentile</th>
+                  <th className="py-2 text-right font-normal">
+                    {entry.denom_kind}
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr
+                    key={`${r.playerId}-${r.year}-${r.mode ?? "all"}`}
+                    className={`border-b border-hairline/60 ${r.qualified ? "" : "text-ink-muted"}`}
+                  >
+                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
+                      {paging.offset + i + 1}
+                    </td>
+                    <td className="py-1.5 pr-4">
+                      <Link
+                        href={`/players/${r.slug}`}
+                        className="font-medium hover:text-accent"
+                      >
+                        {r.handle}
+                      </Link>
+                      {!r.qualified && (
+                        <span
+                          className="ml-1.5 font-mono text-[10px] text-ink-muted"
+                          title={`Below the ${entry.min_denom} ${entry.denom_kind} minimum`}
+                        >
+                          n low
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-4 text-ink-secondary">
+                      {r.year} {r.title}
+                    </td>
+                    {modeSlug === undefined && (
+                      <td className="py-1.5 pr-4 text-ink-secondary">
+                        {r.mode ? (MODE_LABELS[r.mode] ?? r.mode) : "All"}
+                      </td>
+                    )}
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                      {formatValue(r.value, entry)}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                      {r.z !== null
+                        ? `${r.z >= 0 ? "+" : ""}${r.z.toFixed(2)}σ`
+                        : "—"}
+                    </td>
+                    <td className="py-1.5 pr-4">
+                      {r.pctl !== null ? <PctlBar pctl={r.pctl} /> : "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
+                      {Math.round(r.denom)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager
+            basePath="/stats"
+            searchParams={sp}
+            paging={paging}
+            total={total}
+          />
+        </>
       )}
 
       <p className="mt-3 max-w-3xl text-xs text-ink-muted">

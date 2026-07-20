@@ -122,8 +122,8 @@ export default async function Home() {
           Competitive Call of Duty ran on a different game each season, so raw
           stats from 2017, 2018 and 2019 don&rsquo;t compare directly. This site
           scores every player-season against its own year and mode, and rates
-          teams from their series results. The ratings, the methods, and the box
-          scores they run on are all published here.
+          teams from their series results. The ratings, the model specifications,
+          and the box scores behind them are published here.
         </p>
       </header>
 
@@ -334,7 +334,7 @@ export default async function Home() {
                       ? f.subjectType === "team"
                         ? `/teams/${f.subjectSlug}`
                         : `/players/${f.subjectSlug}`
-                      : "/ratings"
+                      : "/methodology"
                   }
                   className="ml-auto flex-none font-mono text-xs text-accent underline underline-offset-2 hover:text-ink"
                 >

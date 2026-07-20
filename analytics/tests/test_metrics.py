@@ -3,13 +3,12 @@ import math
 
 import pytest
 
-from cdlhub_analytics import metrics
+from cdlhub_analytics import maprows, metrics
+from cdlhub_analytics.maprows import Coverage, KeyCoverage
 from cdlhub_analytics.metrics import (
     ALL_MODES,
     CATALOG,
     Aggregate,
-    Coverage,
-    KeyCoverage,
     Loaded,
     Metric,
 )
@@ -19,7 +18,7 @@ def full_coverage(*, exclude: dict[str, set[str]] | None = None) -> Coverage:
     """Every column tracked for every title, minus any named exclusions."""
     excluded = exclude or {}
     columns = (
-        *metrics.NUMERIC_EXTRAS,
+        *maprows.NUMERIC_EXTRAS,
         "avg_kill_dist_m",
         "kills",
         "deaths",
@@ -31,7 +30,7 @@ def full_coverage(*, exclude: dict[str, set[str]] | None = None) -> Coverage:
         "damage",
     )
     coverage: Coverage = {}
-    for title in metrics.TITLE_ORDER:
+    for title in maprows.TITLE_ORDER:
         coverage[title] = {
             col: KeyCoverage(
                 rows=1000, present=1000, nonzero=0 if col in excluded.get(title, set()) else 1000
@@ -264,12 +263,12 @@ def test_build_rows_cohorts_do_not_cross_seasons() -> None:
 
 
 def test_extras_number_rejects_non_numeric() -> None:
-    assert metrics._extras_number({"a": 5}, "a") == 5.0
-    assert metrics._extras_number({"a": "5.5"}, "a") == 5.5
-    assert metrics._extras_number({"a": "MP40"}, "a") is None
-    assert metrics._extras_number({"a": True}, "a") is None
-    assert metrics._extras_number({}, "a") is None
-    assert metrics._extras_number({"a": None}, "a") is None
+    assert maprows.extras_number({"a": 5}, "a") == 5.0
+    assert maprows.extras_number({"a": "5.5"}, "a") == 5.5
+    assert maprows.extras_number({"a": "MP40"}, "a") is None
+    assert maprows.extras_number({"a": True}, "a") is None
+    assert maprows.extras_number({}, "a") is None
+    assert maprows.extras_number({"a": None}, "a") is None
 
 
 # ---------- catalog integrity ----------
@@ -427,7 +426,7 @@ def test_no_duplicate_keys_across_player_and_team_catalogs() -> None:
 
 def test_every_metric_names_sources_that_exist() -> None:
     known = (
-        set(metrics.NUMERIC_EXTRAS)
+        set(maprows.NUMERIC_EXTRAS)
         | set(metrics.KF_KEYS)
         | set(metrics.CLUTCH_KEYS)
         | {

@@ -226,8 +226,8 @@ hyperparameters, and training window. A rerun replaces a whole run rather than e
 rows in place, so any published number can be traced back to the exact code and data
 window that generated it.
 
-**Open player rating, `player_rating_v1` (shipped).** The composite rating, built in
-four steps, each of them auditable:
+**Open player rating (shipped).** The composite rating, built in four steps, each of
+them auditable:
 
 1. *Learn what wins maps.* For every (season × mode), each map is one observation:
    the difference between the two teams' per-10-minute profiles (kills, deaths,
@@ -251,24 +251,109 @@ four steps, each of them auditable:
    uncertainty is a map-resampling bootstrap (200 draws, fixed seed).
 
 Its validation is walk-forward within each (season × mode): every event's maps are
-predicted using weights trained only on earlier events (4,204 predictions, Brier
-0.054, accuracy 92.5%). Read that number for what it is: this is a *value* model
-scored on same-map box scores, not a forecast — the backtest establishes that the
-learned weights generalize across events rather than memorizing them, which is the
-property the rating stands on.
+predicted using weights trained only on earlier events. Read that number for what it
+is: this is a *value* model scored on same-map box scores, not a forecast — the
+backtest establishes that the learned weights generalize across events rather than
+memorizing them, which is the property the rating stands on.
 
-## Tier 3: Career modeling (planned)
+### What the rating measures: three feature sets, compared
 
-The tables exist; the models are not yet written.
+Steps 2 to 4 above never change. What changed across versions is step 1's answer to
+"which numbers describe a team's map", and all three answers are kept runnable so the
+choice can be checked rather than asserted.
+
+- **1.0.0** — kills, deaths, assists and one objective column per mode, all per ten
+  minutes. The box score, essentially.
+- **2.0.0** — per-mode feature sets drawn from the metric layer, with per-mode
+  denominators: Search & Destroy is measured per *round*, not per minute, because a
+  round is what the mode actually spends. First bloods, first deaths, survival, time
+  per life, hill captures and flag carry time enter here.
+- **2.1.0** — adds the kill-feed tier to the modes where a trade means something:
+  untraded-death rate and trade kills in Hardpoint and Search & Destroy, plus deaths
+  that surrendered a man advantage in Search & Destroy. **This is the published
+  version.**
+
+No version declares which titles it applies to. Every feature names the source columns
+it reads, and a cohort keeps a feature only if its title actually populated those
+columns — measured from the data on every run. That is why the feature sets below
+differ per season without a hand-maintained matrix anywhere:
+
+| Cohort | Features used |
+|---|---|
+| 2017 IW Hardpoint | kills, deaths, hill time, hill captures, untraded-death rate, trade kills |
+| 2018 WWII Hardpoint | kills, deaths, hill time, **time per life**, untraded-death rate, trade kills |
+| 2019 BO4 Hardpoint | kills, deaths, hill time, hill captures |
+| 2017 IW Search & Destroy | kills, deaths, first bloods, bomb plays, untraded-death rate, trade kills, thrown deaths |
+| 2018 WWII Search & Destroy | the above plus **first deaths and survival** |
+| 2019 BO4 Search & Destroy | kills, deaths, first bloods, first deaths, survival, bomb plays |
+
+WWII Hardpoint has no hill-capture column and Infinite Warfare tracked no first deaths,
+so those cohorts simply do not use them. Black Ops 4 has no kill feed at all, so its
+2.1.0 cohorts fall back to exactly the 2.0.0 set rather than being fed zeros — an
+absent column means "not recorded", never "none happened".
+
+**One family is deliberately excluded.** The kill-feed tier can also measure rounds won
+while up a man, and clutch wins. Neither is used as a rating feature, because both
+contain the round outcome, and round wins are what decide maps — regressing map wins on
+them would be close to circular and would flatter the backtest without the model having
+learned anything. Thrown deaths qualify because they are counted from alive-counts
+alone; the code computes them with an empty round-winner map so that outcome
+information cannot reach the feature even by accident.
+
+### Does it actually predict better?
+
+All three versions are fitted and backtested on every run, and scored **on the same
+maps**. This matters: feature sets have different data requirements, so each version's
+walk-forward naturally covers a slightly different set of maps, and comparing raw
+totals would let a version look better simply by predicting an easier subset. Only the
+4,171 maps every version predicted enter the table.
+
+| Version | Brier | Log loss | Accuracy |
+|---|---|---|---|
+| 1.0.0 (box score) | 0.0541 | 0.1787 | 92.6% |
+| 2.0.0 (intangibles) | 0.0420 | 0.1441 | 94.5% |
+| **2.1.0 (+ kill feed)** | **0.0416** | **0.1422** | 94.4% |
+
+Adding intangibles is a real improvement: Brier falls 22% against the box-score
+baseline for 2.0.0, and 23% for the published 2.1.0. The kill-feed layer on top is a
+much smaller gain, and an honest reading is
+that it is close to a wash overall — it is published as the default because it wins on
+both proper scoring rules, not because the margin is decisive.
+
+The per-cohort breakdown is more informative than the total, and less flattering:
+
+| Cohort | Maps | 1.0.0 | 2.0.0 | 2.1.0 |
+|---|---|---|---|---|
+| 2018 WWII Hardpoint | 1,068 | 0.0451 | **0.0433** | 0.0442 |
+| 2018 WWII Search & Destroy | 843 | 0.0605 | 0.0441 | **0.0406** |
+| 2018 WWII Capture the Flag | 667 | 0.0485 | **0.0182** | **0.0182** |
+| 2019 BO4 Hardpoint | 674 | 0.0474 | **0.0451** | **0.0451** |
+| 2019 BO4 Search & Destroy | 518 | 0.0712 | **0.0468** | **0.0468** |
+| 2019 BO4 Control | 401 | **0.0627** | 0.0628 | 0.0628 |
+
+Three things are worth saying plainly. Capture the Flag improves enormously, because
+captures and returns per map describe that mode far better than a per-minute average
+of them does. The kill feed helps in exactly one place — WWII Search & Destroy, where
+trades decide rounds — and slightly *hurts* WWII Hardpoint. And Control is the one
+cohort where the box-score model is not beaten at all: with only first-blood net and
+captures available, 2.0.0 has nothing to add there. A version that wins overall while
+losing a cohort is the normal shape of this kind of result, and reporting it is
+cheaper than defending an average.
+
+The 2017 cohorts appear in the feature table but not the comparison: Infinite Warfare
+in this archive is a single event, and a walk-forward backtest needs an earlier event
+to train on. Their ratings are published; their predictive validation is not available,
+and no substitute is invented for it.
+
+## Tier 3: Career and player-shape modeling (planned)
+
+The tables exist but the models are not yet written.
 
 - **Aging curves.** Hierarchical fit of adjusted performance against age, or against
   career-season index where birthdate is unknown, giving each active player a position
   on the curve and the league a peak-age estimate with a credible interval.
 - **Peak and breakout detection.** Changepoint analysis on rolling adjusted rating,
   flagging career inflections with their magnitude in standard deviations.
-- **Archetype clustering.** k-means or GMM on standardized per-mode stat profiles
-  (engagement share, objective share, first-blood rate, hill-time share), producing
-  named archetypes per era and letting a career's archetype drift be tracked.
 
 ## Tier 4: Meta and environment analysis (partly shipped)
 
@@ -293,13 +378,38 @@ The tables exist; the models are not yet written.
 ## Tier 5: Finding generation (shipped)
 
 A layer of rules and statistics scans model outputs after every run and emits ranked,
-plain-English findings in eight kinds: trends, outliers, milestones, era context,
-head-to-head edges, and — reading the newer models' outputs directly — what-wins-maps
-weight comparisons per (season × mode), the top open-rating seasons, and published
-model nulls such as the momentum test. There are currently 151. Each carries the
-numbers backing it and a link into the evidence view, so any claim on the site can be
-traced to the data that produced it. These are generated from model output by fixed
-rules, not written by hand and not written by a language model.
+plain-English findings in fourteen kinds. Eight read the ratings and the era
+adjustment: trends, outliers, milestones, era context, head-to-head edges,
+what-wins-maps weight comparisons per (season × mode), the top open-rating seasons, and
+published model nulls such as the momentum test.
+
+Six more read the metric layer, which is where the claims a box score cannot make live:
+
+- **intangible outlier** — a season elite at an intangible while ordinary at K/D, or
+  the reverse. This is the argument for having a metric layer, stated one player at a
+  time.
+- **profile extreme** — the league-best qualified season value of a gold metric.
+- **clutch milestone** — 1vN records reconstructed from the kill feed.
+- **trade asymmetry** — slaying and trade economy pointing opposite ways: the heavy
+  slayer who dies alone, the light slayer whose deaths always get answered.
+- **meta shift** — a weapon's usage share swinging 20 points or more between
+  consecutive events of a season.
+- **team style** — rosters at the extremes of how they divided hill duty, opening duty
+  and kills.
+
+There are currently 241. Each carries the numbers backing it and a link into the
+evidence view, so any claim on the site can be traced to the data that produced it.
+These are generated from model output by fixed rules, not written by hand and not
+written by a language model.
+
+Two details in that generation are worth stating, because both were bugs first. Roughly
+half the intangibles are lower-is-better — untraded deaths, first deaths, zero-kill
+rounds — so every comparison re-reads a percentile through the catalog's own direction
+before calling it good or bad; without that step the generator reported players who were
+excellent at *both* K/D and an intangible as contradictions, with a headline claiming
+the opposite of the truth. And a "nobody in the league matched this" claim requires
+twice the qualifying sample, because clearing a leaderboard minimum is a much weaker
+thing than being unmatched.
 
 ## Publishing rules
 

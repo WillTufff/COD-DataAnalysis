@@ -166,10 +166,9 @@ export default async function RoundsPage({
         Rounds &amp; kill feed
       </h1>
       <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
-        What the event feed adds under the box score: who trades, who clutches, and how
-        a man advantage converts. Infinite Warfare (2017) and WWII (2018) only — Black
-        Ops 4 has box scores but no feed, so it does not appear here. A death counts as
-        traded when a teammate answers the killer within{" "}
+        Trades, clutches, and man-advantage conversion, read from the event feed.
+        Infinite Warfare (2017) and WWII (2018) only: Black Ops 4 has box scores but
+        no feed. A death counts as traded when a teammate answers the killer within{" "}
         {(overview.trade_window_ms / 1000).toFixed(0)} seconds.
       </p>
 
@@ -209,8 +208,7 @@ export default async function RoundsPage({
           </div>
           <p className="mt-2 max-w-md text-xs text-ink-muted">
             Share of deaths a teammate answered within{" "}
-            {(overview.trade_window_ms / 1000).toFixed(0)} s. The rest are untraded — the
-            kills that actually cost a numbers advantage.
+            {(overview.trade_window_ms / 1000).toFixed(0)} s.
           </p>
         </section>
 

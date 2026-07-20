@@ -25,6 +25,22 @@ import psycopg
 
 from .cohort import z_and_pctl
 from .era import MIN_MAPS
+from .maprows import (
+    KILL_DIST,
+    MIN_NONZERO_ROWS,
+    MODE_CONTROL,
+    MODE_CTF,
+    MODE_HARDPOINT,
+    MODE_SND,
+    MODE_UPLINK,
+    TITLE_IW,
+    TITLE_ORDER,
+    Coverage,
+    MapRow,
+    load_map_rows,
+    record_coverage,
+    titles_tracking,
+)
 
 MODEL = "metric_layer"
 # 2.0.0 adds the Phase B kill-feed layer (trades, clutch, man-advantage) and the
@@ -105,95 +121,6 @@ CLUTCH_KEYS: tuple[str, ...] = (
     KF_SND_ROUNDS,
 )
 
-TITLE_IW = "IW"
-TITLE_WWII = "WWII"
-TITLE_BO4 = "BO4"
-TITLE_ORDER = (TITLE_IW, TITLE_WWII, TITLE_BO4)
-
-# A source column counts as tracked for a title once this many of its rows are
-# non-zero. An absolute floor rather than a share: genuinely rare events (aces,
-# 4-pieces) sit near 1% of rows, while untracked columns sit at 0.
-MIN_NONZERO_ROWS = 20
-
-MODE_HARDPOINT = "hardpoint"
-MODE_SND = "search-and-destroy"
-MODE_CONTROL = "control"
-MODE_CTF = "capture-the-flag"
-MODE_UPLINK = "uplink"
-
-# extras keys summed across maps, by the titles that carry them.
-NUMERIC_EXTRAS: tuple[str, ...] = (
-    "2_piece",
-    "3_piece",
-    "4_piece",
-    "4_streak",
-    "5_streak",
-    "6_streak",
-    "7_streak",
-    "8plus_streak",
-    "bomb_pickups",
-    "bomb_sneak_defuses",
-    "headshots",
-    "hill_captures",
-    "hill_defends",
-    "hits",
-    "shots",
-    "snd_rounds",
-    "suicides",
-    "team_kills",
-    "time_alive_s",
-    "num_lives",
-    "kills_stayed_alive",
-    "team_deaths",
-    "snd_firstdeaths",
-    "snd_survives",
-    "snd_1_kill_round",
-    "snd_2_kill_round",
-    "snd_3_kill_round",
-    "snd_4_kill_round",
-    "uplink_dunks",
-    "uplink_throws",
-    "uplink_points",
-    "payloads_earned",
-    "payloads_used",
-    "ctf_captures",
-    "ctf_returns",
-    "ctf_pickups",
-    "ctf_defends",
-    "ctf_kill_carriers",
-    "ctf_flag_carry_time_s",
-    "scorestreaks_deployed",
-    "scorestreaks_kills",
-    "scorestreaks_assists",
-    "scorestreaks_earned",
-    "scorestreaks_used",
-    "ekia",
-    "player_score",
-    "ctrl_captures",
-    "ctrl_firstbloods",
-    "ctrl_firstdeaths",
-    "ctrl_rounds",
-)
-
-_MAP_SQL = """
-SELECT gps.player_id, gps.team_id, se.id AS season_id, g.mode_id, gm.slug AS mode_slug,
-       t.short_name AS title, g.duration_s,
-       gps.kills, gps.deaths, gps.assists, gps.damage, gps.hill_time,
-       gps.first_bloods, gps.plants, gps.defuses, gps.extras,
-       sum(COALESCE(gps.kills, 0))
-         OVER (PARTITION BY gps.game_id, gps.team_id) AS team_kills_map,
-       sum(COALESCE(gps.hill_time, 0))
-         OVER (PARTITION BY gps.game_id, gps.team_id) AS team_hill_time_map
-FROM game_player_stats gps
-JOIN games g       ON g.id = gps.game_id
-JOIN series s      ON s.id = g.series_id
-JOIN events ev     ON ev.id = s.event_id
-JOIN seasons se    ON se.id = ev.season_id
-JOIN titles t      ON t.id = se.title_id
-JOIN game_modes gm ON gm.id = g.mode_id
-WHERE g.duration_s IS NOT NULL
-"""
-
 
 @dataclass
 class Aggregate:
@@ -242,22 +169,6 @@ class Aggregate:
 Computed = tuple[float, float] | None
 
 
-@dataclass
-class KeyCoverage:
-    """How many of a title's player-map rows carry a real value for one column."""
-
-    rows: int = 0
-    present: int = 0
-    nonzero: int = 0
-
-    @property
-    def tracked(self) -> bool:
-        return self.nonzero >= MIN_NONZERO_ROWS
-
-
-Coverage = dict[str, dict[str, KeyCoverage]]
-
-
 @dataclass(frozen=True)
 class Metric:
     key: str
@@ -276,13 +187,7 @@ class Metric:
 
     def titles(self, coverage: Coverage) -> tuple[str, ...]:
         """Titles whose rows actually carry every source column this metric reads."""
-        found = [
-            title
-            for title in TITLE_ORDER
-            if title in coverage
-            and all(coverage[title].get(src, KeyCoverage()).tracked for src in self.sources)
-        ]
-        return tuple(found)
+        return titles_tracking(coverage, self.sources)
 
     def covers_mode(self, mode_slug: str) -> bool:
         return ALL_MODES in self.modes or mode_slug in self.modes
@@ -1886,136 +1791,62 @@ def catalog_payload(coverage: Coverage, catalog: Iterable[Metric] = CATALOG) -> 
 # ---------- aggregation ----------
 
 
-def _extras_number(extras: dict[str, Any], key: str) -> float | None:
-    raw = extras.get(key)
-    if raw is None or isinstance(raw, bool):
-        return None
-    if isinstance(raw, int | float):
-        value = float(raw)
-    elif isinstance(raw, str):
-        try:
-            value = float(raw)
-        except ValueError:
-            return None
-    else:
-        return None
-    return value if math.isfinite(value) else None
-
-
 @dataclass
 class Loaded:
     aggregates: list[Aggregate]
     coverage: Coverage
 
 
-def _record_coverage(coverage: Coverage, title: str, key: str, value: float | None) -> None:
-    by_key = coverage.setdefault(title, {})
-    cov = by_key.setdefault(key, KeyCoverage())
-    cov.rows += 1
-    if value is not None:
-        cov.present += 1
-        if value != 0.0:
-            cov.nonzero += 1
-
-
-def load(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
-    """One aggregate per (player, season, mode) plus a (player, season, all-modes) row,
-    alongside per-title column coverage measured once per player-map."""
+def fold(rows: Iterable[MapRow], coverage: Coverage) -> Loaded:
+    """Fold player-maps into one aggregate per (player, season, mode) plus a
+    (player, season, all-modes) row. Coverage is measured by the loader and
+    passed through unchanged."""
     buckets: dict[tuple[int, int, int | None], Aggregate] = {}
-    coverage: Coverage = {}
 
-    for row in conn.execute(_MAP_SQL):
-        (
-            player_id,
-            _team_id,
-            season_id,
-            mode_id,
-            mode_slug,
-            title,
-            duration_s,
-            kills,
-            deaths,
-            assists,
-            damage,
-            hill_time,
-            first_bloods,
-            plants,
-            defuses,
-            extras,
-            team_kills_map,
-            team_hill_time_map,
-        ) = row
-
-        extras_dict = cast(dict[str, Any], extras or {})
-        typed = {
-            "kills": kills,
-            "deaths": deaths,
-            "assists": assists,
-            "hill_time": hill_time,
-            "first_bloods": first_bloods,
-            "plants": plants,
-            "defuses": defuses,
-            "damage": damage,
-        }
-        row_title = cast(str, title)
-
-        # Coverage is counted once per player-map, before the row is folded into
-        # both its mode slice and the all-modes slice.
-        for name, raw in typed.items():
-            _record_coverage(
-                coverage, row_title, name, None if raw is None else float(cast(int, raw))
-            )
-        for name in (*NUMERIC_EXTRAS, "avg_kill_dist_m"):
-            _record_coverage(coverage, row_title, name, _extras_number(extras_dict, name))
-
-        for slice_mode_id, slice_slug in (
-            (cast(int, mode_id), cast(str, mode_slug)),
-            (None, ALL_MODES),
-        ):
-            key = (cast(int, player_id), cast(int, season_id), slice_mode_id)
+    for row in rows:
+        for slice_mode_id, slice_slug in ((row.mode_id, row.mode_slug), (None, ALL_MODES)):
+            key = (row.player_id, row.season_id, slice_mode_id)
             agg = buckets.get(key)
             if agg is None:
                 agg = Aggregate(
-                    player_id=cast(int, player_id),
-                    season_id=cast(int, season_id),
+                    player_id=row.player_id,
+                    season_id=row.season_id,
                     mode_id=slice_mode_id,
                     mode_slug=slice_slug,
-                    title=cast(str, title),
+                    title=row.title,
                 )
                 buckets[key] = agg
 
             agg.maps += 1
-            agg.duration_s += float(cast(int, duration_s))
-            agg.team_kills += float(cast(int, team_kills_map) or 0)
-            agg.team_hill_time += float(cast(int, team_hill_time_map) or 0)
+            agg.duration_s += row.duration_s
+            agg.team_kills += row.team_kills
+            agg.team_hill_time += row.team_hill_time
 
             # Damage is missing on most non-BO4 maps, so its rate needs a
             # duration total covering only the maps that reported it.
-            if damage is not None:
-                agg.damage_duration_s += float(cast(int, duration_s))
+            if "damage" in row.values:
+                agg.damage_duration_s += row.duration_s
 
-            for name, raw in typed.items():
-                if raw is None:
-                    continue
-                agg.sums[name] = agg.sums.get(name, 0.0) + float(cast(int, raw))
-                agg.present_maps[name] = agg.present_maps.get(name, 0) + 1
-
-            for name in NUMERIC_EXTRAS:
-                value = _extras_number(extras_dict, name)
-                if value is None:
+            for name, value in row.values.items():
+                if name == KILL_DIST:
                     continue
                 agg.sums[name] = agg.sums.get(name, 0.0) + value
                 agg.present_maps[name] = agg.present_maps.get(name, 0) + 1
 
-            # Per-map average, so it is re-weighted by that map's kills.
-            dist = _extras_number(extras_dict, "avg_kill_dist_m")
-            map_kills = float(cast(int, kills)) if kills is not None else 0.0
+            # A per-map average, so it is re-weighted by that map's kills.
+            dist = row.values.get(KILL_DIST)
+            map_kills = row.get("kills")
             if dist is not None and map_kills > 0:
                 agg.kill_dist_weighted += dist * map_kills
                 agg.kill_dist_kills += map_kills
-                agg.present_maps["avg_kill_dist_m"] = agg.present_maps.get("avg_kill_dist_m", 0) + 1
+                agg.present_maps[KILL_DIST] = agg.present_maps.get(KILL_DIST, 0) + 1
 
     return Loaded(aggregates=list(buckets.values()), coverage=coverage)
+
+
+def load(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
+    loaded = load_map_rows(conn)
+    return fold(loaded.rows, loaded.coverage)
 
 
 # ---------- kill feed (Phase B): trades ----------
@@ -2192,7 +2023,7 @@ def compute_map_clutch_adv(
     return counts
 
 
-_RECON_MAPS_SQL = """
+RECON_MAPS_SQL = """
 SELECT r.game_id, r.player_id, se.id AS season_id, g.mode_id, gm.slug, r.title, g.duration_s
 FROM kill_feed_recon r
 JOIN games g       ON g.id = r.game_id
@@ -2221,14 +2052,14 @@ WHERE gm.slug = 'search-and-destroy'
 ORDER BY gr.game_id, gr.round
 """
 
-_FEED_DEATHS_SQL = """
+FEED_DEATHS_SQL = """
 SELECT game_id, round, time_ms, seq, victim_id, killer_id
 FROM kill_events
 WHERE death_kind = 'normal'
 ORDER BY game_id, round, time_ms, seq
 """
 
-_FEED_TEAMS_SQL = """
+FEED_TEAMS_SQL = """
 SELECT gps.game_id, gps.player_id, gps.team_id
 FROM game_player_stats gps
 WHERE EXISTS (SELECT 1 FROM kill_events k WHERE k.game_id = gps.game_id)
@@ -2247,12 +2078,12 @@ def augment_with_kill_feed(conn: psycopg.Connection[tuple[object, ...]], loaded:
     index = {(a.player_id, a.season_id, a.mode_id): a for a in loaded.aggregates}
 
     team_of: dict[int, dict[int, int]] = defaultdict(dict)
-    for row in conn.execute(_FEED_TEAMS_SQL):
+    for row in conn.execute(FEED_TEAMS_SQL):
         game_id, player_id, team_id = cast(int, row[0]), cast(int, row[1]), cast(int, row[2])
         team_of[game_id][player_id] = team_id
 
     deaths_by_game: dict[int, list[FeedDeath]] = defaultdict(list)
-    for row in conn.execute(_FEED_DEATHS_SQL):
+    for row in conn.execute(FEED_DEATHS_SQL):
         game_id = cast(int, row[0])
         deaths_by_game[game_id].append(
             (
@@ -2266,7 +2097,7 @@ def augment_with_kill_feed(conn: psycopg.Connection[tuple[object, ...]], loaded:
 
     # Reconciled player-maps, grouped by game so each game is scored once.
     recon: dict[int, list[tuple[int, int, int, str, str, float]]] = defaultdict(list)
-    for row in conn.execute(_RECON_MAPS_SQL):
+    for row in conn.execute(RECON_MAPS_SQL):
         game_id, player_id, season_id = cast(int, row[0]), cast(int, row[1]), cast(int, row[2])
         mode_id, mode_slug, title = cast(int, row[3]), cast(str, row[4]), cast(str, row[5])
         duration_s = float(cast(int, row[6]))
@@ -2282,12 +2113,12 @@ def augment_with_kill_feed(conn: psycopg.Connection[tuple[object, ...]], loaded:
             counts = per_player.get(player_id, zero)
             # Coverage once per player-map, so a title without a feed stays untracked.
             for key in KF_KEYS:
-                _record_coverage(loaded.coverage, title, key, counts[key])
+                record_coverage(loaded.coverage, title, key, counts[key])
             is_snd = mode_slug == MODE_SND and game_id in clutch_by_game
             cc = clutch.get(player_id, {}) if is_snd else {}
             if is_snd:
                 for key in CLUTCH_KEYS:
-                    _record_coverage(loaded.coverage, title, key, cc.get(key, 0.0))
+                    record_coverage(loaded.coverage, title, key, cc.get(key, 0.0))
             for slice_mode in (mode_id, None):
                 agg = index.get((player_id, season_id, slice_mode))
                 if agg is None:
@@ -3108,7 +2939,7 @@ def build_rounds_overview(conn: psycopg.Connection[tuple[object, ...]]) -> dict[
     per-player metrics use, over SnD games with a resolvable round winner.
     """
     team_of: dict[int, dict[int, int]] = defaultdict(dict)
-    for row in conn.execute(_FEED_TEAMS_SQL):
+    for row in conn.execute(FEED_TEAMS_SQL):
         team_of[cast(int, row[0])][cast(int, row[1])] = cast(int, row[2])
 
     # Per-game death timelines, and per (year, title, mode) group meta.

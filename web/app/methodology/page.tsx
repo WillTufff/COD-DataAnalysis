@@ -9,8 +9,10 @@ import {
   getMetricCatalog,
   getModeWeights,
   getPaceByMode,
+  getRatingComparison,
   getSeasonKdSpread,
   getWinprobArtifact,
+  latestRatingRun,
   latestRun,
   type PaceCell,
 } from "@/lib/analytics";
@@ -32,7 +34,7 @@ const MODEL_LABEL: Record<string, string> = {
   elo: "Elo",
   glicko2: "Glicko-2",
   winprob: "winprob_v1",
-  player_rating: "player_rating_v1",
+  player_rating: "player rating",
 };
 
 const MODE_ORDER = [
@@ -111,17 +113,82 @@ function PaceTable({ cells }: { cells: PaceCell[] }) {
   );
 }
 
+// Per-event capture gaps, quoted from the source archive's own notes. Static
+// because the archive is: these are losses at capture time, invisible to any
+// row count taken afterwards.
+const EVENT_LOSSES: {
+  event: string;
+  captured: string;
+  note: string;
+  severe?: boolean;
+}[] = [
+  {
+    event: "2017 CWL Champs",
+    captured: "297 of 298",
+    note: "Hardware failure in one Search & Destroy map; basic stats recovered from video, the complex ones for four rounds were not.",
+  },
+  {
+    event: "2018 Pro League S1",
+    captured: "503 of 504",
+    note: "One Capture the Flag map lost in week 6.",
+  },
+  {
+    event: "2018 Atlanta",
+    captured: "6 maps lost",
+    note: "One CTF map on day 1, five more to a data-server crash on day 2.",
+  },
+  {
+    event: "2018 Birmingham",
+    captured: "164 maps, ~80 lost",
+    note: "Roughly a third of the event never captured. Read anything scoped to this event with that in mind.",
+    severe: true,
+  },
+  {
+    event: "2018 Seattle",
+    captured: "3 maps lost",
+    note: "One Hardpoint on day 1, a Hardpoint and a Search & Destroy on day 2.",
+  },
+  {
+    event: "2018 Champs",
+    captured: "295 of 296",
+    note: "One Hardpoint map from the last pool-play series of day 2.",
+  },
+  {
+    event: "2019 Pro League Qualifier",
+    captured: "317 of ~400",
+    note: "The LAN data system was in beta and lost a large share of the event.",
+    severe: true,
+  },
+  {
+    event: "2019 London",
+    captured: "first series block lost",
+    note: "Site power issues on the Friday.",
+  },
+  {
+    event: "2019 Champs",
+    captured: "296 of 300",
+    note: "Four maps missing.",
+  },
+];
+
 export default async function MethodologyPage() {
-  const [eloRun, glickoRun, eraRun, insightsRun, ratingRun, winprobRun, metricRun] =
-    await Promise.all([
-      latestRun("elo"),
-      latestRun("glicko2"),
-      latestRun("era_adjust"),
-      latestRun("insights"),
-      latestRun("player_rating"),
-      latestRun("winprob"),
-      latestRun("metric_layer"),
-    ]);
+  const [
+    eloRun,
+    glickoRun,
+    eraRun,
+    insightsRun,
+    ratingRun,
+    winprobRun,
+    metricRun,
+  ] = await Promise.all([
+    latestRun("elo"),
+    latestRun("glicko2"),
+    latestRun("era_adjust"),
+    latestRun("insights"),
+    latestRatingRun(),
+    latestRun("winprob"),
+    latestRun("metric_layer"),
+  ]);
   const metricCatalog = metricRun ? await getMetricCatalog(metricRun.id) : null;
   const seriesCards = await getBacktestCards(
     [eloRun?.id, glickoRun?.id, winprobRun?.id].filter(
@@ -138,6 +205,13 @@ export default async function MethodologyPage() {
       getCoverage(),
       getPaceByMode(),
     ]);
+  const comparison = ratingRun ? await getRatingComparison(ratingRun.id) : null;
+  // Stated as a share so the sentence cannot drift from the artifact.
+  const brierGain = comparison
+    ? 1 -
+      comparison.overall[comparison.published].brier /
+        comparison.overall[comparison.baseline].brier
+    : null;
   const reconciliation = await getKillFeedReconciliation();
   // Qualified all-mode cohort sizes per title (≥ 8 maps), for the era section.
   const cohorts = eraRun ? await getSeasonKdSpread(eraRun.id, 8) : [];
@@ -238,7 +312,10 @@ export default async function MethodologyPage() {
             paper): each series is its own rating period, τ=0.5, so rating
             deviation (RD) grows when a team is idle and shrinks with evidence.
             That is the ±RD shown on{" "}
-            <a className="underline" href="/ratings">/ratings</a>.
+            <Link className="underline" href="/teams">
+              /teams
+            </Link>
+            .
           </p>
           <p id="glicko2">
             Series whose deciding map is missing from the archive are left
@@ -250,21 +327,20 @@ export default async function MethodologyPage() {
 
       <section id="player-rating" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
-          Open player rating (player_rating_v1)
+          Open player rating
         </h2>
         <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
           <p>
             The composite rating shown on{" "}
-            <a className="underline" href="/ratings">
-              /ratings
-            </a>{" "}
+            <Link className="underline" href="/players">
+              /players
+            </Link>{" "}
             is built in four steps, each reproducible from the published code:
           </p>
           <ol className="list-decimal space-y-2 pl-5 marker:font-mono marker:text-ink-muted">
             <li>
               For each (season × mode), every map is one observation: the
-              difference between the two teams’ per-10-minute stat profiles
-              (kills, deaths, assists, mode objective), standardized and
+              difference between the two teams’ stat profiles, standardized and
               regressed against which team won the map (L2 logistic, λ=1, fit by
               IRLS in ~40 lines of numpy). Each coefficient is how much a one-SD
               edge in that stat was worth toward winning a map in that title and
@@ -284,6 +360,15 @@ export default async function MethodologyPage() {
               averages 1.00. The ±sd is a 200-draw map-resampling bootstrap.
             </li>
           </ol>
+          <p>
+            Which stats step 1 reads is itself measured, not declared. Every
+            feature names the source columns it needs, and a cohort keeps it only
+            if that title actually populated them — so WWII Hardpoint uses time
+            per life where Black Ops 4 uses hill captures, and Search &amp;
+            Destroy is measured per round rather than per minute. Where a
+            reconciled kill feed exists, trades enter too. Whether that helps is
+            a question with an answer, published below.
+          </p>
           <p>
             One reading caveat: in respawn modes a team’s kills mirror its
             opponent’s deaths almost exactly, so those two coefficients are
@@ -336,6 +421,134 @@ export default async function MethodologyPage() {
             </p>
           </div>
         ))}
+
+        {comparison && (
+          <div className="mt-4 border border-hairline bg-surface p-4">
+            <h3 className="font-display text-xl font-semibold uppercase">
+              Does adding intangibles help?
+            </h3>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-secondary">
+              Three feature sets, scored walk-forward on the{" "}
+              {comparison.common_maps.toLocaleString()} maps every one of them
+              predicts — versions have different data requirements, and comparing
+              raw totals would let a version look better by quietly predicting an
+              easier subset. v{comparison.baseline} is the original box-score
+              model; v2.0.0 adds the measured per-mode metric features; v2.1.0
+              adds kill-feed trades where a reconciled feed exists.
+              {brierGain !== null && (
+                <>
+                  {" "}
+                  The published v{comparison.published} cuts Brier score{" "}
+                  {(brierGain * 100).toFixed(0)}% against the baseline.
+                </>
+              )}
+            </p>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full max-w-2xl text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Version</th>
+                    <th className="py-2 pr-4 text-right font-normal">Brier</th>
+                    <th className="py-2 pr-4 text-right font-normal">Log loss</th>
+                    <th className="py-2 pr-4 text-right font-normal">Accuracy</th>
+                    <th className="py-2 text-right font-normal">Δ Brier</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.versions.map((v) => {
+                    const s = comparison.overall[v];
+                    const d = comparison.delta_vs_baseline[v]?.brier ?? 0;
+                    return (
+                      <tr key={v} className="border-b border-hairline/60">
+                        <td className="py-2 pr-4 font-mono text-xs">
+                          v{v}
+                          {v === comparison.published && (
+                            <span className="ml-2 text-accent">published</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {s.brier.toFixed(4)}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {s.log_loss.toFixed(4)}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {(s.accuracy * 100).toFixed(1)}%
+                        </td>
+                        <td className="py-2 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {v === comparison.baseline
+                            ? "—"
+                            : `${d > 0 ? "+" : ""}${d.toFixed(4)}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <h4 className="mt-6 eyebrow text-ink-secondary">By cohort</h4>
+            <p className="mt-2 max-w-3xl text-xs text-ink-muted">
+              &ldquo;v{comparison.published} wins&rdquo; is a weaker claim than
+              where it wins. Lower Brier is better; the cohorts where the
+              published version does not beat the baseline are marked, and they
+              stay on the page.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full max-w-2xl text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Cohort</th>
+                    <th className="py-2 pr-4 text-right font-normal">Maps</th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      v{comparison.baseline}
+                    </th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      v{comparison.published}
+                    </th>
+                    <th className="py-2 text-right font-normal">Δ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.by_cohort.map((c) => {
+                    const base = c.versions[comparison.baseline];
+                    const pub = c.versions[comparison.published];
+                    if (!base || !pub) return null;
+                    const d = pub.brier - base.brier;
+                    return (
+                      <tr
+                        key={`${c.season_id}-${c.mode}`}
+                        className="border-b border-hairline/60"
+                      >
+                        <td className="py-2 pr-4 whitespace-nowrap">
+                          {c.year} {c.title} · {c.mode}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {c.n_maps}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {base.brier.toFixed(4)}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {pub.brier.toFixed(4)}
+                        </td>
+                        <td
+                          className={`py-2 text-right font-mono text-xs tabular-nums ${
+                            d > 0 ? "text-ink" : "text-ink-secondary"
+                          }`}
+                        >
+                          {d > 0 ? "+" : ""}
+                          {d.toFixed(4)}
+                          {d > 0 && " worse"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
 
       <section id="winprob" className="mt-12">
@@ -515,6 +728,57 @@ export default async function MethodologyPage() {
             them, so those cells stay empty.
           </p>
         </div>
+
+        <h3 className="mt-8 eyebrow text-ink-secondary">
+          Per-event data loss
+        </h3>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-secondary">
+          The archive records what it failed to capture, and those gaps are not
+          uniform — two events lost enough that any per-event comparison
+          involving them is unsafe. Everything below is quoted from the source
+          archive&rsquo;s own notes rather than inferred from row counts.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full max-w-3xl text-left text-sm">
+            <thead>
+              <tr className="border-b border-hairline text-xs text-ink-muted">
+                <th className="py-2 pr-4 font-normal">Event</th>
+                <th className="py-2 pr-4 font-normal">Captured</th>
+                <th className="py-2 font-normal">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {EVENT_LOSSES.map((e) => (
+                <tr
+                  key={e.event}
+                  className={`border-b border-hairline/60 align-top ${
+                    e.severe ? "text-ink" : "text-ink-secondary"
+                  }`}
+                >
+                  <td className="py-2 pr-4 whitespace-nowrap">
+                    {e.event}
+                    {e.severe && (
+                      <span className="ml-2 font-mono text-[10px] text-accent">
+                        major
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-4 font-mono text-xs whitespace-nowrap tabular-nums">
+                    {e.captured}
+                  </td>
+                  <td className="py-2 text-xs">{e.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+          Forfeited and tied maps are present in the source data and are kept, so
+          a handful of maps have unrepresentative scorelines by design. Of the
+          typed columns, Black Ops 4 damage is recorded on about 83% of its
+          player-maps, and every damage metric uses only those rows as its
+          denominator.
+        </p>
       </section>
 
       <section id="rounds" className="mt-12">
@@ -653,7 +917,9 @@ export default async function MethodologyPage() {
                       )}
                     </td>
                     <td className="py-2 pr-3 font-mono text-xs text-ink-secondary">
-                      {m.titles.join(", ") || "—"}
+                      {m.titles.join(", ") || (
+                        <span className="text-ink-muted">none reached threshold</span>
+                      )}
                     </td>
                     <td className="py-2 font-mono text-xs text-ink-secondary">
                       {m.min_denom} {m.denom_kind}

@@ -32,14 +32,32 @@ export type ModelRun = {
   createdAt: Date | null;
 };
 
-export async function latestRun(model: string): Promise<ModelRun | null> {
+// The rating is fitted at several feature-set versions on every run — the
+// box-score baseline and the intangible-weighted models — so "the newest run"
+// is not a well-defined answer for it. The published version is pinned here
+// and must match player_rating.PUBLISHED_VERSION in the analytics package;
+// the other versions stay queryable as backtest baselines.
+export const PUBLISHED_RATING_VERSION = "2.1.0";
+
+export async function latestRun(
+  model: string,
+  version?: string,
+): Promise<ModelRun | null> {
   const rows = await db
     .select()
     .from(modelRuns)
-    .where(eq(modelRuns.model, model))
+    .where(
+      version === undefined
+        ? eq(modelRuns.model, model)
+        : and(eq(modelRuns.model, model), eq(modelRuns.version, version)),
+    )
     .orderBy(desc(modelRuns.createdAt), desc(modelRuns.id))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export function latestRatingRun(): Promise<ModelRun | null> {
+  return latestRun("player_rating", PUBLISHED_RATING_VERSION);
 }
 
 export function playerSlug(handle: string): string {
@@ -242,80 +260,136 @@ export async function getPaceByMode(): Promise<PaceCell[]> {
   }));
 }
 
-// ---------- Player-season explorer (/players) ----------
+// ---------- Player index ----------
 
-export type ExplorerFilters = {
-  year?: number;
-  modeSlug?: string; // undefined = all modes combined (mode_id IS NULL rows)
-  minMaps: number;
-  sort: "kd_z" | "kd_raw" | "kd_pctl" | "maps" | "engagement_z" | "obj_z";
-  dir: "asc" | "desc";
-  q?: string; // handle substring
-  limit: number;
-};
-
-export type ExplorerRow = {
+export type PlayerIndexRow = {
   playerId: number;
   handle: string;
   slug: string;
-  year: number;
-  title: string;
-  mode: string | null;
-  mapsPlayed: number;
-  kdRaw: number | null;
-  kdZ: number | null;
-  kdPctl: number | null;
-  engagementZ: number | null;
-  objZ: number | null;
-  completeness: number;
+  maps: number; // career maps, all modes combined
+  seasons: number;
+  firstYear: number;
+  lastYear: number;
+  teamCount: number;
+  latestTeam: string | null;
+  bestRating: number | null; // best qualified season, null if none qualify
+  bestRatingYear: number | null;
+  bestRatingTitle: string | null;
 };
 
-const EXPLORER_SORT_COLS: Record<ExplorerFilters["sort"], string> = {
-  kd_z: "psa.kd_z",
-  kd_raw: "psa.kd_raw",
-  kd_pctl: "psa.kd_pctl",
-  maps: "psa.maps_played",
-  engagement_z: "psa.engagement_z",
-  obj_z: "psa.obj_z",
+export type PlayerIndexSort =
+  | "handle"
+  | "maps"
+  | "seasons"
+  | "teams"
+  | "rating"
+  | "last_year";
+
+export type PlayerIndexQuery = {
+  q?: string; // handle substring
+  sort: PlayerIndexSort;
+  dir: "asc" | "desc";
 };
 
-export async function queryPlayerSeasons(
+// Sorting is by whitelisted key rather than raw input: the column has to be
+// interpolated unquoted, so it must never be caller-controlled text.
+const PLAYER_INDEX_SORT_COLS: Record<PlayerIndexSort, string> = {
+  handle: "p.handle",
+  maps: "c.maps",
+  seasons: "c.seasons",
+  teams: "r.team_count",
+  rating: "b.rating",
+  last_year: "c.last_year",
+};
+
+/** Matching players, for sizing the pager before the page itself is fetched. */
+export async function countPlayerIndex(
   eraRunId: number,
-  f: ExplorerFilters,
-): Promise<ExplorerRow[]> {
-  const sortCol = EXPLORER_SORT_COLS[f.sort];
+  q: Pick<PlayerIndexQuery, "q">,
+): Promise<number> {
   const rows = await db.execute(sql`
-    SELECT psa.player_id, p.handle, se.year, t.short_name AS title,
-           gm.name AS mode, psa.maps_played, psa.kd_raw, psa.kd_z, psa.kd_pctl,
-           psa.engagement_z, psa.obj_z, psa.completeness
+    SELECT COUNT(DISTINCT psa.player_id) AS n
     FROM player_season_adjusted psa
     JOIN players p ON p.id = psa.player_id
-    JOIN seasons se ON se.id = psa.season_id
-    JOIN titles t ON t.id = se.title_id
-    LEFT JOIN game_modes gm ON gm.id = psa.mode_id
-    WHERE psa.run_id = ${eraRunId}
-      AND psa.maps_played >= ${f.minMaps}
-      AND ${f.modeSlug ? sql`gm.slug = ${f.modeSlug}` : sql`psa.mode_id IS NULL`}
-      AND ${f.year ? sql`se.year = ${f.year}` : sql`TRUE`}
-      AND ${f.q ? sql`p.handle ILIKE ${"%" + f.q + "%"}` : sql`TRUE`}
-    ORDER BY ${sql.raw(sortCol)} ${sql.raw(f.dir === "asc" ? "ASC" : "DESC")} NULLS LAST,
-             p.handle ASC
-    LIMIT ${f.limit}
+    WHERE psa.run_id = ${eraRunId} AND psa.mode_id IS NULL
+      AND ${q.q ? sql`p.handle ILIKE ${"%" + q.q + "%"}` : sql`TRUE`}
   `);
-  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+  return Number((rows as unknown as { n: unknown }[])[0]?.n ?? 0);
+}
+
+/**
+ * One row per player with career aggregates, paged. Career totals come from
+ * the era run's all-modes rows; the rating column reports each player's best
+ * season at the same 30-map minimum the rating board uses, so players who
+ * never cleared it read as "—" rather than being ranked on a handful of maps.
+ *
+ * The caller is expected to have clamped `paging` against `countPlayerIndex`
+ * first: this returns whatever the offset lands on, including nothing.
+ */
+export async function queryPlayerIndex(
+  eraRunId: number,
+  ratingRunId: number,
+  q: PlayerIndexQuery,
+  paging: { offset: number; limit: number },
+  minRatingMaps = 30,
+): Promise<PlayerIndexRow[]> {
+  const sortCol = PLAYER_INDEX_SORT_COLS[q.sort];
+  const dir = q.dir === "asc" ? "ASC" : "DESC";
+  const result = await db.execute(sql`
+    WITH career AS (
+      SELECT psa.player_id,
+             SUM(psa.maps_played)::int AS maps,
+             COUNT(DISTINCT psa.season_id)::int AS seasons,
+             MIN(se.year)::int AS first_year,
+             MAX(se.year)::int AS last_year
+      FROM player_season_adjusted psa
+      JOIN seasons se ON se.id = psa.season_id
+      WHERE psa.run_id = ${eraRunId} AND psa.mode_id IS NULL
+      GROUP BY psa.player_id
+    ), best AS (
+      SELECT DISTINCT ON (psa.player_id)
+             psa.player_id, psa.rating,
+             se.year AS rating_year, t.short_name AS rating_title
+      FROM player_season_adjusted psa
+      JOIN seasons se ON se.id = psa.season_id
+      JOIN titles t ON t.id = se.title_id
+      WHERE psa.run_id = ${ratingRunId} AND psa.mode_id IS NULL
+        AND psa.rating IS NOT NULL AND psa.maps_played >= ${minRatingMaps}
+      ORDER BY psa.player_id, psa.rating DESC
+    ), rosters AS (
+      SELECT rs.player_id,
+             COUNT(DISTINCT rs.team_id)::int AS team_count,
+             (ARRAY_AGG(tm.name ORDER BY rs.start_date DESC))[1] AS latest_team
+      FROM roster_stints rs
+      JOIN teams tm ON tm.id = rs.team_id
+      GROUP BY rs.player_id
+    )
+    SELECT p.id AS player_id, p.handle,
+           c.maps, c.seasons, c.first_year, c.last_year,
+           r.team_count, r.latest_team,
+           b.rating, b.rating_year, b.rating_title
+    FROM players p
+    JOIN career c ON c.player_id = p.id
+    LEFT JOIN rosters r ON r.player_id = p.id
+    LEFT JOIN best b ON b.player_id = p.id
+    WHERE ${q.q ? sql`p.handle ILIKE ${"%" + q.q + "%"}` : sql`TRUE`}
+    ORDER BY ${sql.raw(sortCol)} ${sql.raw(dir)} NULLS LAST, p.handle ASC
+    LIMIT ${paging.limit} OFFSET ${paging.offset}
+  `);
+  const raw = result as unknown as Record<string, unknown>[];
+  return raw.map((r) => ({
     playerId: Number(r.player_id),
     handle: String(r.handle),
     slug: playerSlug(String(r.handle)),
-    year: Number(r.year),
-    title: String(r.title),
-    mode: r.mode === null ? null : String(r.mode),
-    mapsPlayed: Number(r.maps_played),
-    kdRaw: r.kd_raw === null ? null : Number(r.kd_raw),
-    kdZ: r.kd_z === null ? null : Number(r.kd_z),
-    kdPctl: r.kd_pctl === null ? null : Number(r.kd_pctl),
-    engagementZ: r.engagement_z === null ? null : Number(r.engagement_z),
-    objZ: r.obj_z === null ? null : Number(r.obj_z),
-    completeness: Number(r.completeness),
+    maps: Number(r.maps),
+    seasons: Number(r.seasons),
+    firstYear: Number(r.first_year),
+    lastYear: Number(r.last_year),
+    teamCount: r.team_count === null ? 0 : Number(r.team_count),
+    latestTeam: r.latest_team === null ? null : String(r.latest_team),
+    bestRating: r.rating === null ? null : Number(r.rating),
+    bestRatingYear: r.rating_year === null ? null : Number(r.rating_year),
+    bestRatingTitle: r.rating_title === null ? null : String(r.rating_title),
   }));
 }
 
@@ -959,25 +1033,6 @@ export async function getSeasonKdSpread(
   return [...byYear.values()];
 }
 
-// K/D z-scores of the full cohort matching the explorer filters (no limit).
-export async function getCohortZValues(
-  eraRunId: number,
-  f: { year?: number; modeSlug?: string; minMaps: number },
-): Promise<number[]> {
-  const rows = await db.execute(sql`
-    SELECT psa.kd_z
-    FROM player_season_adjusted psa
-    JOIN seasons se ON se.id = psa.season_id
-    LEFT JOIN game_modes gm ON gm.id = psa.mode_id
-    WHERE psa.run_id = ${eraRunId}
-      AND psa.maps_played >= ${f.minMaps}
-      AND ${f.modeSlug ? sql`gm.slug = ${f.modeSlug}` : sql`psa.mode_id IS NULL`}
-      AND ${f.year ? sql`se.year = ${f.year}` : sql`TRUE`}
-      AND psa.kd_z IS NOT NULL
-  `);
-  return (rows as unknown as Record<string, unknown>[]).map((r) => Number(r.kd_z));
-}
-
 export async function getWinprobArtifact(
   winprobRunId: number,
 ): Promise<WinprobArtifact | null> {
@@ -1103,13 +1158,10 @@ export type MetricQuery = {
   modeSlug?: string;
   qualifiedOnly: boolean;
   dir: "asc" | "desc";
-  limit: number;
 };
 
-export async function queryMetric(
-  metricRunId: number,
-  q: MetricQuery,
-): Promise<MetricRow[]> {
+/** The filter shared by the row query and its count, so the two cannot drift. */
+function metricConditions(metricRunId: number, q: MetricQuery) {
   const conditions = [
     eq(playerMetricSeason.runId, metricRunId),
     eq(playerMetricSeason.metric, q.metric),
@@ -1121,7 +1173,30 @@ export async function queryMetric(
     conditions.push(sql`${playerMetricSeason.modeId} IS NULL`);
   }
   if (q.qualifiedOnly) conditions.push(eq(playerMetricSeason.qualified, true));
+  return and(...conditions);
+}
 
+/** Matching rows, for sizing the pager before the page itself is fetched. */
+export async function countMetric(
+  metricRunId: number,
+  q: MetricQuery,
+): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(playerMetricSeason)
+    .innerJoin(players, eq(players.id, playerMetricSeason.playerId))
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(metricConditions(metricRunId, q));
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function queryMetric(
+  metricRunId: number,
+  q: MetricQuery,
+  paging: { offset: number; limit: number },
+): Promise<MetricRow[]> {
   const rows = await db
     .select({
       playerId: playerMetricSeason.playerId,
@@ -1140,11 +1215,15 @@ export async function queryMetric(
     .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
     .innerJoin(titles, eq(titles.id, seasons.titleId))
     .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
-    .where(and(...conditions))
+    .where(metricConditions(metricRunId, q))
+    // Ties are broken on handle so paging is stable: without a total order,
+    // the same row can appear on two pages or on none.
     .orderBy(
       q.dir === "asc" ? playerMetricSeason.value : desc(playerMetricSeason.value),
+      players.handle,
     )
-    .limit(q.limit);
+    .limit(paging.limit)
+    .offset(paging.offset);
   return rows.map((r) => ({ ...r, slug: playerSlug(r.handle) }));
 }
 
@@ -1332,6 +1411,48 @@ export async function getPlayerMetrics(
         eq(playerMetricSeason.playerId, playerId),
       ),
     );
+}
+
+// ---------- Rating version comparison ----------
+
+export type RatingScore = {
+  n: number;
+  brier: number;
+  log_loss: number;
+  accuracy: number;
+};
+
+export type RatingComparisonCohort = {
+  season_id: number;
+  year: number;
+  title: string;
+  mode: string;
+  n_maps: number;
+  versions: Record<string, RatingScore>;
+};
+
+export type RatingComparison = {
+  versions: string[];
+  baseline: string;
+  published: string;
+  common_maps: number;
+  maps_predicted: Record<string, number>;
+  overall: Record<string, RatingScore>;
+  delta_vs_baseline: Record<string, { brier: number; log_loss: number }>;
+  by_cohort: RatingComparisonCohort[];
+};
+
+export async function getRatingComparison(
+  ratingRunId: number,
+): Promise<RatingComparison | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'rating_model_comparison'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | RatingComparison
+    | undefined;
+  return payload ?? null;
 }
 
 export type TeamMetricValue = {

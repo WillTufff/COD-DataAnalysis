@@ -292,24 +292,6 @@ export const careerCurves = pgTable(
   (t) => [primaryKey({ columns: [t.runId, t.playerId, t.ageOrSeq] })],
 );
 
-export const playerArchetypes = pgTable(
-  "player_archetypes",
-  {
-    runId: integer("run_id")
-      .notNull()
-      .references(() => modelRuns.id),
-    playerId: integer("player_id")
-      .notNull()
-      .references(() => players.id),
-    seasonId: integer("season_id")
-      .notNull()
-      .references(() => seasons.id),
-    archetype: text("archetype").notNull(),
-    loadings: jsonb("loadings"),
-  },
-  (t) => [primaryKey({ columns: [t.runId, t.playerId, t.seasonId] })],
-);
-
 export const insights = pgTable("insights", {
   id: serial("id").primaryKey(),
   runId: integer("run_id").references(() => modelRuns.id),

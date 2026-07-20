@@ -86,7 +86,7 @@ def outliers(conn: psycopg.Connection[tuple[object, ...]], era_run: int) -> list
                 pid,
                 "outlier",
                 f"{handle}'s {year} {scope}K/D of {kd:.2f} sat {abs(z):.1f} standard "
-                f"deviations {'above' if z > 0 else 'below'} the {title} cohort — "
+                f"deviations {'above' if z > 0 else 'below'} the {title} cohort, "
                 f"among the {direction} qualified seasons of that era.",
                 {
                     "season_year": year,
@@ -166,8 +166,8 @@ def milestones(conn: psycopg.Connection[tuple[object, ...]], elo_run: int) -> li
                 "player",
                 pid,
                 "milestone",
-                f"{handle} logged {maps} career maps in the CWL archive — past the "
-                f"{threshold}-map mark, a top-volume career of the 2017–2019 era.",
+                f"{handle} logged {maps} career maps in the CWL archive, past the "
+                f"{threshold}-map mark.",
                 {"career_maps": maps, "threshold": threshold},
                 0.35 + min(maps / 2000.0, 0.3),
             )
@@ -229,8 +229,7 @@ def era_context(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
                     "era_context",
                     f"League-wide {mode} engagement pace {word} {abs(change) * 100:.0f}% "
                     f"from {y1} {t1} to {y2} {t2} "
-                    f"({p1:.1f} → {p2:.1f} kills+deaths per player per 10 min) — raw "
-                    f"stats across these titles are not comparable without adjustment.",
+                    f"({p1:.1f} → {p2:.1f} kills+deaths per player per 10 min).",
                     {
                         "mode": mode,
                         "from": {"year": y1, "title": t1, "pace": round(p1, 2)},
@@ -299,10 +298,18 @@ def what_wins(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list
     out = []
     for cohort in payload["cohorts"]:
         w = cohort["weights"]
-        # Respawn team kills mirror opponent deaths, so the two columns are
-        # near-collinear and ridge splits them; read them jointly as slaying.
-        slay = (abs(w["kills_p10"]) + abs(w["deaths_p10"])) / 2.0
-        obj = max(float(w["obj_p10"]), 0.0)
+        # Which features are the slaying pair is recorded by the model, because
+        # feature sets differ per cohort — SnD counts kills and deaths per round,
+        # respawn modes per 10 minutes. Team kills mirror opponent deaths, so the
+        # pair is near-collinear and ridge splits it; read them jointly.
+        slaying = cohort.get("slaying_features") or ["kills_p10", "deaths_p10"]
+        others = [k for k in w if k not in slaying]
+        if not slaying or not others:
+            continue
+        slay = sum(abs(float(w[k])) for k in slaying) / len(slaying)
+        # Everything the cohort measured beyond the gunfight, by magnitude: a
+        # first-death rate earns its weight through a negative coefficient.
+        obj = sum(abs(float(w[k])) for k in others) / len(others)
         if slay <= 0.0:
             continue
         ratio = obj / slay
@@ -320,7 +327,7 @@ def what_wins(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list
         else:
             reading = (
                 f"objective play and slaying carried nearly equal weight "
-                f"({ratio:.1f}x) — balanced map-win drivers"
+                f"({ratio:.1f}x)"
             )
         out.append(
             Atom(
@@ -376,7 +383,7 @@ def rating_top(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> lis
                 pid,
                 "rating_top",
                 f"{handle}'s {year} {title} season rates {rating:.2f} ± {sd:.2f} on the "
-                f"open player rating — the #{rank} qualified season in the archive "
+                f"open player rating, the #{rank} qualified season in the archive "
                 f"(league average 1.00).",
                 {
                     "year": year,
@@ -418,10 +425,9 @@ def model_null(
         )
     else:
         headline = (
-            f"Momentum, tested: adding recent form and head-to-head history to "
-            f"Glicko-2 did not improve series prediction (Brier {wp_brier:.4f} vs "
-            f"{gl_brier:.4f} over {n} series) — team strength already contains "
-            f"the signal."
+            f"Adding recent form and head-to-head history to Glicko-2 did not "
+            f"improve series prediction: Brier {wp_brier:.4f} vs {gl_brier:.4f} "
+            f"over {n} series."
         )
     return [
         Atom(
@@ -449,7 +455,10 @@ def generate(
     pr_run: int,
     wp_run: int,
     glicko_run: int,
+    metric_run: int | None = None,
 ) -> int:
+    from .insights_metrics import generate as metric_atoms
+
     atoms = (
         outliers(conn, era_run)
         + trends(conn, era_run)
@@ -459,6 +468,7 @@ def generate(
         + what_wins(conn, pr_run)
         + rating_top(conn, pr_run)
         + model_null(conn, wp_run, glicko_run)
+        + (metric_atoms(conn, metric_run) if metric_run is not None else [])
     )
     conn.cursor().executemany(
         "INSERT INTO insights (run_id, subject_type, subject_id, kind, headline, detail, score)"

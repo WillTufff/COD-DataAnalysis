@@ -18,7 +18,8 @@ from typing import Any
 
 import pytest
 
-from cdlhub_analytics import metrics
+from cdlhub_analytics import maprows, metrics
+from cdlhub_analytics.maprows import Coverage, KeyCoverage
 from cdlhub_analytics.metrics import (
     CATALOG,
     KF_ANSWERED,
@@ -31,8 +32,6 @@ from cdlhub_analytics.metrics import (
     KF_TRADED,
     KF_UNTRADED,
     Aggregate,
-    Coverage,
-    KeyCoverage,
     Metric,
     compute_map_clutch_adv,
     compute_map_trades,
@@ -85,7 +84,7 @@ def feed_coverage(feed_titles: tuple[str, ...] = ("IW", "WWII")) -> Coverage:
     """Coverage where the kill-feed keys are tracked only for feed_titles."""
     keys = (*metrics.KF_KEYS, *metrics.CLUTCH_KEYS)
     coverage: Coverage = {}
-    for title in metrics.TITLE_ORDER:
+    for title in maprows.TITLE_ORDER:
         nonzero = 1000 if title in feed_titles else 0
         coverage[title] = {k: KeyCoverage(rows=1000, present=1000, nonzero=nonzero) for k in keys}
     return coverage
