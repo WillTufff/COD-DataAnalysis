@@ -3,6 +3,7 @@
 // versioned snapshot and never mix runs.
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { playerSlug, teamSlug } from "@/lib/slug";
 import {
   backtests,
   eventPlacements,
@@ -60,9 +61,7 @@ export function latestRatingRun(): Promise<ModelRun | null> {
   return latestRun("player_rating", PUBLISHED_RATING_VERSION);
 }
 
-export function playerSlug(handle: string): string {
-  return handle.toLowerCase();
-}
+export { playerSlug, teamSlug };
 
 // ---------- Insight feed ----------
 
@@ -82,6 +81,7 @@ export async function getFeed(
   runId: number,
   limit = 40,
   kind?: string,
+  offset = 0,
 ): Promise<FeedItem[]> {
   const conditions = [eq(insights.runId, runId)];
   if (kind) conditions.push(eq(insights.kind, kind));
@@ -108,7 +108,8 @@ export async function getFeed(
     )
     .where(and(...conditions))
     .orderBy(desc(insights.score), insights.id)
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
   return rows.map((r) => ({
     id: r.id,
@@ -813,13 +814,6 @@ export type WinprobArtifact = {
 
 // ---------- Teams ----------
 
-export function teamSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 export async function getTeamBySlug(slug: string) {
   const rows = await db.select().from(teams);
   return rows.find((t) => teamSlug(t.name) === slug) ?? null;
@@ -1160,18 +1154,29 @@ export type MetricQuery = {
   dir: "asc" | "desc";
 };
 
-/** The filter shared by the row query and its count, so the two cannot drift. */
-function metricConditions(metricRunId: number, q: MetricQuery) {
-  const conditions = [
-    eq(playerMetricSeason.runId, metricRunId),
-    eq(playerMetricSeason.metric, q.metric),
-  ];
+/**
+ * The season + mode cohort filter, shared by the single-metric path and the
+ * report pivot so a cohort means the same thing in both. `year` undefined =
+ * all covered seasons; `modeSlug` undefined = the all-modes rows (mode_id NULL).
+ */
+function cohortConditions(q: { year?: number; modeSlug?: string }) {
+  const conditions = [];
   if (q.year !== undefined) conditions.push(eq(seasons.year, q.year));
   if (q.modeSlug !== undefined) {
     conditions.push(eq(gameModes.slug, q.modeSlug));
   } else {
     conditions.push(sql`${playerMetricSeason.modeId} IS NULL`);
   }
+  return conditions;
+}
+
+/** The filter shared by the row query and its count, so the two cannot drift. */
+function metricConditions(metricRunId: number, q: MetricQuery) {
+  const conditions = [
+    eq(playerMetricSeason.runId, metricRunId),
+    eq(playerMetricSeason.metric, q.metric),
+    ...cohortConditions(q),
+  ];
   if (q.qualifiedOnly) conditions.push(eq(playerMetricSeason.qualified, true));
   return and(...conditions);
 }
@@ -1249,6 +1254,203 @@ export async function getMetricScope(
     ...new Set(rows.map((r) => r.mode).filter((m): m is string => m !== null)),
   ].sort();
   return { years, modes };
+}
+
+// ── Report builder: many metrics as columns, players as rows ────────────────
+//
+// The pivot of the single-metric path. `queryMetric` pulls one metric across
+// all players; `queryReport` pulls several at once for a fixed cohort and
+// pivots them into a wide table. Qualification is per *cell* (a player can
+// clear the sample minimum for one column and not another), so cells are
+// sparse — the renderer greys an unqualified cell and shows "—" for an absent
+// one, and never drops a row for it.
+
+/** One metric's value for one player, in one cohort. */
+export type ReportCell = {
+  value: number;
+  denom: number;
+  z: number | null;
+  pctl: number | null;
+  qualified: boolean;
+};
+
+/** A column descriptor, so the client renderer can format without the catalog. */
+export type ReportColumn = {
+  key: string;
+  label: string;
+  unit: string;
+  higherIsBetter: boolean;
+  denomKind: string;
+  minDenom: number;
+};
+
+/** One player in the cohort, with a sparse map of metric → cell. */
+export type ReportRow = {
+  playerId: number;
+  handle: string;
+  slug: string;
+  year: number;
+  title: string;
+  mode: string | null;
+  cells: Record<string, ReportCell>;
+};
+
+export type ReportQuery = {
+  metrics: string[]; // ordered column keys
+  year?: number; // undefined = all covered seasons
+  modeSlug?: string; // undefined = all-modes rows (mode_id IS NULL)
+  qualifiedOnly: boolean; // gate rows on the SORT metric's qualified flag
+  sort: string; // a metric key, or "player"
+  dir: "asc" | "desc";
+};
+
+/**
+ * The wide report for a cohort: one query over all selected metrics, pivoted
+ * in JS by `(playerId, year, mode)`, then sorted on the chosen column. Cells
+ * are sparse; a player missing the sort metric sorts to the bottom in either
+ * direction (an absent value is never "best" or "worst", just absent). Rows are
+ * returned whole and unpaged — the client table pages and re-sorts them, like
+ * the single-metric path's `FETCH_ALL`.
+ *
+ * `catalog` is passed in rather than re-fetched: the caller already resolved it
+ * to validate the requested keys, and it carries the column metadata (unit,
+ * direction, sample floor) the renderer needs.
+ */
+export async function queryReport(
+  metricRunId: number,
+  q: ReportQuery,
+  catalog: MetricCatalogEntry[],
+): Promise<{ columns: ReportColumn[]; rows: ReportRow[] }> {
+  const byKey = new Map(catalog.map((m) => [m.key, m]));
+  // Preserve the requested column order; silently drop keys the catalog no
+  // longer knows (a stale link must degrade, not error).
+  const columns: ReportColumn[] = q.metrics
+    .map((k) => byKey.get(k))
+    .filter((m): m is MetricCatalogEntry => m !== undefined)
+    .map((m) => ({
+      key: m.key,
+      label: m.label,
+      unit: m.unit,
+      higherIsBetter: m.higher_is_better,
+      denomKind: m.denom_kind,
+      minDenom: m.min_denom,
+    }));
+  const keys = columns.map((c) => c.key);
+  if (keys.length === 0) return { columns, rows: [] };
+
+  const raw = await db
+    .select({
+      metric: playerMetricSeason.metric,
+      playerId: playerMetricSeason.playerId,
+      handle: players.handle,
+      year: seasons.year,
+      title: titles.shortName,
+      mode: gameModes.slug,
+      value: playerMetricSeason.value,
+      denom: playerMetricSeason.denom,
+      z: playerMetricSeason.z,
+      pctl: playerMetricSeason.pctl,
+      qualified: playerMetricSeason.qualified,
+    })
+    .from(playerMetricSeason)
+    .innerJoin(players, eq(players.id, playerMetricSeason.playerId))
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(
+      and(
+        eq(playerMetricSeason.runId, metricRunId),
+        inArray(playerMetricSeason.metric, keys),
+        ...cohortConditions(q),
+      ),
+    );
+
+  // Pivot: one row per (player, season, mode); each source row drops into its
+  // metric's cell. With a single-season + single-mode cohort this is one row
+  // per player, but the key stays general so all-modes / all-seasons cohorts
+  // pivot correctly too.
+  const rowsById = new Map<string, ReportRow>();
+  for (const r of raw) {
+    const id = `${r.playerId}-${r.year}-${r.mode ?? "all"}`;
+    let row = rowsById.get(id);
+    if (!row) {
+      row = {
+        playerId: r.playerId,
+        handle: r.handle,
+        slug: playerSlug(r.handle),
+        year: r.year,
+        title: r.title,
+        mode: r.mode,
+        cells: {},
+      };
+      rowsById.set(id, row);
+    }
+    row.cells[r.metric] = {
+      value: r.value,
+      denom: r.denom,
+      z: r.z,
+      pctl: r.pctl,
+      qualified: r.qualified,
+    };
+  }
+  let rows = [...rowsById.values()];
+
+  // "Qualified only" gates each row on the sort column's cell: a row without a
+  // qualified value in the column being ranked has no business being ranked.
+  // Other columns keep their cells (greyed when below their own minimum). When
+  // sorting by player name there is no metric to gate on, so the flag is a
+  // no-op.
+  const sortIsMetric = keys.includes(q.sort);
+  if (q.qualifiedOnly && sortIsMetric) {
+    rows = rows.filter((row) => row.cells[q.sort]?.qualified === true);
+  }
+
+  const factor = q.dir === "asc" ? 1 : -1;
+  rows.sort((a, b) => {
+    if (!sortIsMetric) return factor * a.handle.localeCompare(b.handle);
+    const av = a.cells[q.sort]?.value ?? null;
+    const bv = b.cells[q.sort]?.value ?? null;
+    // Absent values sink to the bottom regardless of direction, then handle
+    // breaks ties so paging is stable.
+    if (av === null && bv === null) return a.handle.localeCompare(b.handle);
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    if (av === bv) return a.handle.localeCompare(b.handle);
+    return factor * (av - bv);
+  });
+
+  return { columns, rows };
+}
+
+/**
+ * Seasons and modes with rows for *any* of the chosen metrics — the union, so
+ * the cohort pickers offer a season if at least one selected column covers it.
+ * Columns that don't cover the picked cohort render as "—" in their cells.
+ */
+export async function getReportScope(
+  metricRunId: number,
+  metrics: string[],
+): Promise<{ years: number[]; modes: string[]; allModes: boolean }> {
+  if (metrics.length === 0) return { years: [], modes: [], allModes: false };
+  const rows = await db
+    .select({ year: seasons.year, mode: gameModes.slug })
+    .from(playerMetricSeason)
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(
+      and(
+        eq(playerMetricSeason.runId, metricRunId),
+        inArray(playerMetricSeason.metric, metrics),
+      ),
+    )
+    .groupBy(seasons.year, gameModes.slug);
+  const years = [...new Set(rows.map((r) => r.year))].sort();
+  const modes = [
+    ...new Set(rows.map((r) => r.mode).filter((m): m is string => m !== null)),
+  ].sort();
+  // Any all-modes (mode_id NULL) row means "All modes combined" is a valid pick.
+  const allModes = rows.some((r) => r.mode === null);
+  return { years, modes, allModes };
 }
 
 export type MetaEntry = {

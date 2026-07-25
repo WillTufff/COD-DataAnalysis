@@ -1,27 +1,27 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Pager } from "@/components/Pager";
-import { PctlBar } from "@/components/PctlBar";
+import { CarryParams } from "@/components/table/CarryParams";
+import { ColumnPicker, type PickerMetric } from "./ColumnPicker";
+import { ExportBar } from "./ExportBar";
+import { PresetPicker, type PresetTile } from "./PresetPicker";
+import { ReportTable } from "./ReportTable";
 import {
   type MetricCatalogEntry,
-  type MetricQuery,
-  countMetric,
   getMetricCatalog,
-  getMetricScope,
   latestRun,
-  queryMetric,
+  queryReport,
 } from "@/lib/analytics";
+import { REPORT_PRESETS } from "@/lib/reports/presets";
+import { resolveReport } from "@/lib/reports/resolve";
 import {
-  DEFAULT_PER,
   type SearchParams,
-  clampPage,
-  one,
-  parsePaging,
+  parsePage,
+  parsePer,
 } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Stat explorer" };
+export const metadata: Metadata = { title: "Report builder" };
 
 const MODE_LABELS: Record<string, string> = {
   hardpoint: "Hardpoint",
@@ -36,6 +36,9 @@ const TIER_ORDER = ["gold", "gold-fun", "standard", "fun"];
 const CATEGORY_LABELS: Record<string, string> = {
   slaying: "Slaying & engagement",
   discipline: "Discipline & survival",
+  trades: "Trades & entries",
+  advantage: "Man-advantage",
+  clutch: "Clutch",
   hardpoint: "Hardpoint",
   snd: "Search & Destroy",
   control: "Control",
@@ -55,13 +58,6 @@ function sortMetrics(metrics: MetricCatalogEntry[]): MetricCatalogEntry[] {
   });
 }
 
-function formatValue(v: number, entry: MetricCatalogEntry): string {
-  if (entry.unit.startsWith("share")) return `${(v * 100).toFixed(1)}%`;
-  if (Math.abs(v) >= 100) return v.toFixed(0);
-  if (Math.abs(v) >= 10) return v.toFixed(2);
-  return v.toFixed(3);
-}
-
 export default async function StatsPage({
   searchParams,
 }: {
@@ -75,7 +71,7 @@ export default async function StatsPage({
     return (
       <main className="mx-auto max-w-6xl px-6 py-12">
         <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
-          Stat explorer
+          Report builder
         </h1>
         <p className="mt-4 text-sm text-ink-secondary">
           No metric run has been published yet.
@@ -85,84 +81,116 @@ export default async function StatsPage({
   }
 
   // A metric no title cleared coverage for has no rows in any season, so it is
-  // not a leaderboard. It keeps its glossary entry, which explains the absence.
+  // not a column anyone can chart. It keeps its glossary entry, which explains
+  // the absence.
   const metrics = sortMetrics(catalog.metrics.filter((m) => m.titles.length > 0));
-  const requested = one(sp, "metric");
-  const entry =
-    metrics.find((m) => m.key === requested) ?? metrics[0];
+  const knownKeys = new Set(metrics.map((m) => m.key));
 
-  const scope = await getMetricScope(run.id, entry.key);
-  const yearRaw = Number(one(sp, "year"));
-  const year = scope.years.includes(yearRaw) ? yearRaw : undefined;
+  // One resolution, shared with the export route so a download always matches
+  // the table it came from.
+  const resolved = await resolveReport(run.id, sp, metrics);
+  const { selected, selectedEntries, activePreset, scope, rankedScope } =
+    resolved;
 
-  // A metric scoped to one mode has no all-modes rows, so default to its mode.
-  const modeRaw = one(sp, "mode");
-  const allModesAvailable = entry.modes.includes("__all__");
-  const modeSlug = scope.modes.includes(modeRaw)
-    ? modeRaw
-    : allModesAvailable
-      ? undefined
-      : scope.modes[0];
+  const pickerCatalog: PickerMetric[] = metrics.map((m) => ({
+    key: m.key,
+    label: m.label,
+    category: m.category,
+    gold: m.tier.startsWith("gold"),
+  }));
 
-  const qualifiedOnly = one(sp, "all") !== "1";
-  const dir = one(sp, "dir") === "asc" ? "asc" : entry.higher_is_better ? "desc" : "asc";
+  // Preset tiles, each stamped with how many of its columns still resolve
+  // against the live catalog (a stale preset shows a smaller count, not a crash).
+  const presetTiles: PresetTile[] = REPORT_PRESETS.map((p) => ({
+    id: p.id,
+    name: p.name,
+    blurb: p.blurb,
+    category: p.category,
+    columns: p.metrics.filter((k) => knownKeys.has(k)).length,
+  }));
 
-  const query: MetricQuery = {
-    metric: entry.key,
-    year,
-    modeSlug,
-    qualifiedOnly,
-    dir,
-  };
-  const total = await countMetric(run.id, query);
-  const paging = clampPage(parsePaging(sp), total);
-  const rows = await queryMetric(run.id, query, paging);
+  const header = (
+    <>
+      <p className="font-mono text-xs text-ink-muted">
+        Build a report · pick a cohort, add metric columns · metric_layer v
+        {run.version}
+      </p>
+      <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">
+        Report builder
+      </h1>
+    </>
+  );
 
-  const grouped = new Map<string, MetricCatalogEntry[]>();
-  for (const m of metrics) {
-    const label = CATEGORY_LABELS[m.category] ?? m.category;
-    const list = grouped.get(label) ?? [];
-    list.push(m);
-    grouped.set(label, list);
+  const presetSection = (
+    <PresetPicker presets={presetTiles} activeId={activePreset?.id} />
+  );
+
+  const picker = (
+    <div className="mt-6 border-y border-hairline py-4 print:hidden">
+      <ColumnPicker
+        catalog={pickerCatalog}
+        categoryLabels={CATEGORY_LABELS}
+        selected={selected}
+      />
+    </div>
+  );
+
+  // No columns yet — lead with the presets and the picker rather than an empty
+  // table.
+  if (selected.length === 0) {
+    return (
+      <main className="mx-auto max-w-6xl px-6 py-12">
+        {header}
+        <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
+          {catalog.metrics.length} published metrics, each scored against its own
+          season-and-mode cohort. Start with a preset, or add columns to build
+          your own.
+        </p>
+        <div className="mt-8">{presetSection}</div>
+        {picker}
+        <p className="mt-8 text-sm text-ink-secondary">
+          Pick a preset above or add a metric column to start a report.
+        </p>
+      </main>
+    );
   }
+
+  const { year, modeSlug, qualifiedOnly, sort, dir, defaultSortKey, defaultDir } =
+    resolved;
+  const { columns, rows } = await queryReport(
+    run.id,
+    resolved.query,
+    selectedEntries,
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
-      <p className="font-mono text-xs text-ink-muted">
-        Every measured stat in the archive, era-scored · metric_layer v{run.version}
-      </p>
-      <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">
-        Stat explorer
-      </h1>
-      <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
-        {catalog.metrics.length} published metrics, each scored against its own
-        season-and-mode cohort. Which seasons a metric covers is measured from
-        the data.
+      {header}
+
+      <details className="mt-6 group print:hidden" open={!!activePreset}>
+        <summary className="cursor-pointer list-none text-xs text-ink-muted hover:text-ink">
+          <span className="group-open:hidden">▸ Start from a preset</span>
+          <span className="hidden group-open:inline">▾ Presets</span>
+        </summary>
+        <div className="mt-3">{presetSection}</div>
+      </details>
+
+      {picker}
+
+      {/* Print-only cohort stamp: the controls are hidden on paper, so the
+          printout names its own cohort. */}
+      <p className="mt-4 hidden font-mono text-xs text-ink-secondary print:block">
+        {activePreset ? `${activePreset.name} · ` : ""}
+        {year ?? "All seasons"} ·{" "}
+        {modeSlug ? (MODE_LABELS[modeSlug] ?? modeSlug) : "All modes combined"} ·{" "}
+        {qualifiedOnly ? "qualified only" : "including small samples"} ·
+        metric_layer v{run.version}
       </p>
 
       <form
         method="GET"
-        className="mt-8 flex flex-wrap items-end gap-x-5 gap-y-3 border-y border-hairline py-4 text-sm"
+        className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-3 text-sm print:hidden"
       >
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-ink-muted">Metric</span>
-          <select
-            name="metric"
-            defaultValue={entry.key}
-            className="max-w-xs border border-hairline bg-surface px-2 py-1.5"
-          >
-            {[...grouped.entries()].map(([label, list]) => (
-              <optgroup key={label} label={label}>
-                {list.map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.label}
-                    {m.tier.startsWith("gold") ? " ★" : ""}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ink-muted">Season</span>
           <select
@@ -186,7 +214,9 @@ export default async function StatsPage({
               defaultValue={modeSlug ?? ""}
               className="border border-hairline bg-surface px-2 py-1.5"
             >
-              {allModesAvailable && <option value="">All modes combined</option>}
+              {rankedScope.allModes && (
+                <option value="">All modes combined</option>
+              )}
               {scope.modes.map((m) => (
                 <option key={m} value={m}>
                   {MODE_LABELS[m] ?? m}
@@ -195,17 +225,6 @@ export default async function StatsPage({
             </select>
           </label>
         )}
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-ink-muted">Order</span>
-          <select
-            name="dir"
-            defaultValue={dir}
-            className="border border-hairline bg-surface px-2 py-1.5"
-          >
-            <option value={entry.higher_is_better ? "desc" : "asc"}>Best first</option>
-            <option value={entry.higher_is_better ? "asc" : "desc"}>Worst first</option>
-          </select>
-        </label>
         <label className="flex items-center gap-2 pb-1.5">
           <input
             type="checkbox"
@@ -215,133 +234,53 @@ export default async function StatsPage({
             className="accent-[var(--series-1)]"
           />
           <span className="text-xs text-ink-muted">
-            Include below minimum {entry.denom_kind}
+            Include below-minimum samples
           </span>
         </label>
-        {/* The row count is a link in the pager; carry it through so changing a
-            filter does not silently reset it. */}
-        {paging.per !== DEFAULT_PER && (
-          <input type="hidden" name="per" value={paging.per} />
-        )}
+        {/* metrics/sort/dir/per live on the URL, written client-side; carry them
+            so a cohort submit does not silently drop the report. */}
+        <CarryParams names={["metrics", "sort", "dir", "per"]} />
         <button
           type="submit"
           className="border border-accent-dim bg-surface-raised px-4 py-1.5 font-display text-sm font-semibold uppercase tracking-wide text-ink hover:border-accent"
         >
-          Run query
+          Apply cohort
         </button>
       </form>
 
-      <div className="mt-4 border-l-2 border-hairline pl-3">
-        <div className="font-display text-lg font-semibold">{entry.label}</div>
-        <div className="mt-0.5 font-mono text-xs text-ink-secondary">
-          {entry.formula}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="font-mono text-xs text-ink-muted">
+          {columns.length} column{columns.length === 1 ? "" : "s"} ·{" "}
+          {rows.length} row{rows.length === 1 ? "" : "s"} ·{" "}
+          {qualifiedOnly ? "qualified only" : "including small samples"}
         </div>
-        <div className="mt-1 text-xs text-ink-muted">
-          Qualifies at {entry.min_denom} {entry.denom_kind} · covers{" "}
-          {entry.titles.join(", ") || "no season"} · {entry.unit}
-          {entry.higher_is_better ? "" : " · lower is better"}
-        </div>
-        {entry.note && (
-          <p className="mt-1.5 max-w-2xl text-xs text-ink-secondary">{entry.note}</p>
-        )}
-      </div>
-
-      <div className="mt-4 font-mono text-xs text-ink-muted">
-        {qualifiedOnly ? "qualified only" : "including small samples"}
+        {rows.length > 0 && <ExportBar />}
       </div>
 
       {rows.length === 0 ? (
         <p className="mt-8 text-sm text-ink-secondary">
-          No rows for this combination. This metric covers{" "}
-          {entry.titles.join(", ") || "no season"}
-          {modeSlug ? ` in ${MODE_LABELS[modeSlug] ?? modeSlug}` : ""}.
+          No players match this cohort. The chosen columns may not cover{" "}
+          {year ?? "the selected season"}
+          {modeSlug ? ` in ${MODE_LABELS[modeSlug] ?? modeSlug}` : ""}. Try a
+          different season or mode, or widen the sample.
         </p>
       ) : (
-        <>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-hairline text-xs text-ink-muted">
-                  <th className="py-2 pr-3 font-normal">#</th>
-                  <th className="py-2 pr-4 font-normal">Player</th>
-                  <th className="py-2 pr-4 font-normal">Season</th>
-                  {modeSlug === undefined && (
-                    <th className="py-2 pr-4 font-normal">Mode</th>
-                  )}
-                  <th className="py-2 pr-4 text-right font-normal">{entry.label}</th>
-                  <th className="py-2 pr-4 text-right font-normal">vs cohort</th>
-                  <th className="py-2 pr-4 font-normal">Percentile</th>
-                  <th className="py-2 text-right font-normal">
-                    {entry.denom_kind}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr
-                    key={`${r.playerId}-${r.year}-${r.mode ?? "all"}`}
-                    className={`border-b border-hairline/60 ${r.qualified ? "" : "text-ink-muted"}`}
-                  >
-                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
-                      {paging.offset + i + 1}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      <Link
-                        href={`/players/${r.slug}`}
-                        className="font-medium hover:text-accent"
-                      >
-                        {r.handle}
-                      </Link>
-                      {!r.qualified && (
-                        <span
-                          className="ml-1.5 font-mono text-[10px] text-ink-muted"
-                          title={`Below the ${entry.min_denom} ${entry.denom_kind} minimum`}
-                        >
-                          n low
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-4 text-ink-secondary">
-                      {r.year} {r.title}
-                    </td>
-                    {modeSlug === undefined && (
-                      <td className="py-1.5 pr-4 text-ink-secondary">
-                        {r.mode ? (MODE_LABELS[r.mode] ?? r.mode) : "All"}
-                      </td>
-                    )}
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                      {formatValue(r.value, entry)}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                      {r.z !== null
-                        ? `${r.z >= 0 ? "+" : ""}${r.z.toFixed(2)}σ`
-                        : "—"}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      {r.pctl !== null ? <PctlBar pctl={r.pctl} /> : "—"}
-                    </td>
-                    <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
-                      {Math.round(r.denom)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pager
-            basePath="/stats"
-            searchParams={sp}
-            paging={paging}
-            total={total}
-          />
-        </>
+        <ReportTable
+          columns={columns}
+          rows={rows}
+          showMode={modeSlug === undefined}
+          initialPer={parsePer(sp)}
+          initialPage={parsePage(sp)}
+          initialSort={{ id: sort, dir }}
+          defaultSort={{ id: defaultSortKey, dir: defaultDir }}
+        />
       )}
 
       <p className="mt-3 max-w-3xl text-xs text-ink-muted">
-        Percentile and z-score are measured within the qualified players of the same
-        season and mode. Rows below the minimum sample are shown greyed when
-        included, and are scored against the qualified cohort rather than
-        against each other. Full definitions are on the{" "}
+        Each cell is scored within the qualified players of its own season and
+        mode, so a column can qualify a player the next column does not — those
+        cells are greyed, never dropped. Percentile and z-score are within that
+        cohort. Full definitions are on the{" "}
         <Link href="/methodology#metrics" className="underline">
           methodology
         </Link>{" "}

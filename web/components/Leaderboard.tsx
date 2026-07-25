@@ -10,7 +10,7 @@ import type { LeaderboardRow } from "@/lib/analytics";
 // shows how era pace distorts cross-year comparison.
 export function Leaderboard({
   rows,
-  limit = 25,
+  limit = 10,
 }: {
   rows: LeaderboardRow[];
   limit?: number;

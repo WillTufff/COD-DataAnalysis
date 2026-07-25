@@ -1,18 +1,27 @@
-// Shared paging state for the server-rendered tables. Page and rows-per-page
-// travel in the query string like every other filter on the site, so a paged
-// view is addressable and the pages stay `force-dynamic` with no client state.
+// Shared paging state for the site's tables. Rows-per-page, page, and column
+// sort travel in the query string so a view stays addressable and shareable.
+// The tables slice and sort themselves in the browser now, so these helpers
+// exist mainly to seed that client state from the URL and to keep filter forms
+// carrying the current settings through a server round-trip.
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
-export const PER_OPTIONS = [25, 50, 100, 250] as const;
-export const DEFAULT_PER = 50;
+// "all" is a real option: show every row, no page limit. It rides the URL as
+// the literal string `all`; every numeric option is itself.
+export type Per = number | "all";
 
-export type Paging = {
-  page: number; // 1-based, clamped once the total is known
-  per: number;
-  offset: number;
-  limit: number;
-};
+export const PER_OPTIONS: readonly Per[] = [10, 20, 50, 100, "all"];
+export const DEFAULT_PER: Per = 10;
+
+/** Human label for a rows-per-page option. */
+export function perLabel(p: Per): string {
+  return p === "all" ? "All" : String(p);
+}
+
+/** The concrete slice size for a `Per`, given how many rows exist in total. */
+export function perLimit(p: Per, total: number): number {
+  return p === "all" ? Math.max(total, 1) : p;
+}
 
 /** First value for a key, ignoring repeats. */
 export function one(sp: SearchParams, key: string): string {
@@ -20,36 +29,22 @@ export function one(sp: SearchParams, key: string): string {
   return (Array.isArray(v) ? v[0] : v) ?? "";
 }
 
-/**
- * Read `page` and `per` off the query string. The page is only lower-bounded
- * here — the upper bound needs the row count, which the caller gets from the
- * query this paging drives, so `clampPage` finishes the job afterwards.
- */
-export function parsePaging(
-  sp: SearchParams,
-  defaultPer = DEFAULT_PER,
-): Paging {
-  const perRaw = Number(one(sp, "per"));
-  const per = (PER_OPTIONS as readonly number[]).includes(perRaw)
-    ? perRaw
-    : defaultPer;
-  const pageRaw = Number(one(sp, "page"));
-  const page =
-    Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
-  return { page, per, offset: (page - 1) * per, limit: per };
+/** Read `per` off the query string, falling back to the default. */
+export function parsePer(sp: SearchParams, defaultPer: Per = DEFAULT_PER): Per {
+  const raw = one(sp, "per");
+  if (raw === "all") return "all";
+  const n = Number(raw);
+  return (PER_OPTIONS as readonly Per[]).includes(n) ? n : defaultPer;
+}
+
+/** Read `page` off the query string (1-based, lower-bounded only). */
+export function parsePage(sp: SearchParams): number {
+  const raw = Number(one(sp, "page"));
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1;
 }
 
 export function pageCount(total: number, per: number): number {
-  return Math.max(1, Math.ceil(total / per));
-}
-
-/**
- * Re-clamp against the real row count. A `?page=99` deep link on a filter that
- * only has three pages lands on the last one rather than an empty table.
- */
-export function clampPage(p: Paging, total: number): Paging {
-  const page = Math.min(p.page, pageCount(total, p.per));
-  return { ...p, page, offset: (page - 1) * p.per };
+  return Math.max(1, Math.ceil(total / Math.max(per, 1)));
 }
 
 /**

@@ -53,7 +53,7 @@ export default function RootLayout({
       className={`${body.variable} ${mono.variable} ${display.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <header className="border-b border-hairline">
+        <header className="border-b border-hairline print:hidden">
           <div className="mx-auto flex max-w-6xl items-baseline gap-8 px-6 py-4">
             <Link
               href="/"
@@ -65,7 +65,7 @@ export default function RootLayout({
           </div>
         </header>
         <div className="flex-1">{children}</div>
-        <footer className="mt-16 border-t border-hairline">
+        <footer className="mt-16 border-t border-hairline print:hidden">
           <div className="mx-auto max-w-6xl space-y-1 px-6 py-6 text-xs text-ink-muted">
             <p>
               Box scores: Call of Duty World League archive data ©{" "}

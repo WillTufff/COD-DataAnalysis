@@ -1,23 +1,21 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Pager } from "@/components/Pager";
+import { CarryParams } from "@/components/table/CarryParams";
+import type { SortState } from "@/components/table/tableState";
+import { PlayersIndexTable } from "./PlayersIndexTable";
 import {
   type PlayerIndexSort,
-  countPlayerIndex,
   getRatingComparison,
   getRatingLeaderboard,
   latestRatingRun,
   latestRun,
   queryPlayerIndex,
-  teamSlug,
 } from "@/lib/analytics";
 import {
-  DEFAULT_PER,
   type SearchParams,
-  buildQuery,
-  clampPage,
   one,
-  parsePaging,
+  parsePage,
+  parsePer,
 } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
@@ -40,51 +38,9 @@ function isSort(v: string): v is PlayerIndexSort {
   return Object.prototype.hasOwnProperty.call(SORTS, v);
 }
 
-/**
- * A column header that sorts. Clicking the active column flips direction;
- * clicking any other column starts at that column's natural direction. Sort
- * changes reset to page 1, since the row a reader was looking at will not be
- * on the same page under a different order.
- */
-function SortHeader({
-  col,
-  label,
-  align = "left",
-  sort,
-  dir,
-  searchParams,
-}: {
-  col: PlayerIndexSort;
-  label: string;
-  align?: "left" | "right";
-  sort: PlayerIndexSort;
-  dir: "asc" | "desc";
-  searchParams: SearchParams;
-}) {
-  const active = sort === col;
-  const next = active ? (dir === "asc" ? "desc" : "asc") : SORTS[col];
-  const href = `/players${buildQuery(searchParams, {
-    sort: col === DEFAULT_SORT ? null : col,
-    dir: next === SORTS[col] ? null : next,
-    page: null,
-  })}`;
-  return (
-    <th
-      className={`py-2 pr-4 font-normal ${align === "right" ? "text-right" : ""}`}
-      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      <Link
-        href={href}
-        className={active ? "text-ink hover:text-accent" : "hover:text-ink"}
-      >
-        {label}
-        <span aria-hidden="true" className="ml-1 text-accent">
-          {active ? (dir === "asc" ? "▲" : "▼") : ""}
-        </span>
-      </Link>
-    </th>
-  );
-}
+// The table holds every matching player and pages itself in the browser; this
+// is just a ceiling well above the few thousand rows the archive can produce.
+const FETCH_ALL = 100_000;
 
 export default async function PlayersPage({
   searchParams,
@@ -116,14 +72,14 @@ export default async function PlayersPage({
     );
   }
 
-  const total = await countPlayerIndex(eraRun.id, { q });
-  const paging = clampPage(parsePaging(sp), total);
   const rows = await queryPlayerIndex(
     eraRun.id,
     ratingRun.id,
     { q, sort, dir },
-    paging,
+    { offset: 0, limit: FETCH_ALL },
   );
+  const total = rows.length;
+  const initialSort: SortState = { id: sort, dir };
 
   // The composite rating board, ranking whole seasons rather than careers.
   const [ratingBoard, comparison] = await Promise.all([
@@ -164,15 +120,10 @@ export default async function PlayersPage({
             className="w-44 border border-hairline bg-surface px-2 py-1.5"
           />
         </label>
-        {/* The sort and row count are links elsewhere on the page; carry the
-            current values through so filtering does not silently reset them. */}
-        {sort !== DEFAULT_SORT && (
-          <input type="hidden" name="sort" value={sort} />
-        )}
-        {dir !== SORTS[sort] && <input type="hidden" name="dir" value={dir} />}
-        {paging.per !== DEFAULT_PER && (
-          <input type="hidden" name="per" value={paging.per} />
-        )}
+        {/* The sort and row count live on the URL, written by the table as the
+            reader changes them; carry the live values so filtering does not
+            silently reset them. */}
+        <CarryParams names={["sort", "dir", "per"]} />
         <button
           type="submit"
           className="border border-accent-dim bg-surface-raised px-4 py-1.5 font-display text-sm font-semibold uppercase tracking-wide text-ink hover:border-accent"
@@ -194,126 +145,12 @@ export default async function PlayersPage({
           No player matches {q ? `“${q}”` : "this filter"}.
         </p>
       ) : (
-        <>
-          <div className="mt-6 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-hairline text-xs text-ink-muted">
-                  <th className="py-2 pr-3 font-normal">#</th>
-                  <SortHeader
-                    col="handle"
-                    label="Player"
-                    sort={sort}
-                    dir={dir}
-                    searchParams={sp}
-                  />
-                  <SortHeader
-                    col="last_year"
-                    label="Active"
-                    sort={sort}
-                    dir={dir}
-                    searchParams={sp}
-                  />
-                  <th className="py-2 pr-4 font-normal">Team</th>
-                  <SortHeader
-                    col="teams"
-                    label="Teams"
-                    align="right"
-                    sort={sort}
-                    dir={dir}
-                    searchParams={sp}
-                  />
-                  <SortHeader
-                    col="seasons"
-                    label="Seasons"
-                    align="right"
-                    sort={sort}
-                    dir={dir}
-                    searchParams={sp}
-                  />
-                  <SortHeader
-                    col="maps"
-                    label="Maps"
-                    align="right"
-                    sort={sort}
-                    dir={dir}
-                    searchParams={sp}
-                  />
-                  <SortHeader
-                    col="rating"
-                    label="Best rating"
-                    align="right"
-                    sort={sort}
-                    dir={dir}
-                    searchParams={sp}
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={r.playerId} className="border-b border-hairline/60">
-                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
-                      {paging.offset + i + 1}
-                    </td>
-                    <td className="py-1.5 pr-4 font-medium">
-                      <Link
-                        href={`/players/${r.slug}`}
-                        className="hover:text-accent hover:underline"
-                      >
-                        {r.handle}
-                      </Link>
-                    </td>
-                    <td className="py-1.5 pr-4 font-mono text-xs tabular-nums text-ink-secondary">
-                      {r.firstYear === r.lastYear
-                        ? r.firstYear
-                        : `${r.firstYear}–${r.lastYear}`}
-                    </td>
-                    <td className="py-1.5 pr-4 text-ink-secondary">
-                      {r.latestTeam ? (
-                        <Link
-                          href={`/teams/${teamSlug(r.latestTeam)}`}
-                          className="hover:text-accent hover:underline"
-                        >
-                          {r.latestTeam}
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
-                      {r.teamCount || "—"}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
-                      {r.seasons}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                      {r.maps}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                      {r.bestRating !== null ? (
-                        <>
-                          {r.bestRating.toFixed(2)}
-                          <span className="ml-1 text-ink-muted">
-                            {r.bestRatingYear}
-                          </span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pager
-            basePath="/players"
-            searchParams={sp}
-            paging={paging}
-            total={total}
-            unit="players"
-          />
-        </>
+        <PlayersIndexTable
+          rows={rows}
+          initialPer={parsePer(sp)}
+          initialPage={parsePage(sp)}
+          initialSort={initialSort}
+        />
       )}
 
       <p className="mt-3 max-w-3xl text-xs text-ink-muted">

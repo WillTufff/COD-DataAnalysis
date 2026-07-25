@@ -1,0 +1,169 @@
+"use client";
+
+import Link from "next/link";
+import { TableControls } from "@/components/table/TableControls";
+import { useTableState } from "@/components/table/tableState";
+import type { Per } from "@/lib/paging";
+import type { FeedItem } from "@/lib/analytics";
+
+const KIND_LABELS: Record<string, string> = {
+  outlier: "Outlier",
+  trend: "Trend",
+  milestone: "Milestone",
+  era_context: "Era context",
+  h2h_edge: "Head-to-head",
+  what_wins: "What wins maps",
+  rating_top: "Top rated",
+  model_null: "Model null",
+  intangible_outlier: "Split profile",
+  profile_extreme: "League best",
+  clutch_milestone: "Clutch record",
+  trade_asymmetry: "Trade economy",
+  meta_shift: "Meta shift",
+  team_style: "Team style",
+};
+
+// Insight details carry the mode as its display label; /stats filters by slug.
+const MODE_SLUG: Record<string, string> = {
+  Hardpoint: "hardpoint",
+  "Search & Destroy": "search-and-destroy",
+  Control: "control",
+  "Capture the Flag": "capture-the-flag",
+  Uplink: "uplink",
+};
+
+/** Where a finding's evidence actually lives. Metric-backed kinds deep-link
+ *  into the exact /stats leaderboard the claim was read from; the rest fall
+ *  back to the subject page or the model spec. */
+function evidenceHref(item: FeedItem): string {
+  const d = item.detail;
+  const metric =
+    typeof d.metric === "string" && item.subjectType !== "team" ? d.metric : null;
+  if (metric) {
+    // The report builder takes an ordered `metrics` column list; a single-metric
+    // finding deep-links to a one-column report scoped to its cohort.
+    const params = new URLSearchParams({ metrics: metric });
+    if (typeof d.year === "number") params.set("year", String(d.year));
+    const mode = typeof d.mode === "string" ? MODE_SLUG[d.mode] : undefined;
+    if (mode) params.set("mode", mode);
+    return `/stats?${params}`;
+  }
+  if (item.kind === "meta_shift") return "/meta";
+  if (item.kind === "trade_asymmetry") return "/rounds";
+  if (item.subjectSlug) {
+    return item.subjectType === "team"
+      ? `/teams/${item.subjectSlug}`
+      : `/players/${item.subjectSlug}`;
+  }
+  if (item.kind === "what_wins") return "/methodology#player-rating";
+  if (item.kind === "model_null") return "/methodology#winprob";
+  return "/methodology";
+}
+
+function Chips({ detail }: { detail: Record<string, unknown> }) {
+  const chips: string[] = [];
+  if (typeof detail.kd_raw === "number") chips.push(`K/D ${detail.kd_raw.toFixed(2)}`);
+  if (typeof detail.kd_z === "number")
+    chips.push(`${detail.kd_z > 0 ? "+" : ""}${detail.kd_z.toFixed(1)}σ`);
+  if (typeof detail.maps_played === "number") chips.push(`${detail.maps_played} maps`);
+  if (typeof detail.career_maps === "number") chips.push(`${detail.career_maps} maps`);
+  if (typeof detail.peak_elo === "number")
+    chips.push(`peak ${Math.round(detail.peak_elo)}`);
+  if (typeof detail.win_rate === "number" && typeof detail.n === "number")
+    chips.push(`${Math.round(detail.win_rate * 100)}% over ${detail.n} series`);
+  if (typeof detail.pct_change === "number")
+    chips.push(
+      `${detail.pct_change > 0 ? "+" : ""}${Math.round(detail.pct_change * 100)}% pace`,
+    );
+  if (typeof detail.rating === "number" && typeof detail.rating_sd === "number")
+    chips.push(`${detail.rating.toFixed(2)} ±${detail.rating_sd.toFixed(2)}`);
+  if (typeof detail.obj_vs_slay === "number")
+    chips.push(`obj ${detail.obj_vs_slay.toFixed(1)}× slay`);
+  if (typeof detail.n_maps === "number") chips.push(`${detail.n_maps} maps`);
+  if (typeof detail.pctl === "number")
+    chips.push(`${Math.round(detail.pctl * 100)}th pctl`);
+  if (typeof detail.z === "number")
+    chips.push(`${detail.z > 0 ? "+" : ""}${detail.z.toFixed(1)}σ`);
+  if (typeof detail.n === "number") chips.push(`n=${Math.round(detail.n)}`);
+  if (typeof detail.attempts === "number")
+    chips.push(`${Math.round(detail.attempts)} attempts`);
+  if (typeof detail.n_deaths === "number")
+    chips.push(`${Math.round(detail.n_deaths)} deaths`);
+  if (typeof detail.swing === "number")
+    chips.push(`${detail.swing > 0 ? "+" : ""}${Math.round(detail.swing * 100)} pts share`);
+  if (chips.length === 0) return null;
+  return (
+    <span className="ml-3 space-x-2 font-mono text-[11px] text-ink-muted">
+      {chips.map((c) => (
+        <span key={c}>{c}</span>
+      ))}
+    </span>
+  );
+}
+
+export function FindingsFeed({
+  rows,
+  initialPer,
+  initialPage,
+}: {
+  rows: FeedItem[];
+  initialPer: Per;
+  initialPage: number;
+}) {
+  const state = useTableState<FeedItem>({
+    rows,
+    initialPer,
+    initialPage,
+  });
+
+  return (
+    <div className="mt-2">
+      <TableControls
+        per={state.per}
+        setPer={state.setPer}
+        page={state.page}
+        setPage={state.setPage}
+        pageCount={state.pageCount}
+        total={state.total}
+        offset={state.offset}
+        visibleCount={state.visible.length}
+        unit="findings"
+      />
+      <ol className="divide-y divide-hairline/60">
+        {state.visible.map((item) => (
+          <li key={item.id} className="py-3">
+            <div className="flex items-baseline gap-4">
+              <span className="eyebrow w-24 flex-none text-[10px] text-ink-muted">
+                {KIND_LABELS[item.kind] ?? item.kind}
+              </span>
+              <p className="text-sm leading-snug">
+                {item.headline}
+                <Chips detail={item.detail} />
+              </p>
+              <span className="ml-auto flex flex-none items-baseline gap-3">
+                {item.subjectSlug && (
+                  <Link
+                    href={
+                      item.subjectType === "team"
+                        ? `/teams/${item.subjectSlug}`
+                        : `/players/${item.subjectSlug}`
+                    }
+                    className="font-mono text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+                  >
+                    {item.subjectType === "team" ? "team" : "player"}
+                  </Link>
+                )}
+                <Link
+                  href={evidenceHref(item)}
+                  className="font-mono text-xs text-accent underline underline-offset-2 hover:text-ink"
+                >
+                  evidence
+                </Link>
+              </span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
