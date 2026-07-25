@@ -1,0 +1,11 @@
+-- 0008_drop_player_archetypes: remove the archetype clustering table.
+--
+-- Archetype clustering was explored and dropped. The table was declared in
+-- 0003 alongside career_curves, but no clustering ever shipped in
+-- analytics/src, so nothing writes it and nothing reads it. Publishing rule 2
+-- says a model's code lives in analytics/src with tests; an empty table for a
+-- model that does not exist is the opposite of that, so the table goes rather
+-- than sitting there implying work that isn't published.
+--
+-- career_curves stays: aging curves are still on the roadmap.
+DROP TABLE IF EXISTS player_archetypes;

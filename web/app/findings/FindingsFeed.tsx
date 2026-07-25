@@ -5,23 +5,7 @@ import { TableControls } from "@/components/table/TableControls";
 import { useTableState } from "@/components/table/tableState";
 import type { Per } from "@/lib/paging";
 import type { FeedItem } from "@/lib/analytics";
-
-const KIND_LABELS: Record<string, string> = {
-  outlier: "Outlier",
-  trend: "Trend",
-  milestone: "Milestone",
-  era_context: "Era context",
-  h2h_edge: "Head-to-head",
-  what_wins: "What wins maps",
-  rating_top: "Top rated",
-  model_null: "Model null",
-  intangible_outlier: "Split profile",
-  profile_extreme: "League best",
-  clutch_milestone: "Clutch record",
-  trade_asymmetry: "Trade economy",
-  meta_shift: "Meta shift",
-  team_style: "Team style",
-};
+import { kindLabel } from "@/lib/insightKinds";
 
 // Insight details carry the mode as its display label; /stats filters by slug.
 const MODE_SLUG: Record<string, string> = {
@@ -133,8 +117,8 @@ export function FindingsFeed({
         {state.visible.map((item) => (
           <li key={item.id} className="py-3">
             <div className="flex items-baseline gap-4">
-              <span className="eyebrow w-24 flex-none text-[10px] text-ink-muted">
-                {KIND_LABELS[item.kind] ?? item.kind}
+              <span className="eyebrow w-28 flex-none text-[10px] leading-snug text-ink-muted">
+                {kindLabel(item.kind)}
               </span>
               <p className="text-sm leading-snug">
                 {item.headline}

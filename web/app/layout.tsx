@@ -68,21 +68,16 @@ export default function RootLayout({
         <footer className="mt-16 border-t border-hairline print:hidden">
           <div className="mx-auto max-w-6xl space-y-1 px-6 py-6 text-xs text-ink-muted">
             <p>
-              Box scores: Call of Duty World League archive data ©{" "}
+              Box scores, event metadata and kill feeds: Call of Duty World League
+              archive data ©{" "}
               <a
                 className="underline hover:text-ink-secondary"
                 href="https://github.com/Activision/cwl-data"
               >
                 Activision Publishing (cwl-data)
               </a>
-              , BSD-3-Clause. Event and roster context from{" "}
-              <a
-                className="underline hover:text-ink-secondary"
-                href="https://liquipedia.net/callofduty"
-              >
-                Liquipedia
-              </a>{" "}
-              (CC-BY-SA 3.0).
+              , BSD-3-Clause. Everything on this site is derived from that one
+              source; rosters are inferred from who appears in the box scores.
             </p>
             <p>
               All models are educational analysis of historical play; the{" "}

@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"TRUNCATE {_RESET_TABLES} RESTART IDENTITY CASCADE"  # noqa: S608
             )
             print("reset: competition tables truncated")
-        loader = Loader(conn)
+        loader = Loader(conn, aliases)
         player_ids = {low: loader.player_id(canon[low], spellings[low]) for low in sorted(canon)}
         for pe in events:
             loader.load_event(pe, player_ids)

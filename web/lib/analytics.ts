@@ -128,6 +128,38 @@ export async function getFeed(
   }));
 }
 
+/**
+ * Top findings for the overview, with a per-kind quota.
+ *
+ * Straight score ordering makes the front page monotonous: the highest-scoring
+ * kinds are the per-cohort ones, so eight slots filled by score alone came back
+ * as four near-identical trade-economy lines. Taking at most `maxPerKind` of
+ * each kind, still in score order, shows the range of what the generator found.
+ */
+export async function getFeedHighlights(
+  runId: number,
+  limit = 8,
+  maxPerKind = 2,
+): Promise<FeedItem[]> {
+  // Over-fetch so there is something to choose from once the quota bites.
+  const pool = await getFeed(runId, Math.max(limit * 6, 48));
+  const perKind = new Map<string, number>();
+  const picked: FeedItem[] = [];
+  for (const item of pool) {
+    if (picked.length >= limit) break;
+    const n = perKind.get(item.kind) ?? 0;
+    if (n >= maxPerKind) continue;
+    perKind.set(item.kind, n + 1);
+    picked.push(item);
+  }
+  // If the quota left the page short (few kinds in this run), backfill by score.
+  for (const item of pool) {
+    if (picked.length >= limit) break;
+    if (!picked.includes(item)) picked.push(item);
+  }
+  return picked;
+}
+
 export async function getFeedKinds(runId: number): Promise<{ kind: string; n: number }[]> {
   const rows = await db.execute(sql`
     SELECT kind, count(*) AS n FROM insights WHERE run_id = ${runId}
@@ -405,6 +437,12 @@ export async function getPlayerBySlug(slug: string) {
   return rows[0] ?? null;
 }
 
+/** Every player slug, for prerendering the player pages at build time. */
+export async function getAllPlayerSlugs(): Promise<string[]> {
+  const rows = await db.select({ handle: players.handle }).from(players);
+  return rows.map((r) => playerSlug(r.handle));
+}
+
 export type SeasonAdjusted = {
   seasonId: number;
   year: number;
@@ -597,6 +635,7 @@ export type LeaderboardRow = {
   kdZ: number | null;
   kdPctl: number | null;
 };
+
 
 export async function getPlayerLeaderboard(
   eraRunId: number,
@@ -817,6 +856,12 @@ export type WinprobArtifact = {
 export async function getTeamBySlug(slug: string) {
   const rows = await db.select().from(teams);
   return rows.find((t) => teamSlug(t.name) === slug) ?? null;
+}
+
+/** Every team slug, for prerendering the team pages at build time. */
+export async function getAllTeamSlugs(): Promise<string[]> {
+  const rows = await db.select({ name: teams.name }).from(teams);
+  return rows.map((t) => teamSlug(t.name));
 }
 
 export type SeriesRecord = { wins: number; losses: number };

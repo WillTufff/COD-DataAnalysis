@@ -1,21 +1,28 @@
 """Insight atoms. Spec: /methodology#insights.
 
-Five kinds generated from real model outputs, each with plain-English headline,
-backing numbers in detail (including evidence-link params), and a 0..1 score
-for ranking. Never fabricates: every number is read back from model outputs or
-the spine.
+Each atom carries a plain-English headline, the backing numbers in detail
+(including evidence-link params), and a 0..1 score for ranking. Never
+fabricates: every number is read back from model outputs or the spine.
+
+Five kinds read the era adjustment and the Elo run:
 
   outlier      season K/D >= 2 SD from cohort mean (era run)
   trend        monotonic season-over-season K/D percentile move across 3 seasons
-  milestone    career maps-played thresholds; team all-time peak rating (Elo run)
+  milestone    deepest career map counts; team all-time peak rating (Elo run)
   era_context  league slaying pace shifts between consecutive seasons per mode
   h2h_edge     lopsided head-to-head records (>= 8 decided series, >= 70%)
 
-Three more kinds read the newer models' outputs (player_rating, winprob):
+Three more read the newer models' outputs (player_rating, winprob):
 
   what_wins    per (season x mode): learned objective-vs-slaying map weights
   rating_top   highest open-player-rating seasons in the archive
   model_null   backtested non-results worth publishing (e.g. momentum)
+
+Six more come from the metric layer; see insights_metrics.
+
+Generation ends with two passes that keep the ledger from restating itself:
+`best_per_season` collapses one season's mode slices to the strongest, and
+`cap_per_subject` stops any one subject flooding a kind.
 """
 
 from __future__ import annotations
@@ -27,6 +34,8 @@ from typing import Any, cast
 import psycopg
 
 MIN_MAPS_SEASON = 30  # outlier/trend eligibility: real seasons, not cameos
+MIN_CAREER_MAPS = 250  # floor for a career-volume milestone
+TOP_CAREER_VOLUME = 25  # and only the deepest careers past that floor
 
 
 def _ordinal(n: int) -> str:
@@ -42,6 +51,63 @@ class Atom:
     headline: str
     detail: dict[str, Any]
     score: float
+
+
+# How many atoms of one kind a single subject may contribute. Without a cap the
+# per-cohort kinds emit the (season x mode) cross-product of one underlying
+# fact: a player with a strong season produces an all-modes K/D outlier plus one
+# per mode they played, all restating the same claim. Nine of thirty outliers in
+# an early run belonged to one player. Two per kind keeps the genuinely
+# different case — a player who was an outlier in two separate seasons — while
+# dropping the restatements.
+MAX_PER_SUBJECT_KIND = 2
+
+# Kinds where one row per subject is already one fact, so a cap would only
+# discard real findings: league-wide rankings and per-cohort model summaries.
+UNCAPPED_KINDS = frozenset({"what_wins", "era_context", "meta_shift", "model_null"})
+
+
+def cap_per_subject(atoms: list[Atom], limit: int = MAX_PER_SUBJECT_KIND) -> list[Atom]:
+    """Keep each subject's `limit` highest-scoring atoms of each kind.
+
+    Ties break on headline so the result does not depend on row order coming
+    back from Postgres — two runs over the same data emit the same feed.
+    """
+    ranked = sorted(atoms, key=lambda a: (-a.score, a.headline))
+    kept: list[Atom] = []
+    seen: dict[tuple[str, int, str], int] = {}
+    for a in ranked:
+        if a.kind in UNCAPPED_KINDS:
+            kept.append(a)
+            continue
+        key = (a.subject_type, a.subject_id, a.kind)
+        if seen.get(key, 0) >= limit:
+            continue
+        seen[key] = seen.get(key, 0) + 1
+        kept.append(a)
+    return kept
+
+
+def best_per_season(atoms: list[Atom]) -> list[Atom]:
+    """Collapse atoms that restate one season to the strongest of them.
+
+    `outlier` reads `player_season_adjusted`, which carries an all-modes row
+    plus one row per mode. All of them say "this season's K/D beat the cohort",
+    so only the most extreme is a finding; the rest are the same finding sliced
+    by mode. Atoms with no season in their detail pass through untouched.
+    """
+    best: dict[tuple[str, int, str, object], Atom] = {}
+    passthrough: list[Atom] = []
+    for a in atoms:
+        year = a.detail.get("season_year")
+        if year is None:
+            passthrough.append(a)
+            continue
+        key = (a.subject_type, a.subject_id, a.kind, year)
+        prior = best.get(key)
+        if prior is None or (a.score, a.headline) > (prior.score, prior.headline):
+            best[key] = a
+    return passthrough + list(best.values())
 
 
 def _rows(
@@ -151,24 +217,28 @@ def trends(conn: psycopg.Connection[tuple[object, ...]], era_run: int) -> list[A
 
 def milestones(conn: psycopg.Connection[tuple[object, ...]], elo_run: int) -> list[Atom]:
     out = []
-    # Career map-count thresholds.
+    # Career volume, as a rank rather than a threshold. A bare "past the
+    # 250-map mark" cleared for 75 of 273 players, which is a fact about the
+    # threshold rather than about the player; the rank says how rare the career
+    # actually was, and the cut keeps the claim to careers that stand out.
     sql = """
     SELECT gps.player_id, p.handle, count(*) AS maps
     FROM game_player_stats gps JOIN players p ON p.id = gps.player_id
-    GROUP BY gps.player_id, p.handle HAVING count(*) >= 250
-    ORDER BY maps DESC
+    GROUP BY gps.player_id, p.handle HAVING count(*) >= %(min_maps)s
+    ORDER BY maps DESC, p.handle
+    LIMIT %(top_n)s
     """
-    for r in _rows(conn, sql, {}):
+    params = {"min_maps": MIN_CAREER_MAPS, "top_n": TOP_CAREER_VOLUME}
+    for rank, r in enumerate(_rows(conn, sql, params), start=1):
         pid, handle, maps = cast(int, r[0]), cast(str, r[1]), cast(int, r[2])
-        threshold = 500 if maps >= 500 else 250
         out.append(
             Atom(
                 "player",
                 pid,
                 "milestone",
-                f"{handle} logged {maps} career maps in the CWL archive, past the "
-                f"{threshold}-map mark.",
-                {"career_maps": maps, "threshold": threshold},
+                f"{handle} logged {maps} career maps in the CWL archive, the "
+                f"{_ordinal(rank)}-most of any player in it.",
+                {"career_maps": maps, "rank": rank, "threshold": MIN_CAREER_MAPS},
                 0.35 + min(maps / 2000.0, 0.3),
             )
         )
@@ -325,10 +395,7 @@ def what_wins(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list
                 f"{ratio:.1f}x the equivalent slaying edge"
             )
         else:
-            reading = (
-                f"objective play and slaying carried nearly equal weight "
-                f"({ratio:.1f}x)"
-            )
+            reading = f"objective play and slaying carried nearly equal weight ({ratio:.1f}x)"
         out.append(
             Atom(
                 "season",
@@ -460,7 +527,7 @@ def generate(
     from .insights_metrics import generate as metric_atoms
 
     atoms = (
-        outliers(conn, era_run)
+        best_per_season(outliers(conn, era_run))
         + trends(conn, era_run)
         + milestones(conn, elo_run)
         + era_context(conn)
@@ -470,6 +537,9 @@ def generate(
         + model_null(conn, wp_run, glicko_run)
         + (metric_atoms(conn, metric_run) if metric_run is not None else [])
     )
+    # One subject must not be able to flood a kind with restatements of the
+    # same fact; see cap_per_subject.
+    atoms = cap_per_subject(atoms)
     conn.cursor().executemany(
         "INSERT INTO insights (run_id, subject_type, subject_id, kind, headline, detail, score)"
         " VALUES (%s, %s, %s, %s, %s, %s, %s)",

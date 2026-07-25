@@ -9,7 +9,7 @@ import {
   getEloTimelines,
   getEraSpans,
   getEventMarkers,
-  getFeed,
+  getFeedHighlights,
   getBacktestCards,
   getPaceByMode,
   getPlayerLeaderboard,
@@ -19,16 +19,11 @@ import {
   latestRun,
   teamSlug,
 } from "@/lib/analytics";
+import { kindLabel } from "@/lib/insightKinds";
 
-export const dynamic = "force-dynamic";
-
-const KIND_LABEL: Record<string, string> = {
-  outlier: "Outlier",
-  trend: "Trend",
-  milestone: "Milestone",
-  era_context: "Era context",
-  h2h_edge: "Head-to-head",
-};
+// The archive is frozen and the models only change on a rerun, so this page is
+// prerendered and revalidated on a timer rather than queried per request.
+export const revalidate = 3600;
 
 function SectionHeader({ title, note }: { title: string; note?: string }) {
   return (
@@ -85,7 +80,7 @@ export default async function Home() {
       getBacktestCards(
         [eloRun.id, glickoRun?.id].filter((x): x is number => x != null),
       ),
-      insightsRun ? getFeed(insightsRun.id, 8) : Promise.resolve([]),
+      insightsRun ? getFeedHighlights(insightsRun.id, 8) : Promise.resolve([]),
       getSeriesRecords(),
       getSeasonKdSpread(eraRun.id),
     ]);
@@ -264,16 +259,17 @@ export default async function Home() {
         <div className="mt-6 grid grid-cols-1 gap-10 lg:grid-cols-2">
           <div>
             <p className="text-sm leading-relaxed text-ink-secondary">
-              Each strip below is every qualified player-season in one title,
-              plotted by raw K/D on a shared axis. The league average shifts from
-              year to year, so a 1.10 K/D in 2017 and a 1.10 in 2019 are not the
-              same performance.
+              Each strip below is every player-season of at least 30 maps in one
+              title, plotted by raw K/D on a shared axis. The league average
+              shifts from year to year, so a 1.10 K/D in 2017 and a 1.10 in 2019
+              are not the same performance. The cohort the z-scores are measured
+              against is wider than this — qualification there is 8 maps.
             </p>
             <div className="mt-5 space-y-6">
               {kdSpread.map((s) => (
                 <div key={s.year}>
                   <div className="eyebrow mb-1 text-[10px] text-ink-secondary">
-                    {s.year} {s.title} · {s.values.length} players
+                    {s.year} {s.title} · {s.values.length} players ≥ 30 maps
                   </div>
                   <DistributionStrip
                     values={s.values}
@@ -324,8 +320,8 @@ export default async function Home() {
           <ul className="mt-4 divide-y divide-hairline/60">
             {findings.map((f) => (
               <li key={f.id} className="flex items-baseline gap-4 py-2.5">
-                <span className="eyebrow w-24 flex-none text-[10px] text-ink-muted">
-                  {KIND_LABEL[f.kind] ?? f.kind}
+                <span className="eyebrow w-28 flex-none text-[10px] leading-snug text-ink-muted">
+                  {kindLabel(f.kind)}
                 </span>
                 <span className="text-sm leading-snug">{f.headline}</span>
                 <Link

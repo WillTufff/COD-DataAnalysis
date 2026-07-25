@@ -33,6 +33,10 @@ const MODE_LABELS: Record<string, string> = {
 
 const TIER_ORDER = ["gold", "gold-fun", "standard", "fun"];
 
+// Landing preset: the all-mode engagement core, so the first thing a visitor
+// sees covers every season and mode rather than one mode's specialism.
+const DEFAULT_PRESET = "slaying-core";
+
 const CATEGORY_LABELS: Record<string, string> = {
   slaying: "Slaying & engagement",
   discipline: "Discipline & survival",
@@ -88,7 +92,11 @@ export default async function StatsPage({
 
   // One resolution, shared with the export route so a download always matches
   // the table it came from.
-  const resolved = await resolveReport(run.id, sp, metrics);
+  // A bare visit lands on a real report rather than an empty frame: this page
+  // fronts every published metric, so it should show what one looks like.
+  const resolved = await resolveReport(run.id, sp, metrics, {
+    fallbackPreset: DEFAULT_PRESET,
+  });
   const { selected, selectedEntries, activePreset, scope, rankedScope } =
     resolved;
 

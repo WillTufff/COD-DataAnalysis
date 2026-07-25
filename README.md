@@ -18,28 +18,30 @@ The full loop runs end to end on real data, locally:
 - **Models.** Era adjustment (cohort z-scores and percentiles per season and mode,
   minimum 8 maps), Elo (K=32), Glicko-2 (τ=0.5), an open composite player rating fit on
   what actually wins maps, and a win-probability model whose result was a published null.
-  Walk-forward backtests put Glicko-2 at 0.2215 Brier / 65.4% accuracy and Elo at 0.2228
-  / 63.7%. Every model write is versioned through `model_runs` and replaced on rerun.
-- **Metric layer.** Around eighty derived metrics per player, season and mode, plus team
+  Walk-forward backtests over 1,310 decided series put Glicko-2 at 0.22170 Brier / 65.0%
+  accuracy and Elo at 0.22281 / 63.4%, close enough that no system separates from the
+  others. Every model write is versioned through `model_runs` and replaced on rerun;
+  superseded runs of the same model are pruned so only what a run published survives.
+- **Metric layer.** 93 derived metrics per player, season and mode, plus team
   style metrics and loadout meta aggregates, all era-scored against their own cohort.
   Which seasons a metric covers is measured from the data rather than declared, so
   columns the archive records but never populated are reported as gaps instead of being
   published as zeros.
-- **Site.** An analysis overview, a query explorer over player-season cohorts, a stat
-  explorer across every published metric, a loadout meta page, a ratings page (Elo race,
-  Glicko standings with RD, raw vs. adjusted leaderboard), a findings ledger, and the
-  methodology write-up with an auto-generated metric glossary.
+- **Site.** An analysis overview (Elo race, era-adjustment strips, raw vs. adjusted
+  leaderboard), team and player pages, a report builder over every published metric with
+  CSV/XLSX export, a rounds page for the kill-feed tier, a loadout meta page, a findings
+  ledger, and the methodology write-up with an auto-generated metric glossary. Player and
+  team pages are prerendered; the filterable views render per request.
 
 Two things are still open. CDL-era data needs Liquipedia LPDB API access, which is not yet in
 place, so the site currently covers 2017 to 2019 only. And
-the `career_curves` and `player_archetypes` tables exist but are empty; aging curves and
-archetype clustering are the next modeling work.
+the `career_curves` table exists but is empty; aging curves are the next modeling work.
 
 ## What comes next
 
 1. CDL-era ingestion once LPDB access lands, followed by a first real rating run across
    both eras.
-2. Career modeling: aging curves and archetype clustering, both of which build on the
+2. Career modeling: aging curves and peak detection, both of which build on the
    metric layer.
 3. Public query API and player comparison.
 4. CWL backfill to 2016 and cross-title era recalibration, which also unlocks the

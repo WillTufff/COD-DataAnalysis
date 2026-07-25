@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dsn", default=None)
     args = ap.parse_args(argv)
 
-    from .writeback import open_run
+    from .writeback import open_run, prune_superseded
 
     with connect(args.dsn) as conn:
         series = fit.load_series(conn)
@@ -34,7 +34,10 @@ def main(argv: list[str] | None = None) -> int:
             print("no decided series in database — import data first", file=sys.stderr)
             return 1
         through = fit.data_through(series)
+        lineage = fit.load_lineage(conn)
+        n_merged = sum(1 for team, founder in lineage.items() if team != founder)
         print(f"{len(series)} decided series through {through}")
+        print(f"org lineage: {n_merged} teams rated under an earlier brand")
 
         era_run = open_run(conn, "era_adjust", "1.0.0", {"min_maps": era.MIN_MAPS}, through)
         n = era.compute_and_write(conn, era_run)
@@ -60,8 +63,14 @@ def main(argv: list[str] | None = None) -> int:
         n = metrics.compute_and_write(conn, metric_run)
         print(f"metric_layer run {metric_run}: {n} player-metric rows")
 
-        elo_run = open_run(conn, "elo", "1.0.0", {"k": ELO_K, "level": "series"}, through)
-        preds = fit.fit_elo(conn, elo_run, series, k=ELO_K)
+        elo_run = open_run(
+            conn,
+            "elo",
+            "1.0.0",
+            {"k": ELO_K, "level": "series", "lineage_merged_teams": n_merged},
+            through,
+        )
+        preds = fit.fit_elo(conn, elo_run, series, k=ELO_K, lineage=lineage)
         report = backtest.evaluate(preds)
         backtest.write(conn, elo_run, report)
         print(
@@ -71,9 +80,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         glicko_run = open_run(
-            conn, "glicko2", "1.0.0", {"tau": GLICKO_TAU, "period": "series"}, through
+            conn,
+            "glicko2",
+            "1.0.0",
+            {"tau": GLICKO_TAU, "period": "series", "lineage_merged_teams": n_merged},
+            through,
         )
-        preds = fit.fit_glicko2(conn, glicko_run, series, tau=GLICKO_TAU)
+        preds = fit.fit_glicko2(conn, glicko_run, series, tau=GLICKO_TAU, lineage=lineage)
         report = backtest.evaluate(preds)
         backtest.write(conn, glicko_run, report)
         print(
@@ -174,6 +187,27 @@ def main(argv: list[str] | None = None) -> int:
             conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run, metric_run
         )
         print(f"insights run {ins_run}: {n} atoms")
+
+        # Everything above is what this run publishes. Older runs of the same
+        # models — earlier insight and metric-layer versions in particular — are
+        # never read again, so they go rather than accumulating one copy of the
+        # league per rerun. The rating versions all survive: they are published
+        # baselines, and all three ids are handed over here.
+        removed = prune_superseded(
+            conn,
+            {
+                "era_adjust": [era_run],
+                "metric_layer": [metric_run],
+                "elo": [elo_run],
+                "glicko2": [glicko_run],
+                "player_rating": list(rating_runs.values()),
+                "winprob": [wp_run],
+                "insights": [ins_run],
+            },
+        )
+        if removed:
+            detail = ", ".join(f"{m} x{n}" for m, n in sorted(removed.items()))
+            print(f"pruned superseded runs: {detail}")
 
         conn.commit()
     return 0

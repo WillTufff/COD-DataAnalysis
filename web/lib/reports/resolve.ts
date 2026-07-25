@@ -60,6 +60,12 @@ export async function resolveReport(
   runId: number,
   sp: SearchParams,
   metrics: MetricCatalogEntry[],
+  opts: {
+    /** Preset to fall back to when the URL names no report at all — a bare
+     *  first visit. Deliberately not applied when a column key is present but
+     *  empty, so clearing every column still reaches the blank slate. */
+    fallbackPreset?: string;
+  } = {},
 ): Promise<ResolvedReport> {
   const byKey = new Map(metrics.map((m) => [m.key, m]));
   const knownKeys = new Set(byKey.keys());
@@ -68,7 +74,10 @@ export async function resolveReport(
   // only seeds columns when none were named, so editing a preset's columns —
   // which writes explicit `metrics` and drops `preset` — is respected.
   const explicit = parseMetrics(sp).filter((k) => byKey.has(k));
-  const presetId = one(sp, "preset");
+  const untouched =
+    !("metrics" in sp) && !("metric" in sp) && !("preset" in sp);
+  const presetId =
+    one(sp, "preset") || (untouched ? (opts.fallbackPreset ?? "") : "");
   const activePreset =
     explicit.length === 0 && presetId ? presetById(presetId) : undefined;
   const selected =

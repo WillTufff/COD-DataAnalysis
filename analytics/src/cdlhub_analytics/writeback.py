@@ -3,6 +3,14 @@
 Every model writes through a model_runs row. Runs are immutable in place: a
 rerun with the same (model, version, data_through) *replaces* the whole run
 (cascade-deletes its outputs, reuses the id); anything else creates a new run.
+
+A version bump therefore leaves the old run behind, which is right for the
+rating versions that are kept as backtest baselines and wrong for everything
+else — the site only ever reads the newest run of a model, so superseded
+insights and metric-layer runs are dead rows that grow without bound.
+`prune_superseded` closes that off: whatever a run produced for a model is what
+survives for that model. Models the run never touched are left alone, so the
+pipeline's own runs (kill-feed reconciliation) are not collateral.
 """
 
 from __future__ import annotations
@@ -47,6 +55,30 @@ def open_run(
     ).fetchone()
     assert new is not None
     return cast(int, new[0])
+
+
+def prune_superseded(
+    conn: psycopg.Connection[tuple[object, ...]],
+    produced: dict[str, list[int]],
+) -> dict[str, int]:
+    """Drop runs of each produced model that this run did not produce.
+
+    `produced` maps a model name to every run id the current run wrote for it —
+    several for player_rating, whose feature-set versions are all published and
+    compared. Returns the delete count per model, for logging. Outputs go with
+    the run via ON DELETE CASCADE.
+    """
+    removed: dict[str, int] = {}
+    for model, keep in produced.items():
+        if not keep:  # never prune a model down to nothing
+            continue
+        cur = conn.execute(
+            "DELETE FROM model_runs WHERE model = %s AND NOT (id = ANY(%s))",
+            (model, list(keep)),
+        )
+        if cur.rowcount:
+            removed[model] = cur.rowcount
+    return removed
 
 
 def latest_run_id(conn: psycopg.Connection[tuple[object, ...]], model: str) -> int | None:

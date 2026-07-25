@@ -1,5 +1,5 @@
 {
-  "_comment": "Identity corrections for the CWL 2017-2019 archive (Activision cwl-data). Owner-editable. 'players' maps archive spellings to canonical handles (the archive title-cases stylized gamertags); 'teams' merges names the archive uses inconsistently for the same team. Archive spellings are preserved in player_aliases.",
+  "_comment": "Identity corrections for the CWL 2017-2019 archive (Activision cwl-data). Owner-editable. 'players' maps archive spellings to canonical handles (the archive title-cases stylized gamertags); 'teams' merges names the archive uses inconsistently for the same team. Archive spellings are preserved in player_aliases. 'orgs' is a different thing from 'teams': it groups distinct branded identities under one organisation so a rebrand keeps one rating curve. Membership is only asserted where the two brands' series windows do not overlap — a concurrent second roster is an academy team, not a rebrand.",
   "players": {
     "Abezy": "aBeZy",
     "Formal": "FormaL",
@@ -12,5 +12,8 @@
     "Complexity Gaming": "Complexity",
     "Luminosity Gaming": "Luminosity",
     "ExcelerateGG": "Excelerate"
+  },
+  "orgs": {
+    "eRa Eternity": ["eRa", "eRa Eternity"]
   }
 }

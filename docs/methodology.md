@@ -99,7 +99,7 @@ Splitting cohorts further by LAN versus online is a planned refinement. It needs
 
 The archive measures far more than kills and deaths. The metric layer turns every
 measured column into a published, era-scored metric, so a player's season can be read
-across roughly eighty different lenses instead of four.
+across 93 different lenses instead of four.
 
 Metrics are stored in long form, one row per player, season, mode, and metric, each
 carrying its own qualification denominator. That denominator is the honest sample size
@@ -186,13 +186,29 @@ only about 69% of the time.
 ## Tier 2: Rating systems
 
 **Team strength over time (shipped).** Elo (K=32) and Glicko-2 (τ=0.5) are fit over the
-full history at series level. Ratings are org-lineage-aware, so a team's curve runs
-continuously through rebrands rather than resetting. Glicko-2's rating deviation gives
-the uncertainty bands shown on the ratings page. A map-margin-weighted variant is
-planned as a sensitivity check.
+full history at series level. Glicko-2's rating deviation gives the uncertainty bands
+shown on the ratings page. A map-margin-weighted variant is planned as a sensitivity
+check.
 
-**Series win probability, `winprob_v1` (shipped).** Glicko-2 is the strongest
-baseline in the table below, so rather than another rating system this model asks a
+Ratings are org-lineage-aware: rating state is keyed on the organisation, not the brand,
+so a rebrand continues one curve instead of restarting at 1500. The stored rows still
+name the team that actually played, so the site shows the brand of the day on a
+continuous line, and a lineage is rated under its founding team.
+
+Two honest notes on how much that currently does. Lineage membership is declared in the
+importer's identity file, and it is asserted only where two brands' series windows do
+*not* overlap — a same-brand roster playing concurrently is an academy team, not a
+rebrand, so `Mindfreak` / `Mindfreak Black`, `EZG` / `EZG Blue` and the three `GGEA`
+teams stay on separate curves. Applying that test to this archive leaves exactly one
+lineage, `eRa` → `eRa Eternity`, covering 23 of 1,310 series: the era's well-known
+rebrands (Splyce to Evil Geniuses, the OpTic and franchise moves) all happen after
+2019-08-18, where the data stops. So the machinery is real and tested but currently
+near-inert; it matters for the CDL era, not for this one. `Morituri eSports` /
+`Regal Morituri` is deliberately left unmerged: the older brand reappears *after* the
+newer one, which is not the shape of a rebrand.
+
+**Series win probability, `winprob_v1` (shipped).** Glicko-2 is the strongest of the
+two rating systems, so rather than another rating system this model asks a
 sharper question: given the ratings, does anything else carry information about who
 wins a series? Its features, all computed strictly before each series, are the
 walk-forward Glicko-2 and Elo win probabilities (as logits), the combined Glicko-2
@@ -209,17 +225,22 @@ the momentum narrative. A null, backtested and reported, is a result.
 
 **Validation (shipped).** Models are evaluated by walk-forward backtest, which is to
 say each prediction is made using only data available before that series. Current
-results, over the full 2017-2019 record:
+results, over the full 2017-2019 record of 1,310 decided series:
 
-| Model | Brier | Accuracy |
-|---|---|---|
-| Glicko-2 | 0.2215 | 65.4% |
-| winprob_v1 | 0.2217 | 64.4% |
-| Elo | 0.2228 | 63.7% |
+| Model | Brier | Log loss | Accuracy |
+|---|---|---|---|
+| winprob_v1 | 0.22168 | 0.6363 | 64.4% |
+| Glicko-2 | 0.22170 | 0.6377 | 65.0% |
+| Elo | 0.22281 | 0.6354 | 63.4% |
 
-Glicko-2 is ahead on both, though the margin is narrow enough that it should not be
-read as settled. Brier score, log loss, accuracy, and calibration curves are published
-for every model version.
+No system wins outright, and the table is quoted to five decimals precisely because
+rounding to four would hide that. Glicko-2 leads on accuracy, `winprob_v1` leads on
+Brier by 0.000015 — around one part in fifteen thousand, which is noise and not a
+result — and Elo, the weakest on the other two, has the best log loss. The honest
+reading is that all three are indistinguishable on 1,310 series. That is itself the
+cleanest support for the null below: if the added features carried real signal,
+`winprob_v1` would separate from its own baseline, and it does not. Brier score, log
+loss, accuracy, and calibration curves are published for every model version.
 
 Model outputs are versioned against the run that produced them, recording code version,
 hyperparameters, and training window. A rerun replaces a whole run rather than editing
@@ -397,12 +418,22 @@ Six more read the metric layer, which is where the claims a box score cannot mak
 - **team style** — rosters at the extremes of how they divided hill duty, opening duty
   and kills.
 
-There are currently 241. Each carries the numbers backing it and a link into the
+There are currently 161. Each carries the numbers backing it and a link into the
 evidence view, so any claim on the site can be traced to the data that produced it.
 These are generated from model output by fixed rules, not written by hand and not
 written by a language model.
 
-Two details in that generation are worth stating, because both were bugs first. Roughly
+Two passes at the end keep that count honest, because the raw rules overcount badly.
+Several kinds read a table that carries an all-modes row *plus* one row per mode, so a
+player with one strong season produced an all-modes K/D outlier and one more per mode
+played — the same finding sliced five ways. One player once held nine of thirty
+outliers. So each season collapses to its single most extreme slice, and no subject may
+contribute more than two findings of any one kind; league-wide rankings and per-cohort
+model summaries are exempt, being one fact each already. Career volume is reported as a
+rank among the deepest 25 careers rather than as a threshold, because "past 250 maps"
+was true of 75 of 273 players and described the threshold rather than the player.
+
+Two more details are worth stating, because both were bugs first. Roughly
 half the intangibles are lower-is-better — untraded deaths, first deaths, zero-kill
 rounds — so every comparison re-reads a percentile through the catalog's own direction
 before calling it good or bad; without that step the generator reported players who were

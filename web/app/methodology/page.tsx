@@ -17,7 +17,9 @@ import {
   type PaceCell,
 } from "@/lib/analytics";
 
-export const dynamic = "force-dynamic";
+// The archive is frozen and the models only change on a rerun, so this page is
+// prerendered and revalidated on a timer rather than queried per request.
+export const revalidate = 3600;
 
 export const metadata: Metadata = { title: "Methodology" };
 
@@ -321,6 +323,16 @@ export default async function MethodologyPage() {
             Series whose deciding map is missing from the archive are left
             unrated. Predictions are strictly walk-forward: each series is
             predicted <em>before</em> the model sees its result.
+          </p>
+          <p>
+            Rating state is keyed on the organisation rather than the brand, so a
+            rebrand continues one curve instead of restarting at 1500, while the
+            stored rows keep the team that actually played. A lineage is only
+            declared where two brands&rsquo; series windows don&rsquo;t overlap —
+            a same-brand roster playing concurrently is an academy team, not a
+            rebrand. In this archive that leaves one lineage, eRa → eRa Eternity:
+            the era&rsquo;s well-known rebrands all happen after the data stops,
+            so the machinery matters for the CDL era more than this one.
           </p>
         </div>
       </section>
@@ -976,7 +988,8 @@ export default async function MethodologyPage() {
             (the <code className="font-mono text-xs">cwl-data</code> repository,
             BSD-3-Clause). The 2017–2018 structured event feeds behind this tier
             come from the same repository under the same licence. Event metadata
-            and roster context come from Liquipedia contributors (CC-BY-SA 3.0).
+            comes from that archive too, and roster history is inferred from who
+            appears in the box scores rather than from any external roster source.
             Handles are normalized across seasons with an alias map maintained in
             the repository; corrections are welcome.
           </p>
@@ -988,6 +1001,20 @@ export default async function MethodologyPage() {
             <code className="font-mono text-xs">github.com/Activision/cwl-data</code>.
             The fetch script re-hashes the box-score CSVs against that revision, so
             the box scores and the event feeds are provably one version of the source.
+          </p>
+          <p>
+            CDL-era statistics are not here yet. When they arrive they will come from{" "}
+            <a
+              className="underline hover:text-ink"
+              href="https://liquipedia.net/callofduty"
+            >
+              Liquipedia
+            </a>{" "}
+            (CC-BY-SA 3.0) through the LPDB API — within the published rate limits,
+            with an identifying User-Agent, and never by scraping HTML. Pages using
+            their data will carry visible attribution, and derived data will be shared
+            back under the same licence. Nothing on the site draws on that source
+            today.
           </p>
         </div>
       </section>

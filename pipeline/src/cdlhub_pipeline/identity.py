@@ -18,17 +18,33 @@ from importlib import resources
 class Aliases:
     players: dict[str, str]  # archive spelling -> canonical handle
     teams: dict[str, str]  # archive name -> canonical team name
+    orgs: dict[str, list[str]]  # org name -> its team names, earliest brand first
 
     @classmethod
     def load(cls) -> Aliases:
         raw = json.loads(resources.files("cdlhub_pipeline").joinpath("aliases.json").read_text())
-        return cls(players=dict(raw["players"]), teams=dict(raw["teams"]))
+        return cls(
+            players=dict(raw["players"]),
+            teams=dict(raw["teams"]),
+            orgs={k: list(v) for k, v in raw.get("orgs", {}).items()},
+        )
 
     def team(self, name: str) -> str:
         return self.teams.get(name, name)
 
     def player(self, handle: str) -> str:
         return self.players.get(handle, handle)
+
+    def org_of(self, team_name: str) -> str | None:
+        """The organisation a canonical team name belongs to, if any.
+
+        Teams with no entry return None and are their own lineage; the ratings
+        then behave exactly as they did before any org was declared.
+        """
+        for org, members in self.orgs.items():
+            if team_name in members:
+                return org
+        return None
 
 
 def canonical_spellings(handles: Iterable[str]) -> dict[str, str]:

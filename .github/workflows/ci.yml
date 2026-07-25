@@ -38,6 +38,60 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest -q
 
+  # The real-data gate. The `analytics` job above runs the same suite with no
+  # database, so every DB-backed test skips there. Those tests are the ones that
+  # hold the kill-feed reconciliation figures (WWII at exactly 100%), and a
+  # skipped assertion guards nothing — so the full ingest runs here, against the
+  # snapshots committed in pipeline/snapshots/, and the suite runs again on top
+  # of it. A regression in the importer or in death classification fails this
+  # job.
+  data-gate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cdlhub
+          POSTGRES_PASSWORD: cdlhub
+          POSTGRES_DB: cdlhub
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cdlhub"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://cdlhub:cdlhub@localhost:54329/cdlhub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Migrations
+        working-directory: db
+        run: ./migrate.sh
+      - name: Import box scores and the structured event tier
+        working-directory: pipeline
+        run: |
+          uv sync
+          uv run python -m cdlhub_pipeline.cwl_archive --reset
+          uv run python -m cdlhub_pipeline.cwl_structured --reset
+      - name: Quality gate and coverage report
+        working-directory: pipeline
+        run: uv run python -m cdlhub_pipeline.quality
+      # -rs reports skip reasons. A DB-backed test that skips here means the
+      # gate silently stopped gating, which must fail rather than pass green.
+      - name: Analytics suite against real data
+        working-directory: analytics
+        run: |
+          uv sync
+          set -o pipefail
+          uv run pytest -q -rs 2>&1 | tee pytest.log
+          if grep -qE "no database reachable|kill_events is empty" pytest.log; then
+            echo "::error::DB-backed tests skipped in the data gate; the reconciliation check is not running"
+            exit 1
+          fi
+
   web:
     runs-on: ubuntu-latest
     defaults:

@@ -16,6 +16,7 @@ from typing import cast
 
 import psycopg
 
+from ..identity import Aliases
 from .manifest import LEAGUE, MODE_SLUGS, ArchiveEvent
 from .parse import ArchiveStatLine, ParsedEvent
 
@@ -47,9 +48,16 @@ class GameKey:
 
 
 class Loader:
-    def __init__(self, conn: psycopg.Connection[tuple[object, ...]]):
+    def __init__(
+        self,
+        conn: psycopg.Connection[tuple[object, ...]],
+        aliases: Aliases | None = None,
+    ):
         self.conn = conn
         self.counts: dict[str, int] = defaultdict(int)
+        # Only needed for org lineage; an empty Aliases leaves every team its
+        # own lineage, which is the pre-lineage behaviour.
+        self.aliases = aliases or Aliases(players={}, teams={}, orgs={})
 
     # ---- reference lookups (insert-if-missing, cached) ----
 
@@ -93,12 +101,34 @@ class Loader:
         )
         return self._one("SELECT id FROM maps WHERE name = %s AND title_id = %s", (name, title_id))
 
+    def org_id(self, name: str) -> int:
+        self.conn.execute(
+            "INSERT INTO orgs (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,)
+        )
+        return self._one("SELECT id FROM orgs WHERE name = %s", (name,))
+
     def team_id(self, name: str) -> int:
+        """The team row for a canonical name, creating it and its org on first sight.
+
+        A team named in `aliases.json`'s `orgs` map is linked to that org, which
+        is what lets the ratings run one curve through a rebrand. Teams with no
+        org stay unlinked and are rated on their own.
+        """
+        org = self.aliases.org_of(name)
+        org_id = self.org_id(org) if org else None
         row = self.conn.execute("SELECT id FROM teams WHERE name = %s", (name,)).fetchone()
         if row is not None:
-            return cast(int, row[0])
+            team_id = cast(int, row[0])
+            if org_id is not None:
+                self.conn.execute(
+                    "UPDATE teams SET org_id = %s WHERE id = %s AND org_id IS DISTINCT FROM %s",
+                    (org_id, team_id, org_id),
+                )
+            return team_id
         self.counts["teams"] += 1
-        return self._one("INSERT INTO teams (name) VALUES (%s) RETURNING id", (name,))
+        return self._one(
+            "INSERT INTO teams (name, org_id) VALUES (%s, %s) RETURNING id", (name, org_id)
+        )
 
     def player_id(self, handle: str, archive_spellings: set[str]) -> int:
         row = self.conn.execute(

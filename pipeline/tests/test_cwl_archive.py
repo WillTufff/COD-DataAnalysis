@@ -69,6 +69,33 @@ def test_aliases_apply() -> None:
     assert aliases.player("Scump") == "Scump"  # untouched passthrough
 
 
+def test_org_lineage_groups_rebrands_only() -> None:
+    aliases = Aliases.load()
+    # eRa played 2017 Champs, eRa Eternity the 2018 events; the windows do not
+    # overlap, so it is one org under two brands.
+    assert aliases.org_of("eRa") == "eRa Eternity"
+    assert aliases.org_of("eRa Eternity") == "eRa Eternity"
+    # A team with no declared org is its own lineage.
+    assert aliases.org_of("OpTic Gaming") is None
+
+
+def test_org_lineage_excludes_concurrent_rosters() -> None:
+    """Same-brand pairs that played at the same time are academy teams, not
+    rebrands, and must stay on separate rating curves."""
+    aliases = Aliases.load()
+    for name in ("Mindfreak", "Mindfreak Black", "EZG", "EZG Blue", "GGEA Blue", "GGEA Orange"):
+        assert aliases.org_of(name) is None, f"{name} must not be merged into a lineage"
+
+
+def test_org_members_are_declared_consistently() -> None:
+    """Every name in an org's member list resolves back to that org."""
+    aliases = Aliases.load()
+    for org, members in aliases.orgs.items():
+        assert len(members) >= 2, f"{org} declares a lineage of one, which does nothing"
+        for name in members:
+            assert aliases.org_of(name) == org
+
+
 def test_canonical_handles_majority_casing() -> None:
     def line(player: str) -> ArchiveStatLine:
         return parse_row(_row_2019(player=player))

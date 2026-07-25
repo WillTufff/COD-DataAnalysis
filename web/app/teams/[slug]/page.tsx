@@ -6,6 +6,7 @@ import { PlacementTimeline } from "@/components/charts/PlacementTimeline";
 import { StintTimeline } from "@/components/charts/StintTimeline";
 import { PctlBar } from "@/components/PctlBar";
 import {
+  getAllTeamSlugs,
   getEloTimelines,
   getEraSpans,
   getEventMarkers,
@@ -77,7 +78,16 @@ function buildStyleRows(
     .sort((a, b) => b.year - a.year || a.label.localeCompare(b.label));
 }
 
-export const dynamic = "force-dynamic";
+// The archive is frozen and the models only change on a rerun, so this page is
+// prerendered and revalidated on a timer rather than queried per request.
+export const revalidate = 3600;
+
+// Every team in the archive is known at build time, so all of them prerender
+// rather than each waiting for its first visitor.
+export async function generateStaticParams() {
+  const slugs = await getAllTeamSlugs();
+  return slugs.map((slug) => ({ slug }));
+}
 
 export async function generateMetadata({
   params,
@@ -339,7 +349,7 @@ export default async function TeamPage({
       <section className="mt-12">
         <h2 className="lower-third">
           Roster history
-          <span className="lt-note">from Liquipedia roster records</span>
+          <span className="lt-note">inferred from archive appearances</span>
         </h2>
         <div className="mt-4 border border-hairline bg-surface p-4">
           <StintTimeline

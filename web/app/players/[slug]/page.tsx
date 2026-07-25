@@ -15,6 +15,7 @@ import { RoundShareBar } from "@/components/charts/RoundShareBar";
 import { PctlBar } from "@/components/PctlBar";
 import { Tabs } from "@/components/Tabs";
 import {
+  getAllPlayerSlugs,
   getMetricCatalog,
   getPlayerAdjusted,
   getPlayerBySlug,
@@ -27,8 +28,18 @@ import {
   type PlayerMetricValue,
   type SeasonAdjusted,
 } from "@/lib/analytics";
+import { kindLabel } from "@/lib/insightKinds";
 
-export const dynamic = "force-dynamic";
+// The archive is frozen and the models only change on a rerun, so this page is
+// prerendered and revalidated on a timer rather than queried per request.
+export const revalidate = 3600;
+
+// Every player in the archive is known at build time, so all of them prerender
+// rather than each waiting for its first visitor.
+export async function generateStaticParams() {
+  const slugs = await getAllPlayerSlugs();
+  return slugs.map((slug) => ({ slug }));
+}
 
 function fmtZ(z: number | null): string {
   if (z === null) return "—";
@@ -801,7 +812,7 @@ function CareerTab({
                 className="border border-hairline bg-surface p-3 text-sm"
               >
                 <span className="eyebrow mr-2 text-[10px] text-accent">
-                  {i.kind.replace("_", " ")}
+                  {kindLabel(i.kind)}
                 </span>
                 {i.headline}
               </li>
