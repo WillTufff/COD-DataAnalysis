@@ -14,6 +14,7 @@ import {
   players,
   playerMetricSeason,
   playerSeasonAdjusted,
+  playerStyleSeason,
   rosterStints,
   seasons,
   series,
@@ -306,6 +307,7 @@ export type PlayerIndexRow = {
   teamCount: number;
   latestTeam: string | null;
   bestRating: number | null; // best qualified season, null if none qualify
+  bestRatingSd: number | null; // posterior sd of that rating
   bestRatingYear: number | null;
   bestRatingTitle: string | null;
 };
@@ -381,7 +383,7 @@ export async function queryPlayerIndex(
       GROUP BY psa.player_id
     ), best AS (
       SELECT DISTINCT ON (psa.player_id)
-             psa.player_id, psa.rating,
+             psa.player_id, psa.rating, psa.rating_sd,
              se.year AS rating_year, t.short_name AS rating_title
       FROM player_season_adjusted psa
       JOIN seasons se ON se.id = psa.season_id
@@ -400,7 +402,7 @@ export async function queryPlayerIndex(
     SELECT p.id AS player_id, p.handle,
            c.maps, c.seasons, c.first_year, c.last_year,
            r.team_count, r.latest_team,
-           b.rating, b.rating_year, b.rating_title
+           b.rating, b.rating_sd, b.rating_year, b.rating_title
     FROM players p
     JOIN career c ON c.player_id = p.id
     LEFT JOIN rosters r ON r.player_id = p.id
@@ -421,6 +423,7 @@ export async function queryPlayerIndex(
     teamCount: r.team_count === null ? 0 : Number(r.team_count),
     latestTeam: r.latest_team === null ? null : String(r.latest_team),
     bestRating: r.rating === null ? null : Number(r.rating),
+    bestRatingSd: r.rating_sd === null ? null : Number(r.rating_sd),
     bestRatingYear: r.rating_year === null ? null : Number(r.rating_year),
     bestRatingTitle: r.rating_title === null ? null : String(r.rating_title),
   }));
@@ -452,6 +455,9 @@ export type SeasonAdjusted = {
   mapsPlayed: number;
   kdRaw: number | null;
   kdZ: number | null;
+  /** Standard error of kdZ, computed by the era model against the same cohort
+   *  SD the z-score used. NULL where the sample cannot support one. */
+  kdZSe: number | null;
   kdPctl: number | null;
   engagementZ: number | null;
   objZ: number | null;
@@ -472,6 +478,7 @@ export async function getPlayerAdjusted(
       mapsPlayed: playerSeasonAdjusted.mapsPlayed,
       kdRaw: playerSeasonAdjusted.kdRaw,
       kdZ: playerSeasonAdjusted.kdZ,
+      kdZSe: playerSeasonAdjusted.kdZSe,
       kdPctl: playerSeasonAdjusted.kdPctl,
       engagementZ: playerSeasonAdjusted.engagementZ,
       objZ: playerSeasonAdjusted.objZ,
@@ -489,6 +496,75 @@ export async function getPlayerAdjusted(
     )
     .orderBy(seasons.year, playerSeasonAdjusted.modeId);
   return rows;
+}
+
+export type PlayerRatingSeason = {
+  seasonId: number;
+  year: number;
+  title: string;
+  mapsPlayed: number;
+  rating: number;
+  /** Posterior sd. NULL only if the run predates 0011; drawn as no band. */
+  ratingSd: number | null;
+  qualified: boolean; // cleared the board's map minimum
+};
+
+export type PlayerRatings = {
+  seasons: PlayerRatingSeason[];
+  /** Rating range over every qualified season in the run, so one player's
+   *  intervals are drawn on the same scale as everyone else's. */
+  scale: { lo: number; hi: number };
+  minMaps: number;
+};
+
+/**
+ * A player's composite rating season by season, with the posterior sd that
+ * belongs to each. Returns null when the player has no rated season, so the
+ * caller can drop the section rather than draw an empty axis.
+ */
+export async function getPlayerRatingSeasons(
+  playerId: number,
+  ratingRunId: number,
+  minMaps = 30,
+): Promise<PlayerRatings | null> {
+  const rows = await db.execute(sql`
+    SELECT psa.season_id, se.year, t.short_name AS title,
+           psa.maps_played, psa.rating, psa.rating_sd,
+           (SELECT MIN(q.rating) FROM player_season_adjusted q
+             WHERE q.run_id = ${ratingRunId} AND q.mode_id IS NULL
+               AND q.rating IS NOT NULL AND q.maps_played >= ${minMaps}) AS cohort_lo,
+           (SELECT MAX(q.rating) FROM player_season_adjusted q
+             WHERE q.run_id = ${ratingRunId} AND q.mode_id IS NULL
+               AND q.rating IS NOT NULL AND q.maps_played >= ${minMaps}) AS cohort_hi
+    FROM player_season_adjusted psa
+    JOIN seasons se ON se.id = psa.season_id
+    JOIN titles t ON t.id = se.title_id
+    WHERE psa.run_id = ${ratingRunId} AND psa.mode_id IS NULL
+      AND psa.player_id = ${playerId} AND psa.rating IS NOT NULL
+    ORDER BY se.year
+  `);
+  const raw = rows as unknown as Record<string, unknown>[];
+  if (raw.length === 0) return null;
+  const seasons = raw.map((r) => ({
+    seasonId: Number(r.season_id),
+    year: Number(r.year),
+    title: String(r.title),
+    mapsPlayed: Number(r.maps_played),
+    rating: Number(r.rating),
+    ratingSd: r.rating_sd === null ? null : Number(r.rating_sd),
+    qualified: Number(r.maps_played) >= minMaps,
+  }));
+  // An unqualified season can sit outside the qualified cohort's range, and a
+  // 95% band reaches past its point; widen the scale so nothing is clipped.
+  const lo = Math.min(
+    Number(raw[0].cohort_lo),
+    ...seasons.map((s) => s.rating - 1.96 * (s.ratingSd ?? 0)),
+  );
+  const hi = Math.max(
+    Number(raw[0].cohort_hi),
+    ...seasons.map((s) => s.rating + 1.96 * (s.ratingSd ?? 0)),
+  );
+  return { seasons, scale: { lo, hi }, minMaps };
 }
 
 export async function getPlayerStints(playerId: number) {
@@ -590,7 +666,11 @@ export async function getTeamStandings(
   }));
 }
 
-export type EloPoint = { t: string; rating: number };
+// `rd` is the rating deviation stored alongside the rating: Glicko-2 writes it,
+// Elo leaves it NULL (fit.py has no uncertainty to report). Consumers that draw
+// a band must handle the null rather than assume zero — an unknown deviation is
+// not a confident one.
+export type EloPoint = { t: string; rating: number; rd: number | null };
 export type EloTimeline = { teamId: number; team: string; points: EloPoint[] };
 
 export async function getEloTimelines(
@@ -604,6 +684,7 @@ export async function getEloTimelines(
       team: teams.name,
       playedAt: series.playedAt,
       rating: teamRatings.ratingPost,
+      rd: teamRatings.ratingSd,
     })
     .from(teamRatings)
     .innerJoin(series, eq(series.id, teamRatings.seriesId))
@@ -618,7 +699,11 @@ export async function getEloTimelines(
       tl = { teamId: r.teamId, team: r.team, points: [] };
       byTeam.set(r.teamId, tl);
     }
-    tl.points.push({ t: r.playedAt?.toISOString() ?? "", rating: r.rating });
+    tl.points.push({
+      t: r.playedAt?.toISOString() ?? "",
+      rating: r.rating,
+      rd: r.rd,
+    });
   }
   // Preserve caller's ranking order.
   return teamIds.map((id) => byTeam.get(id)).filter((x): x is EloTimeline => !!x);
@@ -633,6 +718,9 @@ export type LeaderboardRow = {
   mapsPlayed: number;
   kdRaw: number | null;
   kdZ: number | null;
+  /** Standard error of kdZ from the era model; NULL where the sample is too
+   *  thin for one. Carried so the board can show what it does not know. */
+  kdZSe: number | null;
   kdPctl: number | null;
 };
 
@@ -650,6 +738,7 @@ export async function getPlayerLeaderboard(
       mapsPlayed: playerSeasonAdjusted.mapsPlayed,
       kdRaw: playerSeasonAdjusted.kdRaw,
       kdZ: playerSeasonAdjusted.kdZ,
+      kdZSe: playerSeasonAdjusted.kdZSe,
       kdPctl: playerSeasonAdjusted.kdPctl,
     })
     .from(playerSeasonAdjusted)
@@ -806,12 +895,26 @@ export type ModeWeightCohort = {
   mode: string;
   nMaps: number;
   weights: Record<string, number>;
-  objVsSlay: number; // objective weight / mean |slaying| weight
+  labels: Record<string, string>;
+  restFeatures: string[]; // the non-slaying keys the ratio averaged over
+  restVsSlay: number; // mean |weight| beyond the gunfight / mean |slaying weight|
+  // 95% percentile bootstrap over the cohort's maps. Null on runs written before
+  // the bootstrap existed — absent, not wide, so the chart draws no whisker
+  // rather than an invented one.
+  restVsSlayCi: [number, number] | null;
 };
 
 // The learned map-outcome regression weights, one cohort per (season × mode).
-// objVsSlay reads the kills/deaths pair jointly (they are near-collinear in
-// respawn modes, so ridge splits their shared weight).
+//
+// Which features are the slaying pair is read off the artifact, never hardcoded:
+// feature sets differ per cohort (SnD counts kills and deaths per round, respawn
+// modes per 10 minutes) and per version, so a fixed key list silently reads zero
+// the moment the published version changes. The pair is read jointly because a
+// team's kills mirror its opponent's deaths, leaving the two near-collinear and
+// their shared weight split by the ridge penalty.
+//
+// This mirrors what_wins in insights.py — the two must agree, because the chart
+// and the finding make the same claim.
 export async function getModeWeights(ratingRunId: number): Promise<ModeWeightCohort[]> {
   const rows = await db.execute(sql`
     SELECT payload FROM model_artifacts
@@ -825,22 +928,130 @@ export async function getModeWeights(ratingRunId: number): Promise<ModeWeightCoh
           mode: string;
           n_maps: number;
           weights: Record<string, number>;
+          slaying_features?: string[];
+          labels?: Record<string, string>;
+          rest_vs_slay?: number;
+          rest_vs_slay_ci?: [number, number];
         }[];
       }
     | undefined;
   if (!payload) return [];
+  const mean = (keys: string[], w: Record<string, number>) =>
+    keys.reduce((s, k) => s + Math.abs(w[k] ?? 0), 0) / keys.length;
   return payload.cohorts.map((c) => {
-    const slay =
-      (Math.abs(c.weights.kills_p10 ?? 0) + Math.abs(c.weights.deaths_p10 ?? 0)) / 2;
+    const slaying = c.slaying_features?.length
+      ? c.slaying_features
+      : ["kills_p10", "deaths_p10"];
+    const rest = Object.keys(c.weights).filter((k) => !slaying.includes(k));
+    const slay = mean(slaying, c.weights);
+    // The fit publishes the ratio alongside its interval; recomputing it is the
+    // fallback for runs written before it did.
+    const computed = slay > 0 && rest.length > 0 ? mean(rest, c.weights) / slay : 0;
     return {
       year: c.year,
       title: c.title,
       mode: c.mode,
       nMaps: c.n_maps,
       weights: c.weights,
-      objVsSlay: slay > 0 ? Math.max(c.weights.obj_p10 ?? 0, 0) / slay : 0,
+      labels: c.labels ?? {},
+      restFeatures: rest,
+      restVsSlay: c.rest_vs_slay ?? computed,
+      restVsSlayCi: c.rest_vs_slay_ci ?? null,
     };
   });
+}
+
+export type ModelGapPair = {
+  a: string;
+  b: string;
+  delta: number;
+  lo: number;
+  hi: number;
+  excludesZero: boolean;
+  dmT: number | null;
+  dmP: number | null;
+  mde80: number; // smallest gap this many series could resolve at 80% power
+  accuracyDelta: number;
+  accuracyLo: number;
+  accuracyHi: number;
+  accuracyExcludesZero: boolean;
+};
+
+export type ModelGaps = {
+  nSeries: number;
+  bootstrapB: number;
+  models: Record<
+    string,
+    {
+      brier: number;
+      brierLo: number;
+      brierHi: number;
+      accuracy: number;
+      accuracyLo: number;
+      accuracyHi: number;
+    }
+  >;
+  pairs: ModelGapPair[];
+  // Power on the momentum question: the smallest form coefficient the archive
+  // could have detected, and what it would be worth in win probability.
+  formBeta: number | null;
+  formSwingPp: number | null;
+};
+
+// Paired intervals on the backtest table's gaps, stored with the winprob run.
+// The table is sorted by Brier, which reads as a ranking; this is what says
+// which of those orderings the data actually supports.
+export async function getModelGaps(winprobRunId: number): Promise<ModelGaps | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${winprobRunId} AND name = 'model_gaps'
+  `);
+  type Raw = {
+    available?: boolean;
+    n_series: number;
+    bootstrap_b: number;
+    models: Record<string, Record<string, number>>;
+    pairs: Record<string, string | number | boolean | null>[];
+    form_power?: { beta_detectable: number | null; swing_pp: number | null };
+  };
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | Raw
+    | undefined;
+  if (!payload?.available) return null;
+  return {
+    nSeries: payload.n_series,
+    bootstrapB: payload.bootstrap_b,
+    models: Object.fromEntries(
+      Object.entries(payload.models).map(([k, m]) => [
+        k,
+        {
+          brier: m.brier,
+          brierLo: m.brier_lo,
+          brierHi: m.brier_hi,
+          accuracy: m.accuracy,
+          accuracyLo: m.accuracy_lo,
+          accuracyHi: m.accuracy_hi,
+        },
+      ]),
+    ),
+    pairs: payload.pairs.map((p) => ({
+      a: String(p.a),
+      b: String(p.b),
+      delta: Number(p.delta),
+      lo: Number(p.lo),
+      hi: Number(p.hi),
+      excludesZero: Boolean(p.excludes_zero),
+      dmT: p.dm_t === null ? null : Number(p.dm_t),
+      dmP: p.dm_p === null ? null : Number(p.dm_p),
+      mde80: Number(p.mde80),
+      accuracyDelta: Number(p.accuracy_delta),
+      accuracyLo: Number(p.accuracy_lo),
+      accuracyHi: Number(p.accuracy_hi),
+      accuracyExcludesZero: Boolean(p.accuracy_excludes_zero),
+    })),
+    formBeta: payload.form_power?.beta_detectable ?? null,
+    formSwingPp: payload.form_power?.swing_pp ?? null,
+  };
 }
 
 export type WinprobArtifact = {
@@ -849,6 +1060,12 @@ export type WinprobArtifact = {
   minTrain: number;
   refitEvery: number;
   formWindow: number;
+  // The rating settings this run's features were built from, carried on the
+  // artifact so the page can say which fit the pass-through phase reproduces.
+  // Absent on runs written before winprob took them from the caller.
+  period: string | null;
+  eloK: number | null;
+  glickoTau: number | null;
 };
 
 // ---------- Teams ----------
@@ -1086,6 +1303,9 @@ export async function getWinprobArtifact(
         min_train: number;
         refit_every: number;
         form_window: number;
+        period?: string;
+        elo_k?: number;
+        glicko_tau?: number;
       }
     | undefined;
   if (!p) return null;
@@ -1095,6 +1315,9 @@ export async function getWinprobArtifact(
     minTrain: p.min_train,
     refitEvery: p.refit_every,
     formWindow: p.form_window,
+    period: p.period ?? null,
+    eloK: p.elo_k ?? null,
+    glickoTau: p.glicko_tau ?? null,
   };
 }
 
@@ -1702,6 +1925,829 @@ export async function getRatingComparison(
   return payload ?? null;
 }
 
+// ---------- Outcome leakage: what one column already knows ----------
+//
+// The map backtest's companion. For each feature, the accuracy of the crudest
+// possible rule — the sign of the team differential — scored on the same maps
+// the fitted model predicted. A column near the model's own accuracy is the
+// win condition arriving as a feature. See docs/methodology.md.
+
+export type SignBaselineFeature = {
+  key: string;
+  label: string;
+  accuracy: number;
+  n: number;
+  direction: number; // +1, or -1 where the column points the other way (deaths)
+  slaying: boolean;
+};
+
+export type SignBaselineCohort = {
+  season_id: number;
+  year: number;
+  title: string;
+  mode: string;
+  n_maps: number;
+  model_accuracy: number;
+  features: SignBaselineFeature[];
+  best_feature: SignBaselineFeature | null;
+  model_gain: number | null;
+};
+
+export type SignBaseline = {
+  version: string;
+  rule: string;
+  by_cohort: SignBaselineCohort[];
+};
+
+export async function getSignBaseline(
+  ratingRunId: number,
+): Promise<SignBaseline | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'feature_sign_baseline'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | SignBaseline
+    | undefined;
+  return payload ?? null;
+}
+
+// ---------- The shrinkage prior, estimated rather than assumed ----------
+//
+// Per (season × mode): the empirical-Bayes prior strength k in m/(m+k), from the
+// ratio of within-player to between-player score variance in that cohort. The
+// pipeline used to assert 15 everywhere; `vs_fallback` is how far each cohort
+// actually sits from it. See docs/methodology.md.
+
+export type ShrinkageCohort = {
+  season_id: number;
+  year: number;
+  title: string;
+  mode_id: number;
+  mode: string;
+  n_players: number;
+  n_maps: number;
+  within_var: number;
+  between_var: number;
+  shrink_maps: number;
+  half_signal_maps: number;
+  vs_fallback: number;
+  estimated: boolean;
+};
+
+export type RatingShrinkage = {
+  version: string;
+  estimator: string;
+  fallback: number;
+  n_fell_back: number;
+  median: number | null;
+  min: number | null;
+  max: number | null;
+  cohorts: ShrinkageCohort[];
+};
+
+export async function getRatingShrinkage(
+  ratingRunId: number,
+): Promise<RatingShrinkage | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'rating_shrinkage'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | RatingShrinkage
+    | undefined;
+  return payload ?? null;
+}
+
+// ---------- The rating as a posterior ----------
+//
+// The two-level normal-normal fit behind the published rating: per (season ×
+// mode), the spread of true player skill (tau), the per-map noise around it
+// (sigma), and what the pair implies for pooling. `signal_share` is tau over the
+// observed spread of season scores — how much of the leaderboard's range is real
+// difference between players. See docs/methodology.md#the-rating-is-a-posterior.
+
+export type PosteriorCohort = {
+  season_id: number;
+  year: number;
+  title: string;
+  mode_id: number;
+  mode: string;
+  n_players: number;
+  n_maps: number;
+  n_replicated: number;
+  tau: number;
+  sigma: number;
+  implied_k: number;
+  moment_k: number;
+  signal_share: number | null;
+  iterations: number;
+  converged: boolean;
+  collapsed: boolean;
+  estimated: boolean;
+  fallback: string | null;
+  loglik: number | null;
+  calibration: {
+    n: number;
+    ratio: number | null;
+    applied: number;
+  } | null;
+};
+
+export type RatingPosterior = {
+  version: string;
+  model: string;
+  estimator: string;
+  n_cohorts: number;
+  n_fell_back: number;
+  n_collapsed: number;
+  median_k: number | null;
+  cohorts: PosteriorCohort[];
+  // How far the published leaderboard moved when the estimator changed, and how
+  // the posterior interval compares with the bootstrap it replaced.
+  vs_z_shrink:
+    | { available: false; reason: string }
+    | {
+        available: true;
+        n_player_seasons: number;
+        n_qualified: number;
+        mean_abs_delta: number;
+        max_abs_delta: number;
+        spearman: number | null;
+        top10_unchanged: number;
+        interval: {
+          what: string;
+          n: number;
+          median: number | null;
+          p25: number | null;
+          p75: number | null;
+        };
+      };
+  calibration:
+    | { available: false; reason: string }
+    | {
+        available: true;
+        what: string;
+        bootstrap_b: number;
+        n_cohorts: number;
+        n_player_seasons: number;
+        median: number;
+        min: number;
+        max: number;
+      };
+};
+
+export async function getRatingPosterior(
+  ratingRunId: number,
+): Promise<RatingPosterior | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'rating_posterior'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | RatingPosterior
+    | undefined;
+  return payload ?? null;
+}
+
+// ---------- Out-of-sample: the two tests the rating can fail ----------
+
+export type Interval = {
+  lo: number | null;
+  hi: number | null;
+};
+
+export type PersistenceCell = Interval & { n: number; r: number | null };
+
+export type PersistenceContrast = Interval & {
+  what: string;
+  delta_r: number | null;
+  excludes_zero: boolean;
+};
+
+export type RatingPersistence = {
+  min_maps_each_side: number;
+  bootstrap_b: number;
+  n_pairs: number;
+  transitions: {
+    from_year: number;
+    from_title: string;
+    to_year: number;
+    to_title: string;
+    n: number;
+  }[];
+  // Keys are "rating->rating", "rating->kd", "kd->rating", "kd->kd".
+  cells: Record<string, PersistenceCell>;
+  // Keyed by target: "rating" and "kd".
+  contrasts: Record<string, PersistenceContrast>;
+};
+
+export type ForecastScore = {
+  n: number;
+  brier: number;
+  log_loss: number;
+  accuracy: number;
+};
+
+export type BrierContrast = Interval & {
+  what: string;
+  delta: number;
+  excludes_zero: boolean;
+};
+
+export type AccuracyInterval = Interval & {
+  accuracy: number;
+  beats_coin_flip: boolean;
+};
+
+export type RosterForecast = {
+  version: string;
+  min_train_maps: number;
+  skipped_no_history: number;
+  skipped_no_roster: number;
+  per_season: {
+    season_id: number;
+    year: number;
+    title: string;
+    n_events: number;
+    n_scored: number;
+  }[];
+  predictors: Record<string, ForecastScore>;
+  coin_flip_brier: number;
+  common:
+    | { available: false; reason: string }
+    | {
+        available: true;
+        n_maps: number;
+        predictors: Record<string, ForecastScore>;
+      };
+  contrasts:
+    | { available: false; reason: string }
+    | {
+        available: true;
+        n_maps: number;
+        bootstrap_b: number;
+        brier: Record<string, BrierContrast>;
+        accuracy: Record<string, AccuracyInterval>;
+        // Every predictor against the 0.5 floor, with what this many maps
+        // could have resolved. Optional: runs written before RAPM landed
+        // have the rating-anchored block only.
+        vs_coin_flip?: Record<string, BrierContrast & { mde80: number | null }>;
+      };
+};
+
+export type RapmPlayer = {
+  player_id: number;
+  maps: number;
+  coef: number;
+  se: number;
+  z: number | null;
+  teammate_concentration: number;
+};
+
+export type Rapm =
+  | { available: false; reason: string }
+  | {
+      available: true;
+      l2: number;
+      min_maps: number;
+      n_maps: number;
+      n_players: number;
+      converged: boolean;
+      leaders: RapmPlayer[];
+      trailers: RapmPlayer[];
+      n_resolved: number;
+      n_concentrated: number;
+      concentration_median: number;
+      coef_sd: number;
+      se_median: number;
+      ridge_path: {
+        l2: number;
+        n_players: number;
+        sd: number;
+        max_abs: number;
+        corr_with_l2_min?: number;
+      }[];
+      blend:
+        | { available: false; reason: string }
+        | {
+            available: true;
+            what: string;
+            n_players: number;
+            corr_with_plain: number;
+            prior_sd: number;
+          };
+    };
+
+export async function getRapm(ratingRunId: number): Promise<Rapm | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'rapm'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | Rapm
+    | undefined;
+  return payload ?? null;
+}
+
+export async function getRatingPersistence(
+  ratingRunId: number,
+): Promise<RatingPersistence | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'rating_persistence'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | RatingPersistence
+    | undefined;
+  return payload ?? null;
+}
+
+export async function getRosterForecast(
+  ratingRunId: number,
+): Promise<RosterForecast | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'roster_forecast'
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | RosterForecast
+    | undefined;
+  return payload ?? null;
+}
+
+// ---------- Map-level and per-mode team ratings ----------
+
+export type MapArmScore = {
+  n: number;
+  brier: number;
+  log_loss: number;
+  accuracy: number;
+};
+
+// The same paired-gap shape `model_gaps` uses, keyed by map or by series
+// depending on which artifact it came from.
+export type MapPairedGaps = {
+  available: boolean;
+  n?: number;
+  unit?: string;
+  models?: Record<
+    string,
+    {
+      brier: number;
+      brier_lo: number;
+      brier_hi: number;
+      accuracy: number;
+      accuracy_lo: number;
+      accuracy_hi: number;
+    }
+  >;
+  pairs?: {
+    a: string;
+    b: string;
+    delta: number;
+    lo: number;
+    hi: number;
+    excludes_zero: boolean;
+    dm_p: number | null;
+    mde80: number;
+  }[];
+};
+
+export type MapModeRow = {
+  mode: string;
+  n_maps: number;
+  arms: Record<string, MapArmScore>;
+  gaps: MapPairedGaps;
+};
+
+export type MapElo = {
+  dataThrough: string | null;
+  mapBacktest: {
+    n_maps: number;
+    k: number;
+    blend_k: number;
+    published_arm: string;
+    arms: Record<string, MapArmScore>;
+    coin_flip_brier: number;
+    gaps: MapPairedGaps;
+    by_mode: MapModeRow[];
+  };
+  seriesRollup: {
+    n_series: number;
+    n_series_no_rotation: number;
+    wins_needed: number;
+    rotation: Record<string, string[]>;
+    method: string;
+    arms: Record<string, MapArmScore>;
+    gaps: MapPairedGaps;
+  };
+  // The null on whether per-mode strength exists at all. Never rendered apart
+  // from the mode table it judges.
+  specialization: {
+    available: boolean;
+    reason?: string;
+    n_cells?: number;
+    min_mode_maps?: number;
+    observed_sd?: number;
+    null_mean_sd?: number;
+    null_lo?: number;
+    null_hi?: number;
+    null_permutations?: number;
+    p_value?: number;
+    exceeds_null?: boolean;
+    excess_sd?: number;
+  };
+  modeRatings: {
+    min_mode_maps: number;
+    rows: {
+      team_id: number;
+      team: string;
+      mode: string;
+      rating: number;
+      global_rating: number;
+      delta: number;
+      n_maps: number;
+    }[];
+  } | null;
+};
+
+export async function getMapElo(): Promise<MapElo | null> {
+  const run = await latestRun("map_elo");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT name, payload FROM model_artifacts WHERE run_id = ${run.id}
+  `);
+  const byName = new Map(
+    (rows as unknown as { name: string; payload: unknown }[]).map((r) => [
+      r.name,
+      r.payload,
+    ]),
+  );
+  const mapBacktest = byName.get("map_backtest") as
+    | MapElo["mapBacktest"]
+    | undefined;
+  const seriesRollup = byName.get("series_rollup") as
+    | MapElo["seriesRollup"]
+    | undefined;
+  if (!mapBacktest || !seriesRollup) return null;
+  return {
+    dataThrough: run.dataThrough,
+    mapBacktest,
+    seriesRollup,
+    specialization: (byName.get("mode_specialization") as
+      | MapElo["specialization"]
+      | undefined) ?? { available: false },
+    modeRatings:
+      (byName.get("mode_ratings") as MapElo["modeRatings"] | undefined) ?? null,
+  };
+}
+
+// ---------- Round win probability (event tier) ----------
+
+export type RoundWpCell = {
+  own: number;
+  opp: number;
+  n: number;
+  p: number;
+  se: number;
+};
+
+export type RoundWpPair = {
+  a: string;
+  b: string;
+  what: string;
+  delta: number;
+  lo: number;
+  hi: number;
+  excludes_zero: boolean;
+  dm_t: number | null;
+  dm_p: number | null;
+  mde80: number;
+};
+
+export type RoundWinProb = {
+  mode: string;
+  scope: string;
+  bomb_state: string;
+  table: {
+    n_rounds: number;
+    n_states: number;
+    cells: RoundWpCell[];
+    parametric: {
+      intercept: number;
+      weights: Record<string, number>;
+    };
+  };
+  backtest:
+    | { available: false; reason: string }
+    | {
+        available: true;
+        n_rounds: number;
+        n_events_scored: number;
+        models: { model: string; brier: number; brier_lo: number; brier_hi: number }[];
+        pairs: RoundWpPair[];
+        nested: RoundWpPair[];
+        calibration: {
+          lo: number;
+          hi: number;
+          n: number;
+          mean_pred?: number;
+          frac_won?: number;
+        }[];
+      };
+};
+
+export type RoundWpaReliabilityCell = {
+  key: string;
+  what: string;
+  r: number;
+  lo: number;
+  hi: number;
+  spearman_brown: number | null;
+  excludes_zero: boolean;
+};
+
+export type RoundWpa = {
+  n_rounds: number;
+  n_players: number;
+  min_rounds: number;
+  leaders: {
+    player_id: number;
+    rounds: number;
+    kills: number;
+    wpa: number;
+    wpa_per_round: number;
+    kills_per_round: number;
+  }[];
+  reliability:
+    | { available: false; reason: string; n_players?: number }
+    | {
+        available: true;
+        n_players: number;
+        min_rounds: number;
+        split: string;
+        cells: RoundWpaReliabilityCell[];
+        corr_wpa_kills: number;
+        r_detectable: number;
+      };
+};
+
+export type RoundTimelineBin = {
+  t_s: number;
+  /** Rounds still undecided at this instant, of those with a usable span. */
+  n_live: number;
+  live_share: number;
+  winner_alive: number | null;
+  loser_alive: number | null;
+  /** Mean table probability for the eventual winner, over every live round —
+   *  not comparable to `leader_wins`, which conditions on being ahead. */
+  p_winner: number | null;
+  p_winner_se: number | null;
+  /** Live rounds where the sides differ: the subset the next two describe. */
+  leader_n: number;
+  p_leader: number | null; // what the table says the side ahead is worth
+  leader_wins: number | null; // what that side actually did
+  leader_wins_se: number | null;
+  n_deaths: number;
+  traded_share: number | null;
+  traded_se: number | null;
+};
+
+export type RoundTimeline = {
+  bin_ms: number;
+  max_ms: number;
+  n_rounds: number;
+  n_rounds_spanned: number;
+  n_rounds_span_conflict: number;
+  in_sample: string;
+  bins: RoundTimelineBin[];
+  leader_drift: {
+    t_s: number;
+    n: number;
+    model: number;
+    observed: number;
+    gap: number;
+    se: number;
+    excludes_zero: boolean;
+  }[];
+  trade_latency: {
+    window_ms: number;
+    bin_ms: number;
+    max_ms: number;
+    n_deaths: number;
+    n_answered: number;
+    n_within_window: number;
+    within_of_answered: number | null;
+    median_ms: number | null;
+    bins: { lo_s: number; hi_s: number; n: number; share: number; in_window: boolean }[];
+    beyond: { n: number; share: number };
+    never: { n: number; share: number };
+  };
+};
+
+// Every artifact comes off the same run, so they are fetched together and a
+// page can never render the table from one run beside the reliability test
+// from another.
+export async function getRoundWinProb(): Promise<{
+  dataThrough: string | null;
+  winProb: RoundWinProb;
+  wpa: RoundWpa | null;
+  timeline: RoundTimeline | null;
+} | null> {
+  const run = await latestRun("round_wp");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT name, payload FROM model_artifacts
+    WHERE run_id = ${run.id}
+      AND name IN ('round_win_prob', 'round_wpa', 'round_timeline')
+  `);
+  const byName = new Map(
+    (rows as unknown as { name: string; payload: unknown }[]).map((r) => [
+      r.name,
+      r.payload,
+    ]),
+  );
+  const winProb = byName.get("round_win_prob") as RoundWinProb | undefined;
+  if (!winProb) return null;
+  return {
+    dataThrough: run.dataThrough,
+    winProb,
+    wpa: (byName.get("round_wpa") as RoundWpa | undefined) ?? null,
+    timeline: (byName.get("round_timeline") as RoundTimeline | undefined) ?? null,
+  };
+}
+
+// ---------- Series dynamics ----------
+
+// Every observed rate carries two benchmarks: `rating` is independence at the
+// frozen ratings, `quality` is independence once the ratings are allowed to
+// have understated how far apart the teams were. Reading the first without the
+// second is how a race to three gets mistaken for momentum.
+export type SeriesGap = {
+  expected: number;
+  delta: number;
+  lo: number;
+  hi: number;
+  excludes_zero: boolean;
+  mde80: number | null;
+};
+
+export type SeriesRate = {
+  event: string;
+  n_series: number;
+  observed: number;
+  observed_lo: number;
+  observed_hi: number;
+  vs: Record<string, SeriesGap>;
+};
+
+export type SeriesEraCell = {
+  era: string;
+  n_series: number;
+  qualified: boolean;
+} & Record<
+  string,
+  | string
+  | number
+  | boolean
+  | {
+      observed: number;
+      observed_lo: number;
+      observed_hi: number;
+      expected: Record<string, number>;
+    }
+>;
+
+export type SeriesDynamics = {
+  scope: string;
+  benchmarks: Record<string, string>;
+  n_series: number;
+  n_series_loaded: number;
+  dropped: Record<string, number>;
+  bootstrap_b: number;
+  min_era_series: number;
+  map1: {
+    observed: number;
+    coin_flip: number;
+    vs: Record<string, SeriesGap>;
+    note: string;
+  };
+  rates: SeriesRate[];
+  by_era: SeriesEraCell[];
+  strength_check:
+    | { available: false; reason: string }
+    | {
+        available: true;
+        n_maps: number;
+        mean_predicted: number;
+        observed: number;
+        brier: number;
+        calibration_slope: number;
+      };
+};
+
+export type SeriesTerm = {
+  term: string;
+  beta: number;
+  lo: number;
+  hi: number;
+  excludes_zero: boolean;
+  se: number;
+  z: number | null;
+  p: number | null;
+  mde80: number | null;
+  swing_pp?: number;
+  mde80_swing_pp?: number;
+};
+
+export type SeriesFit =
+  | { available: false; reason: string; n_maps: number }
+  | {
+      available: true;
+      rows: string;
+      n_maps: number;
+      n_series: number;
+      cluster: string;
+      specs: { spec: string; intercept: number; terms: SeriesTerm[] }[];
+    };
+
+export type SeriesQualityArm = {
+  arm: string;
+  n_series: number;
+  n_maps: number;
+  gamma: number;
+  gamma_lo: number;
+  gamma_hi: number;
+  excludes_zero: boolean;
+  p: number;
+  swing_pp: number;
+  swing_pp_lo: number;
+  swing_pp_hi: number;
+};
+
+export type SeriesMomentum = {
+  question: string;
+  coding: string;
+  map2: SeriesFit;
+  consecutive: SeriesFit;
+  quality: {
+    available: true;
+    n_series: number;
+    n_maps: number;
+    null: { a: number; sigma: number; loglik: number };
+    full: {
+      a: number;
+      sigma: number;
+      sigma_lo: number;
+      sigma_hi: number;
+      gamma: number;
+      gamma_lo: number;
+      gamma_hi: number;
+      loglik: number;
+    };
+    excludes_zero: boolean;
+    lr_stat: number;
+    p: number;
+    swing_pp: number;
+    swing_pp_lo: number;
+    swing_pp_hi: number;
+    mde80: number | null;
+    mde80_swing_pp: number | null;
+    sigma_swing_pp: number;
+    first_three: SeriesQualityArm;
+    interpretation: string;
+  };
+};
+
+// Both artifacts come off one run, so a page can never render the rates from
+// one fit beside the null from another.
+export async function getSeriesDynamics(): Promise<{
+  dataThrough: string | null;
+  dynamics: SeriesDynamics;
+  momentum: SeriesMomentum | null;
+} | null> {
+  const run = await latestRun("series_dynamics");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT name, payload FROM model_artifacts
+    WHERE run_id = ${run.id} AND name IN ('series_dynamics', 'series_momentum')
+  `);
+  const byName = new Map(
+    (rows as unknown as { name: string; payload: unknown }[]).map((r) => [
+      r.name,
+      r.payload,
+    ]),
+  );
+  const dynamics = byName.get("series_dynamics") as SeriesDynamics | undefined;
+  if (!dynamics) return null;
+  return {
+    dataThrough: run.dataThrough,
+    dynamics,
+    momentum: (byName.get("series_momentum") as SeriesMomentum | undefined) ?? null,
+  };
+}
+
 export type TeamMetricValue = {
   metric: string;
   mode: string | null;
@@ -1737,4 +2783,100 @@ export async function getTeamMetrics(
         eq(teamMetricSeason.teamId, teamId),
       ),
     );
+}
+
+// ---------- Player style axes (and the archetypes that aren't there) ----------
+
+export type StyleAxis = {
+  index: number;
+  name: string;
+  share: number;
+  loadings: { column: string; loading: number }[];
+};
+
+export type StyleNullBand = { lo: number; hi: number; mean: number };
+
+export type StyleKResult = {
+  k: number;
+  gap: number;
+  s_k: number;
+  silhouette: number | null;
+  stability: number[];
+  silhouette_null: StyleNullBand | null;
+  stability_null: StyleNullBand | null;
+  beats_null: boolean;
+};
+
+export type StyleBasis = {
+  basis: string;
+  n: number;
+  n_columns: number;
+  columns: string[];
+  coverage: { season_id: number; eligible: number; kept: number; share: number }[];
+  quality_share: number;
+  n_components: number;
+  component_share: number[];
+  eigenvalues: number[];
+  null95: number[];
+  axes: StyleAxis[];
+  clustering: StyleKResult[];
+  gap_k: number;
+  surviving_k: number;
+  taxonomy: boolean;
+};
+
+export type PlayerStyle = {
+  published_basis: string;
+  min_season_coverage: number;
+  n_subjects_total: number;
+  ineligible_columns: { column: string; coverage: Record<string, number> }[];
+  bases: StyleBasis[];
+};
+
+export async function getPlayerStyleArtifact(): Promise<{
+  dataThrough: string | null;
+  runId: number;
+  style: PlayerStyle;
+} | null> {
+  const run = await latestRun("player_style");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${run.id} AND name = 'player_style'
+  `);
+  const payload = (rows as unknown as { payload: PlayerStyle }[])[0]?.payload;
+  if (!payload) return null;
+  return { dataThrough: run.dataThrough, runId: run.id, style: payload };
+}
+
+export type PlayerStylePoint = {
+  year: number;
+  title: string;
+  axis: number;
+  score: number;
+  pctl: number;
+};
+
+export async function getPlayerStyle(
+  styleRunId: number,
+  playerId: number,
+): Promise<PlayerStylePoint[]> {
+  return db
+    .select({
+      year: seasons.year,
+      title: titles.shortName,
+      axis: playerStyleSeason.axis,
+      score: playerStyleSeason.score,
+      pctl: playerStyleSeason.pctl,
+    })
+    .from(playerStyleSeason)
+    .innerJoin(seasons, eq(seasons.id, playerStyleSeason.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .where(
+      and(
+        eq(playerStyleSeason.runId, styleRunId),
+        eq(playerStyleSeason.playerId, playerId),
+      ),
+    )
+    .orderBy(seasons.year, playerStyleSeason.axis);
 }

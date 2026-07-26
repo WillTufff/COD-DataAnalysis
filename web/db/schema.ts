@@ -267,6 +267,7 @@ export const playerSeasonAdjusted = pgTable("player_season_adjusted", {
   mapsPlayed: integer("maps_played").notNull(),
   kdRaw: real("kd_raw"),
   kdZ: real("kd_z"),
+  kdZSe: real("kd_z_se"),
   kdPctl: real("kd_pctl"),
   engagementZ: real("engagement_z"),
   objZ: real("obj_z"),
@@ -366,4 +367,23 @@ export const teamMetricSeason = pgTable("team_metric_season", {
   z: real("z"),
   pctl: real("pctl"),
   qualified: boolean("qualified").notNull(),
+});
+
+// 0012_player_style. Not a cluster label: the archetype partition does not beat
+// a cloud with no clusters in it, so what is stored is a position on the
+// retained style axes. The axis's meaning lives in the run's player_style
+// artifact, which carries the loadings.
+export const playerStyleSeason = pgTable("player_style_season", {
+  runId: integer("run_id")
+    .notNull()
+    .references(() => modelRuns.id),
+  playerId: integer("player_id")
+    .notNull()
+    .references(() => players.id),
+  seasonId: integer("season_id")
+    .notNull()
+    .references(() => seasons.id),
+  axis: smallint("axis").notNull(),
+  score: real("score").notNull(),
+  pctl: real("pctl").notNull(),
 });

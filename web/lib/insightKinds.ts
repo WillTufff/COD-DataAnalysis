@@ -16,6 +16,8 @@ export const INSIGHT_KIND_LABELS: Record<string, string> = {
   what_wins: "What wins maps",
   rating_top: "Top rated",
   model_null: "Model null",
+  mode_null: "Mode null",
+  series_dynamics: "Series dynamics",
   intangible_outlier: "Split profile",
   profile_extreme: "League best",
   clutch_milestone: "Clutch record",
