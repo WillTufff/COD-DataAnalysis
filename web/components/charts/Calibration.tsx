@@ -12,7 +12,17 @@ export type CalBin = {
 
 // Reliability plot: mean predicted P(win) vs observed win rate per bin.
 // A perfectly calibrated model sits on the diagonal.
-export function Calibration({ bins }: { bins: CalBin[] }) {
+//
+// `unit` names what one prediction is. The team ratings predict series; the
+// player rating's weight validation predicts maps, and labelling those "series"
+// silently misstates the sample.
+export function Calibration({
+  bins,
+  unit = "series",
+}: {
+  bins: CalBin[];
+  unit?: string;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const pts = bins.filter(
     (b): b is Required<CalBin> => b.n > 0 && b.mean_pred !== undefined,
@@ -100,7 +110,7 @@ export function Calibration({ bins }: { bins: CalBin[] }) {
               {(pts[hover].frac_won * 100).toFixed(0)}%
             </text>
             <text x={20} y={M.top + 28} fontSize={10} fill="var(--ink-secondary)">
-              {pts[hover].n} series in bin
+              {pts[hover].n} {unit} in bin
             </text>
           </g>
         )}
@@ -125,7 +135,7 @@ export function Calibration({ bins }: { bins: CalBin[] }) {
         </text>
       </svg>
       <figcaption className="mt-1 text-xs text-ink-muted">
-        Dot size scales with the number of series in each probability bin; the
+        Dot size scales with the number of {unit} in each probability bin; the
         dashed diagonal is perfect calibration.
       </figcaption>
     </figure>
