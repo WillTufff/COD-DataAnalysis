@@ -13,6 +13,7 @@ import {
   modelRuns,
   players,
   playerMetricSeason,
+  playerRapm,
   playerSeasonAdjusted,
   playerStyleSeason,
   rosterStints,
@@ -2322,6 +2323,49 @@ export async function getRapm(ratingRunId: number): Promise<Rapm | null> {
     | Rapm
     | undefined;
   return payload ?? null;
+}
+
+// rapm.py refuses to read a coefficient as a player's own above this. Kept in
+// step with rapm.artifact's `n_concentrated`, which counts on the same rule.
+export const RAPM_CONCENTRATION_LIMIT = 0.9;
+
+export type PlayerRapm = {
+  coef: number;
+  se: number;
+  maps: number;
+  concentration: number;
+  // Does the 95% interval clear zero? False for 189 of the 196 players in the
+  // current fit, so callers must render this, not infer it from the sign.
+  resolved: boolean;
+  // At or above the limit the coefficient is substantially the team's.
+  entangled: boolean;
+};
+
+// One player's RAPM from the published rating run. Null when the player did not
+// clear rapm.MIN_MAPS, which is the common case and not an error.
+export async function getPlayerRapm(
+  ratingRunId: number,
+  playerId: number,
+): Promise<PlayerRapm | null> {
+  const rows = await db
+    .select({
+      coef: playerRapm.coef,
+      se: playerRapm.se,
+      maps: playerRapm.maps,
+      concentration: playerRapm.teammateConcentration,
+    })
+    .from(playerRapm)
+    .where(
+      and(eq(playerRapm.runId, ratingRunId), eq(playerRapm.playerId, playerId)),
+    )
+    .limit(1);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    ...r,
+    resolved: Math.abs(r.coef) > 1.96 * r.se,
+    entangled: r.concentration >= RAPM_CONCENTRATION_LIMIT,
+  };
 }
 
 export async function getRatingPersistence(

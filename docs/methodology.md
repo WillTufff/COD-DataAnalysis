@@ -1223,6 +1223,26 @@ published rating.
 The artifacts (`rating_persistence`, `roster_forecast`, `rapm`) are stored with the
 published rating run and recomputed on every rerun.
 
+The `rapm` artifact publishes the forty highest and forty lowest coefficients, which is
+the right shape for reading the distribution and the wrong shape for reading a player: it
+names 80 of the 196 players the model fits, so the other 116 could not be looked up at
+all. `player_rapm` (migration 0013) stores the whole fit, one row per player per rating
+run, and the player page reads that.
+
+Publishing a per-player coefficient raises the obvious hazard, so the table is explicit
+about it. Seven of the 196 coefficients exceed 1.96 SE; the median standard error is 0.53
+against a coefficient spread of 0.423, so for almost everyone the ridge penalty is larger
+than the signal. Six of those seven players have a teammate concentration of 1.0 — every
+map beside the same teammate, one column wearing two names, with ridge splitting the
+credit evenly between them. **Exactly one player in this archive has a RAPM coefficient
+that both clears zero and is separable from his teammates'**, which is the single most
+important thing to know about the number and is not visible from a leaderboard at all.
+
+So the player page draws the interval as the chart and prints the coefficient as a label
+on it, states in words whether the interval covers zero, and adds a second notice when
+concentration is at or above 0.9. Nothing renders the coefficient without its standard
+error.
+
 ## Tier 2b: Series dynamics (shipped)
 
 A Call of Duty series is a race to three maps, and much of what gets said about one is a

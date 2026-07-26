@@ -27,6 +27,7 @@ import {
   getPlayerBySlug,
   getPlayerInsights,
   getPlayerMetrics,
+  getPlayerRapm,
   getPlayerRatingSeasons,
   getPlayerStints,
   getPlayerStyle,
@@ -36,6 +37,7 @@ import {
   teamSlug,
   type MetricCatalog,
   type PlayerMetricValue,
+  type PlayerRapm,
   type PlayerRatings,
   type PlayerStyle,
   type PlayerStylePoint,
@@ -759,6 +761,123 @@ function ClutchTable({ lines }: { lines: ClutchLine[] }) {
   );
 }
 
+// RAPM. The only number on this page with nothing from the box score in it,
+// and the only one whose interval usually covers zero -- 7 of 196 players clear
+// 1.96 SE. So the interval is the chart and the coefficient is a label on it,
+// not the other way round, and the verdict is written out rather than left for
+// a reader to infer from a sign.
+function RapmSection({ rapm }: { rapm: PlayerRapm }) {
+  const half = 1.96 * rapm.se;
+  const lo = rapm.coef - half;
+  const hi = rapm.coef + half;
+  const domain = Math.max(1, Math.ceil(Math.max(Math.abs(lo), Math.abs(hi)) * 2) / 2);
+
+  const W = 460;
+  const H = 46;
+  // Wide enough that the end ticks, which are centred on the axis extremes,
+  // do not run off the viewBox.
+  const M = { left: 26, right: 26 };
+  const iw = W - M.left - M.right;
+  const x = (v: number) => M.left + ((v + domain) / (2 * domain)) * iw;
+  const yMid = 20;
+
+  return (
+    <section className="mt-10">
+      <h2 className="lower-third">
+        Value in wins
+        <span className="lt-note">RAPM, with its 95% interval</span>
+      </h2>
+      <div className="mt-3 border border-hairline bg-surface p-4">
+        <figure>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full"
+            role="img"
+            aria-label={`RAPM ${rapm.coef.toFixed(2)}, 95% interval ${lo.toFixed(2)} to ${hi.toFixed(2)}`}
+          >
+            {[-domain, 0, domain].map((v) => (
+              <g key={v}>
+                <line
+                  x1={x(v)}
+                  x2={x(v)}
+                  y1={4}
+                  y2={yMid + 10}
+                  stroke={v === 0 ? "var(--baseline)" : "var(--hairline)"}
+                />
+                <text
+                  x={x(v)}
+                  y={H - 6}
+                  textAnchor="middle"
+                  fontSize={9.5}
+                  fill="var(--ink-muted)"
+                  className="font-mono"
+                >
+                  {v > 0 ? `+${v}` : v}
+                </text>
+              </g>
+            ))}
+            <line
+              x1={x(lo)}
+              x2={x(hi)}
+              y1={yMid}
+              y2={yMid}
+              stroke={rapm.resolved ? "var(--series-1)" : "var(--ink-muted)"}
+              strokeWidth={6}
+              strokeLinecap="round"
+              opacity={rapm.resolved ? 1 : 0.55}
+            />
+            <circle
+              cx={x(rapm.coef)}
+              cy={yMid}
+              r={4}
+              fill="var(--surface)"
+              stroke={rapm.resolved ? "var(--series-1)" : "var(--ink-secondary)"}
+              strokeWidth={2}
+            />
+          </svg>
+        </figure>
+        <p className="mt-2 font-mono text-sm text-ink-secondary">
+          {rapm.coef >= 0 ? "+" : ""}
+          {rapm.coef.toFixed(2)}{" "}
+          <span className="text-ink-muted">
+            ({lo >= 0 ? "+" : ""}
+            {lo.toFixed(2)} to {hi >= 0 ? "+" : ""}
+            {hi.toFixed(2)}) · {rapm.maps} maps
+          </span>
+        </p>
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+        Ridge-regressed contribution to the log-odds of winning a map, holding
+        the other seven players on the server constant. Nothing from the box
+        score enters the fit, which is what makes it worth reading next to the
+        composite rating rather than as a version of it.{" "}
+        {rapm.resolved ? (
+          <>
+            This interval clears zero &mdash; one of the few on the site that
+            does, since the ridge penalty is larger than the signal for most
+            players.
+          </>
+        ) : (
+          <>
+            This interval covers zero, so the sign is not evidence: the honest
+            reading is that the model cannot separate this player from average.
+            That is true of 189 of the 196 players it rates.
+          </>
+        )}{" "}
+        {rapm.entangled && (
+          <>
+            It is also substantially a team number. This player spent{" "}
+            {Math.round(rapm.concentration * 100)}% of their maps beside the
+            same teammate, and players who never play apart are one column
+            wearing two names &mdash; ridge splits the credit between them
+            evenly, which is correct and is not a finding about either.
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
+
 // The composite rating, drawn with the posterior interval that belongs to it.
 // A career of two-decimal ratings invites reading a 0.03 gap as improvement;
 // with the bands drawn, most of a player's seasons turn out to be one season
@@ -831,6 +950,7 @@ function CareerTab({
   fingerprint,
   style,
   ratings,
+  rapm,
   allModes,
   playerInsights,
 }: {
@@ -838,6 +958,7 @@ function CareerTab({
   fingerprint: FingerprintData | null;
   style: StyleView | null;
   ratings: PlayerRatings | null;
+  rapm: PlayerRapm | null;
   allModes: SeasonAdjusted[];
   playerInsights: { id: number; kind: string; headline: string }[];
 }) {
@@ -861,6 +982,8 @@ function CareerTab({
       </section>
 
       {ratings && <RatingSection ratings={ratings} />}
+
+      {rapm && <RapmSection rapm={rapm} />}
 
       {fingerprint && (
         <section className="mt-10">
@@ -1273,6 +1396,7 @@ export default async function PlayerPage({
     stylePoints,
     styleArtifact,
     ratings,
+    rapm,
   ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
@@ -1284,6 +1408,9 @@ export default async function PlayerPage({
       getPlayerStyleArtifact(),
       ratingRun
         ? getPlayerRatingSeasons(player.id, ratingRun.id)
+        : Promise.resolve(null),
+      ratingRun
+        ? getPlayerRapm(ratingRun.id, player.id)
         : Promise.resolve(null),
     ]);
   const metricCards = buildMetricCards(metricValues, metricCatalog);
@@ -1356,6 +1483,7 @@ export default async function PlayerPage({
                   fingerprint={fingerprint}
                   style={style}
                   ratings={ratings}
+                  rapm={rapm}
                   allModes={allModes}
                   playerInsights={playerInsights}
                 />

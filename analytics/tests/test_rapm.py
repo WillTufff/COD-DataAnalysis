@@ -297,3 +297,74 @@ def test_artifact_declines_on_too_few_maps() -> None:
     rows = make_map(1, (1, 2), (3, 4))
     art = rapm.artifact(rows)
     assert art["available"] is False
+
+
+# ===== the per-player rows =====
+
+
+def _rotating_league(seed: int, n_games: int = 400, pool_size: int = 12) -> list[MapRow]:
+    rng = np.random.default_rng(seed)
+    pool = list(range(1, pool_size + 1))
+    rows: list[MapRow] = []
+    for g in range(n_games):
+        order = list(rng.permutation(pool))
+        rows.extend(
+            make_map(
+                g,
+                (int(order[0]), int(order[1])),
+                (int(order[2]), int(order[3])),
+                flip=bool(rng.integers(0, 2)),
+            )
+        )
+    return rows
+
+
+def test_player_rows_cover_everyone_the_artifact_truncates() -> None:
+    """The whole reason the table exists: the artifact names 80 players and the
+    fit knows more than that."""
+    rows = _rotating_league(31)
+    emitted = rapm.player_rows(rows)
+    art = rapm.artifact(rows, top_n=2)
+    listed = {p["player_id"] for p in art["leaders"]} | {
+        p["player_id"] for p in art["trailers"]
+    }
+    assert len(emitted) == art["n_players"]
+    assert len(listed) < len(emitted)
+    # Every truncated player is still recoverable from the rows.
+    assert listed <= {r[0] for r in emitted}
+
+
+def test_player_rows_agree_with_the_fit_they_come_from() -> None:
+    rows = _rotating_league(37)
+    fit = rapm.fit(rows)
+    assert fit is not None
+    emitted = {r[0]: r for r in rapm.player_rows(rows)}
+    assert set(emitted) == {p.player_id for p in fit.players}
+    for p in fit.players:
+        _pid, maps, coef, se, conc = emitted[p.player_id]
+        assert maps == p.maps
+        assert coef == p.coef
+        assert se == p.se
+        assert conc == p.teammate_concentration
+
+
+def test_player_rows_honour_the_min_maps_floor() -> None:
+    rows = _rotating_league(41)
+    for g in range(400, 403):
+        rows.extend(make_map(g, (99, 2), (3, 4)))
+    assert 99 not in {r[0] for r in rapm.player_rows(rows)}
+
+
+def test_player_rows_satisfy_the_tables_constraints() -> None:
+    """0013 constrains maps > 0, se > 0, coef finite and concentration in [0, 1].
+    A row the writeback cannot insert is a pipeline that dies at 3am."""
+    for pid, maps, coef, se, conc in rapm.player_rows(_rotating_league(43)):
+        assert isinstance(pid, int)
+        assert maps > 0
+        assert se > 0
+        assert np.isfinite(coef)
+        assert 0.0 <= conc <= 1.0
+
+
+def test_player_rows_are_empty_when_the_fit_declines() -> None:
+    assert rapm.player_rows(make_map(1, (1, 2), (3, 4))) == []

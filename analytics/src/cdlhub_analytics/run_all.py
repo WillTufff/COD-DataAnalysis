@@ -339,6 +339,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"{rapm_art['n_concentrated']} players never play apart from one teammate "
                 f"(median concentration {rapm_art['concentration_median']:.2f})"
             )
+        # The artifact above is a top-and-bottom-forty. Player pages need the
+        # whole fit, so it also lands in a table keyed by player.
+        rapm_rows = rapm.player_rows(usable_rows)
+        if rapm_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_rapm "
+                    "(run_id, player_id, maps, coef, se, teammate_concentration) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [(pr_run, *r) for r in rapm_rows],
+                )
+            print(f"  {len(rapm_rows)} player_rapm rows written")
 
         forecast = holdout.roster_forecast(
             conn, player_rating.PUBLISHED_VERSION, glicko_run, rating_rows, rating_coverage

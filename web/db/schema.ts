@@ -387,3 +387,23 @@ export const playerStyleSeason = pgTable("player_style_season", {
   score: real("score").notNull(),
   pctl: real("pctl").notNull(),
 });
+
+// One RAPM coefficient per player per rating run, over every decided map in
+// the archive. See 0013 — `se` is not optional decoration here, it is larger
+// than the coefficient spread for most of the table.
+export const playerRapm = pgTable(
+  "player_rapm",
+  {
+    runId: integer("run_id")
+      .notNull()
+      .references(() => modelRuns.id),
+    playerId: integer("player_id")
+      .notNull()
+      .references(() => players.id),
+    maps: integer("maps").notNull(),
+    coef: real("coef").notNull(),
+    se: real("se").notNull(),
+    teammateConcentration: real("teammate_concentration").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.playerId] })],
+);

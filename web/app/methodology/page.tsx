@@ -17,6 +17,7 @@ import {
   getRatingPosterior,
   getRatingShrinkage,
   getRapm,
+  RAPM_CONCENTRATION_LIMIT,
   getRosterForecast,
   getRoundWinProb,
   getSeasonKdSpread,
@@ -346,6 +347,19 @@ export default async function MethodologyPage() {
   const rapmVsFlip = forecast?.contrasts.available
     ? forecast.contrasts.vs_coin_flip?.rapm
     : undefined;
+  // What the two RAPM diagnostics say jointly rather than side by side: among
+  // the players the artifact actually names, how many clear 1.96 SE *and* are
+  // separable from their lineup. Counted rather than asserted, because a rerun
+  // can change it and a sentence claiming "one player" would not notice.
+  const rapmListed = rapm?.available
+    ? [...rapm.leaders, ...rapm.trailers]
+    : [];
+  const rapmSeparableResolved = rapmListed.filter(
+    (p) =>
+      p.se > 0 &&
+      Math.abs(p.coef) > 1.96 * p.se &&
+      p.teammate_concentration < RAPM_CONCENTRATION_LIMIT,
+  ).length;
   const seriesDyn = await getSeriesDynamics();
   const styleArt = await getPlayerStyleArtifact();
   // The sequence fit, and the plain regression it corrects — both pulled out by
@@ -1967,6 +1981,22 @@ export default async function MethodologyPage() {
                 </dd>
               </div>
             </dl>
+
+            <p className="mt-4 text-sm leading-relaxed text-ink-secondary">
+              The table below is the top and bottom {rapm.leaders.length}. The
+              whole fit &mdash; all {rapm.n_players} players &mdash; is stored
+              per player and drawn on each player&rsquo;s page with the interval
+              attached, because a coefficient whose interval covers zero is not
+              a ranking and {rapm.n_players - rapm.n_resolved} of these do.
+              Note what the two diagnostics say together rather than apart:
+              among the players named below,{" "}
+              <strong>{rapmSeparableResolved}</strong>{" "}
+              {rapmSeparableResolved === 1 ? "clears" : "clear"} 1.96 SE while
+              also playing under {Math.round(RAPM_CONCENTRATION_LIMIT * 100)}%
+              of their maps beside the same teammate. The rest of the
+              significant coefficients are their lineup&rsquo;s as much as their
+              own.
+            </p>
 
             {rapm.ridge_path.length > 0 && (
               <div className="mt-4 overflow-x-auto">

@@ -363,6 +363,29 @@ def ridge_path(
     return out
 
 
+def player_rows(
+    rows: Sequence[MapRow],
+) -> list[tuple[int, int, float, float, float]]:
+    """Every fitted player as (player_id, maps, coef, se, concentration).
+
+    The artifact below publishes the top and bottom `top_n` because a
+    methodology page wants the shape of the distribution, not 196 rows. A player
+    page wants exactly one row and has no way to ask a leaderboard for it, so
+    the same fit is emitted whole here and written to player_rapm.
+
+    No filtering beyond the `min_maps` floor `fit` already applies, and no
+    ordering: a caller reading one player's row must not depend on rank, and a
+    caller that wants rank has the artifact.
+    """
+    full = fit(rows)
+    if full is None:
+        return []
+    return [
+        (p.player_id, p.maps, p.coef, p.se, p.teammate_concentration)
+        for p in full.players
+    ]
+
+
 def artifact(
     rows: Sequence[MapRow],
     ratings: dict[tuple[int, int, int | None], float] | None = None,
