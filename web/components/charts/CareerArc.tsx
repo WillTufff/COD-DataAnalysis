@@ -6,12 +6,18 @@ export type ArcPoint = {
   year: number;
   title: string; // IW / WWII / BO4 — annotation: cohorts change with the title
   kdZ: number;
+  kdZSe: number | null; // standard error of kdZ, from the era model
   kdPctl: number; // 0..1
   maps: number;
 };
 
-// Era-adjusted career arc: season K/D z-score vs cohort, with a ±1.96/√maps
-// sampling band (documented approximation — see /methodology#era).
+// Era-adjusted career arc: season K/D z-score vs cohort, with a 95% band.
+//
+// The band is ±1.96 × the era model's stored standard error, not a shape
+// derived here. An earlier version used ±1.96/√maps, which assumed a player's
+// per-map K/D varied exactly as much as season K/Ds vary between players; per-map
+// variance is the larger of the two, so that band was too tight on the one chart
+// whose entire subject is uncertainty. See /methodology#era.
 export function CareerArc({ points }: { points: ArcPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -21,7 +27,10 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
   const iw = W - M.left - M.right;
   const ih = H - M.top - M.bottom;
 
-  const band = points.map((p) => 1.96 / Math.sqrt(Math.max(p.maps, 1)));
+  // A season the model would not put an error on gets no band, rather than a
+  // zero-width one that would read as certainty.
+  const band = points.map((p) => (p.kdZSe == null ? 0 : 1.96 * p.kdZSe));
+  const hasBand = points.some((p) => p.kdZSe != null);
   const yLo = Math.min(-1, ...points.map((p, i) => p.kdZ - band[i]));
   const yHi = Math.max(1, ...points.map((p, i) => p.kdZ + band[i]));
   const x = (i: number) =>
@@ -76,7 +85,7 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
         ))}
 
         {/* uncertainty band */}
-        {points.length > 1 && (
+        {points.length > 1 && hasBand && (
           <path d={bandPath} fill="var(--series-1)" opacity={0.16} />
         )}
 
@@ -174,15 +183,18 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
               fontSize={10}
               fill="var(--ink-muted)"
             >
-              band ±{band[hover].toFixed(2)}σ sampling noise
+              {points[hover].kdZSe == null
+                ? "too few maps to put an error on"
+                : `95% band ±${band[hover].toFixed(2)}σ · ${points[hover].maps} maps`}
             </text>
           </g>
         )}
       </svg>
       <figcaption className="mt-1 text-xs text-ink-muted">
         Season K/D as standard deviations from the qualified cohort mean of that
-        season and title (all modes). Shaded band is ±1.96/√maps sampling noise
-        (an approximation), spec in{" "}
+        season and title (all modes). Shaded band is the 95% interval on that
+        z-score, from the sampling error of the season&rsquo;s K/D across the maps
+        it was earned on. Spec in{" "}
         <a href="/methodology#era" className="underline">
           methodology
         </a>

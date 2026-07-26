@@ -22,6 +22,7 @@ const KIND_META: Record<string, { label: string; dot: string }> = {
   what_wins: { label: "What wins maps", dot: "var(--series-2)" },
   rating_top: { label: "Top rated", dot: "var(--series-3)" },
   model_null: { label: "Model null", dot: "var(--series-8)" },
+  mode_null: { label: "Mode null", dot: "var(--series-8)" },
   // Metric-layer kinds.
   intangible_outlier: { label: "Split profile", dot: "var(--series-2)" },
   profile_extreme: { label: "League best", dot: "var(--series-4)" },

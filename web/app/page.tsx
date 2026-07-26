@@ -85,10 +85,13 @@ export default async function Home() {
       getSeasonKdSpread(eraRun.id),
     ]);
   const topTeams = standings.slice(0, 10);
-  const timelines = await getEloTimelines(
-    eloRun.id,
-    topTeams.map((t) => t.teamId),
-  );
+  const topTeamIds = topTeams.map((t) => t.teamId);
+  // Both systems for the same teams: the explorer toggles between them, and
+  // only the Glicko run carries a rating deviation to shade.
+  const [timelines, glickoTimelines] = await Promise.all([
+    getEloTimelines(eloRun.id, topTeamIds),
+    glickoRun ? getEloTimelines(glickoRun.id, topTeamIds) : Promise.resolve([]),
+  ]);
   const sparkByTeam = new Map(timelines.map((tl) => [tl.teamId, tl.points]));
   const allSpark = timelines.flatMap((tl) => tl.points.map((p) => p.rating));
   const sparkDomain: [number, number] =
@@ -130,6 +133,7 @@ export default async function Home() {
         <div className="mt-4">
           <EloExplorer
             timelines={timelines}
+            glicko={glickoTimelines}
             eras={eras}
             events={events}
             height={380}

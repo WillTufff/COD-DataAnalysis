@@ -96,7 +96,20 @@ export function Leaderboard({
                   {r.kdRaw?.toFixed(2) ?? "—"}
                 </td>
                 <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                  {r.kdZ !== null ? `${r.kdZ >= 0 ? "+" : ""}${r.kdZ.toFixed(2)}σ` : "—"}
+                  {r.kdZ !== null ? (
+                    <>
+                      {r.kdZ >= 0 ? "+" : ""}
+                      {r.kdZ.toFixed(2)}σ
+                      {r.kdZSe !== null && (
+                        <span className="text-ink-muted">
+                          {" "}
+                          ±{r.kdZSe.toFixed(2)}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="py-1.5">
                   {r.kdPctl !== null ? <PctlBar pctl={r.kdPctl} /> : "—"}
@@ -109,7 +122,9 @@ export function Leaderboard({
       <p className="mt-2 text-xs text-ink-muted">
         Qualified player-seasons only (≥ 30 maps, all modes combined). Percentile is
         within that season-and-title cohort, so a 90th in 2017 IW and a 90th in 2019
-        BO4 mean the same thing.
+        BO4 mean the same thing. The ± on the z-score is the era model&rsquo;s
+        standard error for that season; where two rows are within a couple of
+        those of each other, the order between them is noise.
       </p>
     </div>
   );

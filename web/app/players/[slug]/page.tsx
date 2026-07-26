@@ -11,7 +11,13 @@ import {
   type FingerprintGroup,
   type FingerprintSeason,
 } from "@/components/charts/Fingerprint";
+import {
+  StyleAxes,
+  type StyleAxisMeta,
+  type StyleSeasonPoint,
+} from "@/components/charts/StyleAxes";
 import { RoundShareBar } from "@/components/charts/RoundShareBar";
+import { RatingIntervals, overlaps } from "@/components/charts/RatingInterval";
 import { PctlBar } from "@/components/PctlBar";
 import { Tabs } from "@/components/Tabs";
 import {
@@ -21,11 +27,18 @@ import {
   getPlayerBySlug,
   getPlayerInsights,
   getPlayerMetrics,
+  getPlayerRatingSeasons,
   getPlayerStints,
+  getPlayerStyle,
+  getPlayerStyleArtifact,
+  latestRatingRun,
   latestRun,
   teamSlug,
   type MetricCatalog,
   type PlayerMetricValue,
+  type PlayerRatings,
+  type PlayerStyle,
+  type PlayerStylePoint,
   type SeasonAdjusted,
 } from "@/lib/analytics";
 import { kindLabel } from "@/lib/insightKinds";
@@ -497,6 +510,48 @@ const MODE_SIGNATURE: Record<string, string[]> = {
   uplink: ["uplink_points_pm", "uplink_dunk_rate"],
 };
 
+type StyleView = {
+  axes: StyleAxisMeta[];
+  points: StyleSeasonPoint[];
+  cohortN: number;
+  bestSilhouette: number;
+  nullLo: number;
+  nullHi: number;
+};
+
+// The style section only renders when the model actually refused a taxonomy and
+// the player is in the fitted cohort. If a future archive does produce clusters
+// that beat the null, this returns null rather than silently drawing a
+// continuum over a real partition.
+function buildStyleView(
+  artifact: PlayerStyle | null,
+  points: PlayerStylePoint[],
+): StyleView | null {
+  if (!artifact || points.length === 0) return null;
+  const published = artifact.bases.find((b) => b.basis === artifact.published_basis);
+  if (!published || published.taxonomy) return null;
+  const scored = published.clustering.filter(
+    (c) => c.silhouette !== null && c.silhouette_null !== null,
+  );
+  if (scored.length === 0) return null;
+  const best = scored.reduce((a, b) =>
+    (b.silhouette ?? 0) > (a.silhouette ?? 0) ? b : a,
+  );
+  return {
+    axes: published.axes,
+    points: points.map((p) => ({
+      year: p.year,
+      title: p.title,
+      axis: p.axis,
+      pctl: p.pctl,
+    })),
+    cohortN: published.n,
+    bestSilhouette: best.silhouette ?? 0,
+    nullLo: best.silhouette_null?.lo ?? 0,
+    nullHi: best.silhouette_null?.hi ?? 0,
+  };
+}
+
 type FingerprintData = {
   seasons: FingerprintSeason[];
   groups: FingerprintGroup[];
@@ -704,16 +759,85 @@ function ClutchTable({ lines }: { lines: ClutchLine[] }) {
   );
 }
 
+// The composite rating, drawn with the posterior interval that belongs to it.
+// A career of two-decimal ratings invites reading a 0.03 gap as improvement;
+// with the bands drawn, most of a player's seasons turn out to be one season
+// measured three times.
+function RatingSection({ ratings }: { ratings: PlayerRatings }) {
+  const best = ratings.seasons.reduce((a, b) => (b.rating > a.rating ? b : a));
+  const separable = ratings.seasons.filter(
+    (s) => s.seasonId !== best.seasonId && !overlaps(s, best),
+  ).length;
+  const others = ratings.seasons.length - 1;
+  const times = ["", "once", "twice", "three times", "four times", "five times"];
+  const timesLabel =
+    times[ratings.seasons.length] ?? `${ratings.seasons.length} times`;
+
+  return (
+    <section className="mt-10">
+      <h2 className="lower-third">
+        Rating
+        <span className="lt-note">composite, with its 95% interval</span>
+      </h2>
+      <div className="mt-3 border border-hairline bg-surface p-4">
+        <RatingIntervals
+          seasons={ratings.seasons}
+          lo={ratings.scale.lo}
+          hi={ratings.scale.hi}
+          minMaps={ratings.minMaps}
+        />
+      </div>
+      <p className="mt-3 text-xs text-ink-muted">
+        The composite rating weights each stat by what it is worth to winning
+        maps in that title and mode, then reads the result through a two-level
+        model of the cohort; an average qualified season is 1.00. The bar is
+        ±1.96 posterior sd — what is still unknown about the player after
+        pooling — drawn on the range the archive&rsquo;s qualified seasons
+        occupy, widened where a band runs past it.{" "}
+        {others === 0 ? (
+          <>
+            One rated season, so there is nothing here to compare it against
+            except the league.
+          </>
+        ) : separable === 0 ? (
+          <>
+            No other season&rsquo;s interval clears {best.year} {best.title}
+            &rsquo;s, so this career reads as one level measured {timesLabel}{" "}
+            rather than a trajectory.
+          </>
+        ) : separable === others ? (
+          <>
+            Every other season sits clear of {best.year} {best.title}: the gaps
+            here are wider than the model&rsquo;s uncertainty about them.
+          </>
+        ) : (
+          <>
+            {separable} of the {others} other seasons{" "}
+            {separable === 1 ? "sits" : "sit"} clear of {best.year} {best.title};
+            the remaining {others - separable} overlap it and should be read as
+            the same level, not a decline or a rise.
+          </>
+        )}{" "}
+        <a href="/methodology#player-rating">Methodology</a>.
+      </p>
+    </section>
+  );
+}
+
 // ---------- Tab content ----------
 
 function CareerTab({
   arcPoints,
   fingerprint,
+  style,
+  ratings,
   allModes,
   playerInsights,
 }: {
   arcPoints: ArcPoint[];
   fingerprint: FingerprintData | null;
+  style: StyleView | null;
+  ratings: PlayerRatings | null;
   allModes: SeasonAdjusted[];
   playerInsights: { id: number; kind: string; headline: string }[];
 }) {
@@ -736,6 +860,8 @@ function CareerTab({
         </div>
       </section>
 
+      {ratings && <RatingSection ratings={ratings} />}
+
       {fingerprint && (
         <section className="mt-10">
           <h2 className="lower-third">
@@ -753,6 +879,37 @@ function CareerTab({
             season and mode; metrics where low is good are flipped so brighter
             always reads better. Reading down a column gives the season&rsquo;s
             shape; reading across a row gives the career drift.
+          </p>
+        </section>
+      )}
+
+      {style && (
+        <section className="mt-10">
+          <h2 className="lower-third">
+            Style
+            <span className="lt-note">position, not label</span>
+          </h2>
+          <div className="mt-4 border border-hairline bg-surface p-4">
+            <StyleAxes
+              axes={style.axes}
+              points={style.points}
+              cohortN={style.cohortN}
+            />
+          </div>
+          <p className="mt-3 text-xs text-ink-muted">
+            There is no archetype here to compare against, and that is a
+            finding rather than a gap. Clustering these metrics never beats a
+            cloud with no clusters in it: the best-separated partition scores a
+            silhouette of {style.bestSilhouette.toFixed(3)} where an unclustered
+            cloud of the same size and shape scores{" "}
+            {style.nullLo.toFixed(3)}&ndash;{style.nullHi.toFixed(3)}. So a
+            player is drawn as a position on the {style.axes.length}{" "}
+            axes that survive Horn&rsquo;s parallel analysis, over{" "}
+            {style.cohortN.toLocaleString()}{" "}
+            player-seasons, with the composite
+            rating already projected out &mdash; this is how someone played at
+            their level, not what level that was. See{" "}
+            <a href="/methodology#player-style">methodology</a>.
           </p>
         </section>
       )}
@@ -785,6 +942,9 @@ function CareerTab({
                   </td>
                   <td className="py-2 pr-4 text-right font-mono tabular-nums">
                     {fmtZ(a.kdZ)}
+                    {a.kdZ !== null && a.kdZSe !== null && (
+                      <span className="text-ink-muted"> ±{a.kdZSe.toFixed(2)}</span>
+                    )}
                   </td>
                   <td className="py-2 pr-4">
                     {a.kdPctl !== null ? <PctlBar pctl={a.kdPctl} /> : "—"}
@@ -797,6 +957,12 @@ function CareerTab({
             </tbody>
           </table>
         </div>
+        <p className="mt-3 text-xs text-ink-muted">
+          The ± on the cohort z-score is the era model&rsquo;s standard error
+          for that season, the same quantity the career arc bands. Coverage is
+          the share of the season&rsquo;s metrics the source data actually
+          supports; a low one is why a season can be rated and still be wide.
+        </p>
       </section>
 
       {playerInsights.length > 0 && (
@@ -1091,24 +1257,41 @@ export default async function PlayerPage({
   const player = await getPlayerBySlug(slug.toLowerCase());
   if (!player) notFound();
 
-  const [eraRun, insightsRun, metricRun] = await Promise.all([
+  const [eraRun, insightsRun, metricRun, styleRun, ratingRun] = await Promise.all([
     latestRun("era_adjust"),
     latestRun("insights"),
     latestRun("metric_layer"),
+    latestRun("player_style"),
+    latestRatingRun(),
   ]);
-  const [adjusted, stints, playerInsights, metricValues, metricCatalog] =
+  const [
+    adjusted,
+    stints,
+    playerInsights,
+    metricValues,
+    metricCatalog,
+    stylePoints,
+    styleArtifact,
+    ratings,
+  ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
       getPlayerStints(player.id),
       insightsRun ? getPlayerInsights(player.id, insightsRun.id) : Promise.resolve([]),
       metricRun ? getPlayerMetrics(metricRun.id, player.id) : Promise.resolve([]),
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
+      styleRun ? getPlayerStyle(styleRun.id, player.id) : Promise.resolve([]),
+      getPlayerStyleArtifact(),
+      ratingRun
+        ? getPlayerRatingSeasons(player.id, ratingRun.id)
+        : Promise.resolve(null),
     ]);
   const metricCards = buildMetricCards(metricValues, metricCatalog);
   const feedSeasons = buildFeedSeasons(metricValues, metricCatalog);
   const roundProfiles = buildRoundProfiles(metricValues, metricCatalog);
   const streakRows = buildStreakRows(metricValues);
   const fingerprint = buildFingerprint(metricValues, metricCatalog);
+  const style = buildStyleView(styleArtifact?.style ?? null, stylePoints);
 
   const allModes = adjusted.filter((a) => a.modeId === null);
   const byMode = adjusted.filter((a) => a.modeId !== null);
@@ -1129,6 +1312,7 @@ export default async function PlayerPage({
       year: a.year,
       title: a.title,
       kdZ: a.kdZ as number,
+      kdZSe: a.kdZSe,
       kdPctl: a.kdPctl as number,
       maps: a.mapsPlayed,
     }));
@@ -1170,6 +1354,8 @@ export default async function PlayerPage({
                 <CareerTab
                   arcPoints={arcPoints}
                   fingerprint={fingerprint}
+                  style={style}
+                  ratings={ratings}
                   allModes={allModes}
                   playerInsights={playerInsights}
                 />

@@ -91,10 +91,16 @@ const COLUMNS: Column<PlayerIndexRow>[] = [
     sortable: true,
     sortDir: "desc",
     sortValue: (r) => r.bestRating,
+    // Sorting by a number whose sd is around 0.04 puts adjacent rows inside
+    // each other's error, so the sd travels with the number rather than being
+    // left on the rating board alone.
     render: (r) =>
       r.bestRating !== null ? (
         <>
           {r.bestRating.toFixed(2)}
+          {r.bestRatingSd !== null && (
+            <span className="text-ink-muted"> ±{r.bestRatingSd.toFixed(2)}</span>
+          )}
           <span className="ml-1 text-ink-muted">{r.bestRatingYear}</span>
         </>
       ) : (

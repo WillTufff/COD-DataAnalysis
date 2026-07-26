@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { RoundClock, TradeLatency } from "@/components/charts/RoundClock";
+import { visibleBins } from "@/components/charts/roundClockScale";
 import {
   type ClutchByN,
   type DensityMap,
+  type RoundTimeline,
   type RoundsGroup,
   getKillDensity,
+  getRoundWinProb,
   getRoundsOverview,
   latestRun,
 } from "@/lib/analytics";
@@ -118,6 +122,92 @@ function DensityGrid({ m }: { m: DensityMap }) {
   );
 }
 
+/** Annotation for the four-panel figure: the numbers it is worth pointing at,
+ *  read off the artifact so a rerun cannot leave the prose behind. */
+function ClockCaption({ timeline }: { timeline: RoundTimeline }) {
+  const bins = visibleBins(timeline.bins);
+  const at = (t: number) => bins.find((b) => b.t_s === t);
+  const half = bins.find((b) => b.live_share < 0.5);
+  const mid = at(30);
+  const [early, late] = timeline.leader_drift;
+  const last = bins[bins.length - 1];
+
+  return (
+    <>
+      Half the rounds are over by {half ? `${half.t_s} seconds` : "the midpoint"}
+      , and the shape of the first panel is why: survivors fall on both sides at
+      once, and the winner&rsquo;s side is ahead by well under a player for most
+      of the round&mdash;
+      {mid?.winner_alive?.toFixed(2)} against {mid?.loser_alive?.toFixed(2)} at
+      thirty seconds. That is the same instant the second panel puts the eventual
+      winner at {mid?.p_winner ? `${(mid.p_winner * 100).toFixed(0)}%` : "—"}:
+      rounds are not decided early so much as leaned on early.{" "}
+      {early && late && (
+        <>
+          The third panel is the one to argue with. It compares the table&rsquo;s
+          price for a man advantage against what the side holding it actually
+          did, on the same rounds. At {early.t_s} s the gap is{" "}
+          {(early.gap * 100).toFixed(1)} points ±{(early.se * 100).toFixed(1)}{" "}
+          and does not clear its own error; at {late.t_s} s it is{" "}
+          {(late.gap * 100).toFixed(1)} ±{(late.se * 100).toFixed(1)} over{" "}
+          {late.n.toLocaleString()} rounds, which does. A body is worth more
+          late than early, and the state table — which has no clock in it, and
+          was tested with one — prices both the same. That null still
+          stands as stated: adding time did not improve out-of-sample Brier. Both
+          can be true, and usually are when an effect is real and small.{" "}
+        </>
+      )}
+      Probabilities are the published table read on the rounds that fitted it, so
+      the second and third panels describe this archive rather than forecast a
+      new one; the out-of-sample test is on{" "}
+      <Link href="/methodology#round-win-probability" className="underline">
+        methodology
+      </Link>
+      . Three things are left out rather than drawn thin: the axis stops at{" "}
+      {last.t_s} s, where {(last.live_share * 100).toFixed(1)}% of rounds are
+      still going; {timeline.n_rounds_span_conflict.toLocaleString()} rounds
+      whose recorded length contradicts their own feed are excluded from the
+      three state panels; and the third panel starts at five seconds, because
+      only two rounds in the archive open uneven and a rate over two rounds is
+      not a rate.
+    </>
+  );
+}
+
+function TradeCaption({ timeline }: { timeline: RoundTimeline }) {
+  const lat = timeline.trade_latency;
+  const answered = lat.n_answered / lat.n_deaths;
+  const early = timeline.bins[0];
+  const later = timeline.bins.find((b) => b.t_s === 60);
+  return (
+    <>
+      A death is <em>traded</em>
+      {" when the killer is answered by the victim’s side within "}
+      {lat.window_ms / 1000} seconds. Unwindowed, the answer arrives
+      on a smooth decay: {(answered * 100).toFixed(0)}% of deaths are ever
+      answered, the median answer takes{" "}
+      {lat.median_ms === null ? "—" : (lat.median_ms / 1000).toFixed(1)} seconds,
+      and only{" "}
+      {lat.within_of_answered === null
+        ? "—"
+        : `${(lat.within_of_answered * 100).toFixed(0)}%`}{" "}
+      of the answers that do come land inside the window. So the convention is
+      not arbitrary — the distribution peaks in its first two seconds — but it is
+      a cut across a slope rather than a seam in the data, and it leaves more
+      revenge kills outside than it counts.{" "}
+      {early.traded_share !== null && later?.traded_share != null && (
+        <>
+          Trades are also front-loaded:{" "}
+          {(early.traded_share * 100).toFixed(0)}% of deaths in the opening five
+          seconds are answered in time, against{" "}
+          {(later.traded_share * 100).toFixed(0)}% of those at a minute in, when
+          there are fewer teammates left to do the answering.
+        </>
+      )}
+    </>
+  );
+}
+
 export default async function RoundsPage({
   searchParams,
 }: {
@@ -127,6 +217,10 @@ export default async function RoundsPage({
   const run = await latestRun("metric_layer");
   const overview = run ? await getRoundsOverview(run.id) : null;
   const density = run ? await getKillDensity(run.id) : null;
+  // The round tier's own run, independent of the metric layer above: pooled
+  // Search & Destroy, not the group the picker selects.
+  const rounds = await getRoundWinProb();
+  const timeline = rounds?.timeline ?? null;
 
   if (!run || !overview || overview.groups.length === 0) {
     return (
@@ -236,8 +330,8 @@ export default async function RoundsPage({
             </div>
             <p className="mt-2 max-w-md text-xs text-ink-muted">
               Over {group.advantage.adv_rounds.toLocaleString()} rounds decided by an
-              opening pick. The two rates sum to 100% — every such round is one side&rsquo;s
-              conversion or the other&rsquo;s steal.
+              opening pick. The two rates sum to 100% — every such round is one side’s
+              conversion or the other’s steal.
             </p>
           </section>
         )}
@@ -269,6 +363,47 @@ export default async function RoundsPage({
           </div>
         </section>
       </div>
+
+      {/* The round along its own clock */}
+      {timeline && timeline.bins.length > 0 && (
+        <section className="mt-14">
+          <h2 className="lower-third">
+            Inside the round
+            <span className="lt-note">
+              {timeline.n_rounds_spanned.toLocaleString()} Search & Destroy
+              rounds, 2017–2018
+            </span>
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm text-ink-secondary">
+            The panels above are one number per season. This is the same feed
+            read along the clock: how many players are still up, how decided the
+            round already is, and whether the model&rsquo;s answer matches what
+            happened. Pooled over both titles and independent of the picker
+            above &mdash; Search &amp; Destroy is the only mode here whose rounds
+            are a unit of play.
+          </p>
+          <div className="mt-5 border border-hairline bg-surface p-4">
+            <RoundClock timeline={timeline} />
+          </div>
+          <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+            <ClockCaption timeline={timeline} />
+          </p>
+
+          <div className="mt-10 grid grid-cols-1 gap-x-12 gap-y-6 md:grid-cols-2">
+            <div>
+              <h3 className="eyebrow text-ink-secondary">
+                How long an answer takes
+              </h3>
+              <div className="mt-3 border border-hairline bg-surface p-4">
+                <TradeLatency latency={timeline.trade_latency} />
+              </div>
+            </div>
+            <p className="max-w-md self-center text-xs text-ink-muted">
+              <TradeCaption timeline={timeline} />
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* Kill density */}
       {density && densityMaps.length > 0 && (

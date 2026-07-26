@@ -140,6 +140,10 @@ export default async function TeamPage({
       metricRun ? getTeamMetrics(metricRun.id, team.id) : Promise.resolve([]),
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
     ]);
+  // The same team under Glicko-2, so the trajectory chart can shade its RD.
+  const glickoTimelines = glickoRun
+    ? await getEloTimelines(glickoRun.id, [team.id])
+    : [];
   const styleRows = buildStyleRows(teamMetrics, metricCatalog);
 
   const standing = standings.find((s) => s.teamId === team.id);
@@ -214,11 +218,12 @@ export default async function TeamPage({
       <section className="mt-12">
         <h2 className="lower-third">
           Rating trajectory
-          <span className="lt-note">Elo after every rated series</span>
+          <span className="lt-note">after every rated series</span>
         </h2>
         <div className="mt-4">
           <EloExplorer
             timelines={timelines}
+            glicko={glickoTimelines}
             eras={eras}
             events={events}
             height={300}

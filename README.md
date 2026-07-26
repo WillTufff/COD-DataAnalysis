@@ -17,11 +17,40 @@ The full loop runs end to end on real data, locally:
   season, and the 2019 BO4 season.
 - **Models.** Era adjustment (cohort z-scores and percentiles per season and mode,
   minimum 8 maps), Elo (K=32), Glicko-2 (τ=0.5), an open composite player rating fit on
-  what actually wins maps, and a win-probability model whose result was a published null.
-  Walk-forward backtests over 1,310 decided series put Glicko-2 at 0.22170 Brier / 65.0%
-  accuracy and Elo at 0.22281 / 63.4%, close enough that no system separates from the
-  others. Every model write is versioned through `model_runs` and replaced on rerun;
+  what actually wins maps and published as the posterior of a two-level model, so its
+  interval is the model's rather than a bootstrap of its point estimate, and a
+  win-probability model whose result was a published null.
+  Walk-forward backtests over 1,310 decided series put Elo at 0.22281 Brier / 63.4%
+  accuracy and Glicko-2 at 0.22874 / 63.4%. Those gaps are paired and carry intervals:
+  Elo's edge over Glicko-2 (−0.0059, 95% CI −0.0111 to −0.0010) separates, the
+  win-probability model's edge over Glicko-2 does not, and the null it publishes comes
+  with a power statement saying what size of effect the archive could have found. Every model write is versioned through `model_runs` and replaced on rerun;
   superseded runs of the same model are pruned so only what a run published survives.
+- **Series dynamics.** What a 1-0 lead is actually worth, measured against an exact
+  enumeration of a race to three with no memory in it. The map-1 winner takes 75.9% of
+  1,272 best-of-fives, and against ratings alone that looks like momentum — too many
+  sweeps, too few deciders. Model the sequence with a per-series quality offset the
+  ratings did not have and the carryover goes to −0.8 points of map win probability
+  (95% CI −5.5 to +3.9), against +10.9 from the same data fitted the ordinary way.
+- **Rounds.** The first model built on the kill feed: given the survivor count in a Search
+  and Destroy round right now, what is each side worth? Sixteen non-terminal states from
+  ~104,000 observations, walk-forward by event, and the regularity worth naming is that
+  round odds track the *ratio* of survivors rather than the difference — being up one is
+  .716 at 4v3 and .846 at 2v1. Two add-a-feature nulls are published with their intervals:
+  neither elapsed time nor a plant indicator improves out-of-sample Brier, the second for a
+  structural reason the feed cannot fix. The round is also drawn along its own clock —
+  survivors, win probability, the model against the outcome, and how much of the sample is
+  still playing, on one shared time axis. Rounds turn out not to be decided early so much
+  as leaned on early: half are over by 60 seconds, and at thirty the eventual winner is
+  ahead by under two thirds of a player.
+- **Player style.** Whether roles are a taxonomy or a continuum, asked properly. With the
+  composite rating projected out (it explains 11.7% of the variance, so style and quality
+  are nearly orthogonal) and only metrics every season can reach, no partition beats a
+  cloud with no clusters in it: the best-separated k scores a silhouette of 0.286 where an
+  unclustered Gaussian of the same shape scores 0.251 to 0.305. Bootstrap stability of
+  0.961 sounds convincing and is not — the same null reproduces itself just as well. So
+  players are published as positions on the four axes Horn's parallel analysis retains,
+  not as archetype labels.
 - **Metric layer.** 93 derived metrics per player, season and mode, plus team
   style metrics and loadout meta aggregates, all era-scored against their own cohort.
   Which seasons a metric covers is measured from the data rather than declared, so
@@ -32,6 +61,13 @@ The full loop runs end to end on real data, locally:
   CSV/XLSX export, a rounds page for the kill-feed tier, a loadout meta page, a findings
   ledger, and the methodology write-up with an auto-generated metric glossary. Player and
   team pages are prerendered; the filterable views render per request.
+- **Uncertainty is drawn, not stored and hidden.** Every rating the site publishes
+  carries the interval its model computed: the composite rating's posterior SD on the
+  player page, the rating board and the player index; the era model's standard error on
+  the career arc, the season tables and the home leaderboard; Glicko-2's RD on the team
+  pages. Bands are ±1.96 SD on a domain shared across the table or plot, so overlap is
+  legible — on the top-twenty rating board, eight of the nineteen chasing seasons reach
+  the leader's interval, and the order between them is not a claim the model can make.
 
 Two things are still open. CDL-era data needs Liquipedia LPDB API access, which is not yet in
 place, so the site currently covers 2017 to 2019 only. And

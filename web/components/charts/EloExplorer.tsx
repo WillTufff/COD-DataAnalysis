@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { EloTimeline, EraSpan, EventMarker } from "@/lib/analytics";
+import type { EloPoint, EloTimeline, EraSpan, EventMarker } from "@/lib/analytics";
 
 // Fixed slot order (validated categorical palette, dark steps). Color follows
 // the team — slot is assigned once by standings rank and never repainted when
@@ -40,11 +40,15 @@ function shortLabel(name: string): string {
 
 export function EloExplorer({
   timelines,
+  glicko,
   eras = [],
   events = [],
   height = 340,
 }: {
   timelines: EloTimeline[];
+  /** Same teams, rated by Glicko-2. Supplying it enables the system toggle and
+   *  the ±RD band — the one thing Glicko-2 knows that Elo does not. */
+  glicko?: EloTimeline[];
   eras?: EraSpan[];
   events?: EventMarker[];
   height?: number;
@@ -52,21 +56,28 @@ export function EloExplorer({
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(timelines.slice(0, DEFAULT_SHOWN).map((t) => t.teamId)),
   );
+  const [system, setSystem] = useState<"elo" | "glicko">("elo");
   const [hover, setHover] = useState<{
     team: string;
     t: string;
     rating: number;
+    rd: number | null;
     color: string;
   } | null>(null);
   const [eventHover, setEventHover] = useState<EventMarker | null>(null);
 
+  // Color follows the team, and slot is assigned from the Elo ordering
+  // (standings rank) so switching systems never repaints a line.
   const slotOf = useMemo(() => {
     const m = new Map<number, string>();
     timelines.forEach((tl, i) => m.set(tl.teamId, SLOTS[i % SLOTS.length]));
     return m;
   }, [timelines]);
 
-  const shown = timelines.filter((tl) => selected.has(tl.teamId));
+  const canToggle = !!glicko?.length;
+  const showBand = canToggle && system === "glicko";
+  const source = showBand ? glicko! : timelines;
+  const shown = source.filter((tl) => selected.has(tl.teamId));
 
   const W = 760;
   const H = height;
@@ -80,8 +91,13 @@ export function EloExplorer({
   const allPts = shown.flatMap((tl) => tl.points);
   const t0 = Math.min(...allPts.map((p) => Date.parse(p.t)));
   const t1 = Math.max(...allPts.map((p) => Date.parse(p.t)));
-  const r0 = Math.min(1400, ...allPts.map((p) => p.rating));
-  const r1 = Math.max(1600, ...allPts.map((p) => p.rating));
+  // With bands on, the domain has to hold them: a team's first few series carry
+  // an RD near Glicko's 350 starting value, and clipping that to fit the lines
+  // would hide exactly the uncertainty the band exists to show.
+  const bandLo = (p: EloPoint) => (showBand && p.rd != null ? p.rating - p.rd : p.rating);
+  const bandHi = (p: EloPoint) => (showBand && p.rd != null ? p.rating + p.rd : p.rating);
+  const r0 = Math.min(1400, ...allPts.map(bandLo));
+  const r1 = Math.max(1600, ...allPts.map(bandHi));
   // Compressed time scale, event-granular: each stretch of rated play gets
   // width proportional to its duration, and every quiet gap — the week after
   // a major, the holiday break, the offseason — collapses to a fixed sliver.
@@ -147,6 +163,30 @@ export function EloExplorer({
   const rTicks: number[] = [];
   for (let v = Math.ceil(r0 / 100) * 100; v <= r1; v += 100) rTicks.push(v);
 
+  // End-of-line labels, pushed apart where two teams finish close together.
+  // Ratings converge more under Glicko-2 than Elo, so the overlap that was
+  // occasional on the Elo view is routine on this one. Greedy top-down sweep:
+  // labels keep their order and only ever move down, so the nearest label to a
+  // line is still that line's.
+  const LABEL_GAP = 11;
+  const labelY = useMemo(() => {
+    const ends = shown
+      .map((tl) => ({
+        teamId: tl.teamId,
+        y: y(tl.points[tl.points.length - 1].rating),
+      }))
+      .sort((a, b) => a.y - b.y);
+    const out = new Map<number, number>();
+    let prev = -Infinity;
+    for (const e of ends) {
+      const placed = Math.max(e.y, prev + LABEL_GAP);
+      out.set(e.teamId, placed);
+      prev = placed;
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown, r0, r1, ih, M.top]);
+
   function toggle(teamId: number) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -158,6 +198,25 @@ export function EloExplorer({
 
   return (
     <figure>
+      {canToggle && (
+        <div className="mb-3 flex items-center gap-1 text-xs">
+          {(["elo", "glicko"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSystem(s)}
+              aria-pressed={system === s}
+              className={`rounded border px-2 py-1 transition-colors ${
+                system === s
+                  ? "border-hairline bg-surface-raised text-ink"
+                  : "border-transparent text-ink-muted hover:text-ink-secondary"
+              }`}
+            >
+              {s === "elo" ? "Elo" : "Glicko-2 ± RD"}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* filter row: one row above the chart */}
       <div className="mb-3 flex flex-wrap gap-2">
         {timelines.map((tl) => {
@@ -192,7 +251,11 @@ export function EloExplorer({
           viewBox={`0 0 ${W} ${H}`}
           className="w-full"
           role="img"
-          aria-label="Team Elo rating over time, one line per selected team"
+          aria-label={
+            showBand
+              ? "Team Glicko-2 rating over time with rating-deviation bands, one line per selected team"
+              : "Team Elo rating over time, one line per selected team"
+          }
           onMouseLeave={() => setHover(null)}
         >
           {/* era bands: each title is literally a different game — the chart
@@ -363,6 +426,32 @@ export function EloExplorer({
             );
           })}
 
+          {/* Bands first, so every line draws over every band: with several
+              teams selected the translucent fills overlap, and a line buried
+              under a neighbour's uncertainty is unreadable. */}
+          {showBand &&
+            shown.map((tl) => {
+              const band = tl.points.filter((p) => p.rd != null);
+              if (band.length < 2) return null;
+              const d =
+                band.map((p, i) => `${i ? "L" : "M"}${x(p.t)},${y(bandHi(p))}`).join(" ") +
+                " " +
+                band
+                  .slice()
+                  .reverse()
+                  .map((p) => `L${x(p.t)},${y(bandLo(p))}`)
+                  .join(" ") +
+                " Z";
+              return (
+                <path
+                  key={tl.teamId}
+                  d={d}
+                  fill={slotOf.get(tl.teamId)!}
+                  opacity={0.14}
+                  stroke="none"
+                />
+              );
+            })}
           {shown.map((tl) => {
             const color = slotOf.get(tl.teamId)!;
             const d = tl.points
@@ -373,14 +462,34 @@ export function EloExplorer({
               <g key={tl.teamId}>
                 <path d={d} fill="none" stroke={color} strokeWidth={2} />
                 {/* direct label at line end — identity never color-alone */}
-                <text
-                  x={x(last.t) + 6}
-                  y={y(last.rating) + 3.5}
-                  fontSize={10.5}
-                  fill="var(--ink-secondary)"
-                >
-                  {tl.team}
-                </text>
+                {(() => {
+                  const ly = labelY.get(tl.teamId) ?? y(last.rating);
+                  const dy = ly - y(last.rating);
+                  return (
+                    <>
+                      {/* leader line when the label had to move off its own end */}
+                      {Math.abs(dy) > 1.5 && (
+                        <line
+                          x1={x(last.t) + 2}
+                          y1={y(last.rating)}
+                          x2={x(last.t) + 5}
+                          y2={ly}
+                          stroke={color}
+                          strokeWidth={1}
+                          opacity={0.5}
+                        />
+                      )}
+                      <text
+                        x={x(last.t) + 6}
+                        y={ly + 3.5}
+                        fontSize={10.5}
+                        fill="var(--ink-secondary)"
+                      >
+                        {tl.team}
+                      </text>
+                    </>
+                  );
+                })()}
                 {tl.points.map((p, i) => (
                   <circle
                     key={i}
@@ -389,7 +498,13 @@ export function EloExplorer({
                     r={7}
                     fill="transparent"
                     onMouseEnter={() =>
-                      setHover({ team: tl.team, t: p.t, rating: p.rating, color })
+                      setHover({
+                        team: tl.team,
+                        t: p.t,
+                        rating: p.rating,
+                        rd: p.rd,
+                        color,
+                      })
                     }
                     onMouseLeave={() => setHover(null)}
                   />
@@ -472,19 +587,36 @@ export function EloExplorer({
                 fill="var(--ink-secondary)"
                 className="font-mono"
               >
-                {hover.rating.toFixed(0)} · {hover.t.slice(0, 10)}
+                {hover.rating.toFixed(0)}
+                {showBand && hover.rd != null && ` ± ${hover.rd.toFixed(0)}`} ·{" "}
+                {hover.t.slice(0, 10)}
               </text>
             </g>
           )}
         </svg>
       )}
       <figcaption className="mt-1 text-xs text-ink-muted">
-        Series-level Elo (K=32, initial 1500) after each rated series.
+        {showBand ? (
+          <>
+            Series-level Glicko-2 (τ=0.5, initial 1500 ± 350) after each rated
+            series. The shaded band is the rating deviation — the model&rsquo;s own
+            uncertainty about where the rating sits, which Elo has no way to
+            express. It starts wide for a team with no record and narrows as the
+            team plays. Note that each series is its own rating period, so the
+            deviation tracks games played rather than time elapsed: it does not
+            widen over a layoff.
+          </>
+        ) : (
+          <>Series-level Elo (K=32, initial 1500) after each rated series.</>
+        )}
         {timelines.length > 1 && (
           <> Teams shown are the top {timelines.length} by final rating.</>
         )}{" "}
         The 1500 line is league average by construction. Spec in{" "}
-        <a href="/methodology#elo" className="underline">
+        <a
+          href={showBand ? "/methodology#glicko2" : "/methodology#elo"}
+          className="underline"
+        >
           methodology
         </a>
         .

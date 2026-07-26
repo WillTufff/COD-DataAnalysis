@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CarryParams } from "@/components/table/CarryParams";
 import type { SortState } from "@/components/table/tableState";
 import { PlayersIndexTable } from "./PlayersIndexTable";
+import { IntervalBar, halfWidth, overlaps } from "@/components/charts/RatingInterval";
 import {
   type PlayerIndexSort,
   getRatingComparison,
@@ -91,6 +92,30 @@ export default async function PlayersPage({
       comparison.overall[comparison.published].brier /
         comparison.overall[comparison.baseline].brier
     : null;
+
+  // The board's intervals share one domain, so overlap is legible down the
+  // column. How much of the top the leader is not actually separated from is
+  // the honest headline of a table sorted to the third decimal.
+  // The domain starts at the 1.00 league average even though no row is near it,
+  // so the tick on each track means something and the whole board is visibly
+  // above the line rather than filling the width by construction.
+  // Padded at both ends so the 1.00 tick and the widest band sit inside the
+  // track rather than on its edge, where either would be unreadable.
+  const RATING_PAD = 0.02;
+  const ratingDomain = {
+    lo:
+      Math.min(
+        1,
+        ...ratingBoard.map((r) => r.rating - (halfWidth(r.ratingSd) ?? 0)),
+      ) - RATING_PAD,
+    hi:
+      Math.max(
+        ...ratingBoard.map((r) => r.rating + (halfWidth(r.ratingSd) ?? 0)),
+      ) + RATING_PAD,
+  };
+  const tiedWithLeader = ratingBoard
+    .slice(1)
+    .filter((r) => overlaps(r, ratingBoard[0])).length;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
@@ -181,6 +206,7 @@ export default async function PlayersPage({
                   <th className="py-2 pr-4 text-right font-normal">
                     Rating ± sd
                   </th>
+                  <th className="py-2 pr-4 font-normal">95% interval</th>
                   <th className="py-2 text-right font-normal">Raw K/D</th>
                 </tr>
               </thead>
@@ -216,6 +242,22 @@ export default async function PlayersPage({
                         </span>
                       )}
                     </td>
+                    <td className="py-1.5 pr-4">
+                      <IntervalBar
+                        value={r.rating}
+                        sd={r.ratingSd}
+                        lo={ratingDomain.lo}
+                        hi={ratingDomain.hi}
+                        mark={1}
+                        label={
+                          r.ratingSd === null
+                            ? `${r.handle} ${r.year}: rating ${r.rating.toFixed(2)}, no stored interval`
+                            : `${r.handle} ${r.year}: rating ${r.rating.toFixed(2)}, 95% ${(
+                                r.rating - 1.96 * r.ratingSd
+                              ).toFixed(2)} to ${(r.rating + 1.96 * r.ratingSd).toFixed(2)}`
+                        }
+                      />
+                    </td>
                     <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
                       {r.kdRaw !== null ? r.kdRaw.toFixed(2) : "—"}
                     </td>
@@ -226,11 +268,18 @@ export default async function PlayersPage({
           </div>
           <p className="mt-3 max-w-3xl text-xs text-ink-muted">
             The rating weights each stat by its regression coefficient for
-            winning maps in that title and mode, shrinks small samples toward
-            the league mean, and scales the result so an average qualified
-            season is 1.00. Which stats it reads is measured per cohort, and
-            covers first bloods, survival, time per life and — where a kill feed
-            exists — trades. The ±sd comes from a map-resampling bootstrap.
+            winning maps in that title and mode, then reads that score through a
+            two-level model of the cohort, which pulls short seasons toward the
+            league mean and puts an average qualified season at 1.00. Which
+            stats it reads is measured per cohort, and covers first bloods,
+            survival, time per life and — where a kill feed exists — trades. The
+            ±sd is the posterior&rsquo;s: what is still unknown about the player
+            after pooling, not how far the number would move on other maps. The
+            interval is ±1.96 sd on a scale shared by every row, which is the
+            point of drawing it: {tiedWithLeader} of the other{" "}
+            {ratingBoard.length - 1} seasons on this board have an interval that
+            reaches the top one’s, so those ranks are an ordering of the
+            estimates rather than a claim that the seasons differ.
             {brierGain !== null && comparison && (
               <>
                 {" "}

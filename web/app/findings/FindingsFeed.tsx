@@ -41,6 +41,7 @@ function evidenceHref(item: FeedItem): string {
   }
   if (item.kind === "what_wins") return "/methodology#player-rating";
   if (item.kind === "model_null") return "/methodology#winprob";
+  if (item.kind === "mode_null") return "/methodology#map-elo";
   return "/methodology";
 }
 
@@ -61,8 +62,8 @@ function Chips({ detail }: { detail: Record<string, unknown> }) {
     );
   if (typeof detail.rating === "number" && typeof detail.rating_sd === "number")
     chips.push(`${detail.rating.toFixed(2)} ±${detail.rating_sd.toFixed(2)}`);
-  if (typeof detail.obj_vs_slay === "number")
-    chips.push(`obj ${detail.obj_vs_slay.toFixed(1)}× slay`);
+  if (typeof detail.rest_vs_slay === "number")
+    chips.push(`rest ${detail.rest_vs_slay.toFixed(1)}× slaying`);
   if (typeof detail.n_maps === "number") chips.push(`${detail.n_maps} maps`);
   if (typeof detail.pctl === "number")
     chips.push(`${Math.round(detail.pctl * 100)}th pctl`);
