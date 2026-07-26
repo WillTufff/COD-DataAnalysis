@@ -2,6 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { EloExplorer } from "@/components/charts/EloExplorer";
 import { ModeSplitBars } from "@/components/charts/ModeSplitBars";
+import {
+  ModeStrengthBars,
+  ModeStrengthNull,
+} from "@/components/charts/ModeStrengthBars";
 import { PlacementTimeline } from "@/components/charts/PlacementTimeline";
 import { StintTimeline } from "@/components/charts/StintTimeline";
 import { PctlBar } from "@/components/PctlBar";
@@ -14,6 +18,7 @@ import {
   getTeamBySlug,
   getTeamH2H,
   getTeamModeSplits,
+  getTeamModeStrength,
   getTeamPlacements,
   getTeamStints,
   getTeamStandings,
@@ -124,6 +129,7 @@ export default async function TeamPage({
     placements,
     stints,
     modeSplits,
+    modeStrength,
     h2h,
     teamMetrics,
     metricCatalog,
@@ -136,6 +142,7 @@ export default async function TeamPage({
       getTeamPlacements(team.id),
       getTeamStints(team.id),
       getTeamModeSplits(team.id),
+      getTeamModeStrength(team.id),
       getTeamH2H(team.id, 12),
       metricRun ? getTeamMetrics(metricRun.id, team.id) : Promise.resolve([]),
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
@@ -145,6 +152,15 @@ export default async function TeamPage({
     ? await getEloTimelines(glickoRun.id, [team.id])
     : [];
   const styleRows = buildStyleRows(teamMetrics, metricCatalog);
+  // mode_ratings keys modes by slug; the win-rate chart above reads game_modes
+  // .name. Same labels on both, or the two charts look like different modes.
+  const strength = modeStrength && {
+    ...modeStrength,
+    rows: modeStrength.rows.map((r) => ({
+      ...r,
+      mode: STYLE_MODE_LABELS[r.mode] ?? r.mode,
+    })),
+  };
 
   const standing = standings.find((s) => s.teamId === team.id);
   const rank = standings.findIndex((s) => s.teamId === team.id) + 1;
@@ -252,6 +268,19 @@ export default async function TeamPage({
           <div className="mt-4 border border-hairline bg-surface p-4">
             <ModeSplitBars splits={modeSplits} />
           </div>
+
+          {strength && (
+            <>
+              <h2 className="lower-third mt-10">
+                Strength by mode
+                <span className="lt-note">opposition-adjusted</span>
+              </h2>
+              <div className="mt-4 border border-hairline bg-surface p-4">
+                <ModeStrengthBars strength={strength} />
+                <ModeStrengthNull strength={strength} />
+              </div>
+            </>
+          )}
         </div>
         <div>
           <h2 className="lower-third">

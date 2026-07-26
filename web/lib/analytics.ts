@@ -1186,6 +1186,80 @@ export async function getTeamModeSplits(teamId: number): Promise<ModeSplit[]> {
   }));
 }
 
+export type ModeStrengthRow = {
+  mode: string;
+  // Mode rating minus global rating, then minus the field's mean gap in that
+  // mode. See getTeamModeStrength for why the second subtraction is required.
+  rel: number;
+  nMaps: number;
+};
+
+export type ModeStrength = {
+  rows: ModeStrengthRow[];
+  minModeMaps: number;
+  // The permutation null this quantity has to be read against.
+  nullSd: number;
+  nullLo: number;
+  nullHi: number;
+  observedSd: number;
+  pValue: number;
+  exceedsNull: boolean;
+};
+
+// Per-mode team strength, adjusted for opposition, for one team.
+//
+// The map_elo run publishes a mode_ratings artifact carrying each qualified
+// (team, mode) cell's rating alongside that team's global rating. Its `delta`
+// is not usable as published: across the 98 qualified cells it averages -34
+// and is negative in 72 of them, because a mode rating is fit on a fraction of
+// the maps the global rating sees and regresses further toward the initial
+// value. Printed raw it would tell a reader that almost every team is worse at
+// every mode than they are overall, which cannot be true of a set of modes that
+// make up the whole. The offset is mode-specific -- control -57, hardpoint -24
+// -- so it is removed per mode, leaving a gap against the field rather than
+// against an artifact of the estimator.
+//
+// The specialization null travels with the rows and is not optional. It reports
+// that the spread across cells does not exceed what shuffling produces, so no
+// caller may present these as established mode specialisms.
+export async function getTeamModeStrength(
+  teamId: number,
+): Promise<ModeStrength | null> {
+  const elo = await getMapElo();
+  if (!elo?.modeRatings || !elo.specialization.available) return null;
+
+  const all = elo.modeRatings.rows;
+  const mine = all.filter((r) => r.team_id === teamId);
+  if (mine.length === 0) return null;
+
+  const fieldMean = new Map<string, number>();
+  for (const mode of new Set(all.map((r) => r.mode))) {
+    const cells = all.filter((r) => r.mode === mode);
+    fieldMean.set(
+      mode,
+      cells.reduce((a, r) => a + r.delta, 0) / cells.length,
+    );
+  }
+
+  const s = elo.specialization;
+  return {
+    rows: mine
+      .map((r) => ({
+        mode: r.mode,
+        rel: r.delta - (fieldMean.get(r.mode) ?? 0),
+        nMaps: r.n_maps,
+      }))
+      .sort((a, b) => b.rel - a.rel),
+    minModeMaps: elo.modeRatings.min_mode_maps,
+    nullSd: s.null_mean_sd ?? 0,
+    nullLo: s.null_lo ?? 0,
+    nullHi: s.null_hi ?? 0,
+    observedSd: s.observed_sd ?? 0,
+    pValue: s.p_value ?? 1,
+    exceedsNull: s.exceeds_null ?? false,
+  };
+}
+
 export type H2HRow = {
   opponentId: number;
   opponent: string;

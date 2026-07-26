@@ -659,6 +659,23 @@ this number attached, and the largest gaps in it (eUnited −173 in Control, 100
 specialization is not measurable here" is what this says; "mode specialization does not
 exist" is not.
 
+**Reading `mode_ratings.delta` off the artifact.** The stored `delta` is a cell's rating
+minus the team's global rating, and it is not centred: across the 98 qualified cells it
+averages **−34** and is negative in 72 of them. That is a property of the estimator, not
+of the league. A mode rating is fit on a fraction of the maps the global rating sees, so
+it regresses further toward the initial value, and the size of the pull depends on how
+much of the rotation the mode is — control −57 on average, hardpoint −24. Printed raw,
+`delta` says almost every team is worse at every mode than they are overall, which cannot
+be true of a set of modes that make up the whole. The figures quoted above (eUnited −173
+in Control, 100 Thieves −162 in Search) carry that offset and are quoted only to show the
+range the null covers.
+
+Team pages therefore subtract the field's mean gap in each mode before drawing anything,
+which leaves a gap against the field rather than against the estimator. The chart shades
+the null band behind the bars and mutes every bar that falls inside it, and the verdict
+above travels with it in the same component, so no page can render the ordering without
+the number that says how much of it is real.
+
 **What the extra sample does buy.** The one thing that clearly works is rating maps at
 all. Rolled up to series, the blend arm scores 0.21821 against Elo's 0.22281 — a gap of
 0.00460 that clears both its interval and its power threshold, the only model comparison
