@@ -3,6 +3,7 @@ walk-forward hygiene, shrinkage, rating ordering, and per-cohort feature
 resolution. No database required."""
 
 from datetime import date, timedelta
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -15,18 +16,27 @@ from cdlhub_analytics.maprows import (
     MapRow,
 )
 from cdlhub_analytics.ratings.player_rating import (
+    BOOTSTRAP_B,
     MIN_TRAIN_GAMES,
+    SHRINK_FALLBACK,
     Cohort,
+    ModeFit,
+    PlayerModeAgg,
+    _estimate_shrinkage,
     _shrink,
     aggregate_players,
     backtest_weights,
+    bootstrap_mode_weights,
     build_cohort_scales,
     build_cohorts,
     build_game_diffs,
     compute_ratings,
     fit_mode_weights,
     resolve_features,
+    rest_vs_slay,
+    weights_artifact,
 )
+from cdlhub_analytics.regress import LogisticFit
 
 # Player skill: (mean kills per map). Team 1 = {11, 12}, team 2 = {21, 22}.
 SKILL = {11: 30.0, 12: 20.0, 21: 20.0, 22: 15.0}
@@ -154,9 +164,110 @@ def test_ratings_order_scale_and_uncertainty() -> None:
 
 
 def test_shrinkage_pulls_small_samples_to_league_mean() -> None:
-    assert abs(_shrink(2.0, 8)) < abs(_shrink(2.0, 80))  # fewer maps, more pooling
-    assert abs(_shrink(2.0, 10**6) - 2.0) < 1e-3  # huge samples keep their signal
-    assert _shrink(-2.0, 8) > -2.0  # shrinks from both sides
+    k = SHRINK_FALLBACK
+    assert abs(_shrink(2.0, 8, k)) < abs(_shrink(2.0, 80, k))  # fewer maps, more pooling
+    assert abs(_shrink(2.0, 10**6, k) - 2.0) < 1e-3  # huge samples keep their signal
+    assert _shrink(-2.0, 8, k) > -2.0  # shrinks from both sides
+    assert _shrink(1.0, 20, 40.0) < _shrink(1.0, 20, 10.0)  # a stronger prior pools harder
+
+
+# ------------------------------------------------------- empirical-Bayes prior
+
+
+def one_feature_cohort(
+    n_players: int, n_maps: int, sigma: float, tau: float, seed: int = 11
+) -> list[PlayerModeAgg]:
+    """A cohort with a known variance ratio: true scores drawn with SD `tau`,
+    per-map observations scattered around them with SD `sigma`, one feature that
+    is the score itself. The estimator should recover k = sigma^2 / tau^2."""
+    rng = np.random.default_rng(seed)
+    out: list[PlayerModeAgg] = []
+    for pid in range(n_players):
+        truth = rng.normal(0.0, tau)
+        obs = rng.normal(truth, sigma, size=n_maps).reshape(n_maps, 1)
+        out.append(
+            PlayerModeAgg(
+                player_id=pid,
+                season_id=1,
+                mode_id=1,
+                maps=n_maps,
+                feats=np.asarray(obs.mean(axis=0)),
+                numerators=obs,
+                denominators=np.ones((n_maps, 1)),
+            )
+        )
+    return out
+
+
+UNIT = (np.zeros(1), np.ones(1), np.ones(1))  # feat_mu, feat_sd, weights
+
+
+def _unit_fit() -> ModeFit:
+    """A one-feature fit whose weight is 1, so the score is the feature itself."""
+    return ModeFit(
+        n_games=0,
+        mu=np.zeros(1),
+        sd=np.ones(1),
+        fit=LogisticFit(intercept=0.0, weights=np.ones(1), converged=True, n_iter=1),
+    )
+
+
+def test_estimate_shrinkage_recovers_a_known_variance_ratio() -> None:
+    members = one_feature_cohort(n_players=250, n_maps=30, sigma=3.0, tau=1.0)
+    k, within, between, n_players, n_maps, estimated = _estimate_shrinkage(members, *UNIT)
+    assert estimated
+    assert (n_players, n_maps) == (250, 7500)
+    assert abs(within - 9.0) < 0.5  # sigma^2
+    assert abs(between - 1.0) < 0.25  # tau^2
+    assert 7.0 < k < 11.0  # sigma^2 / tau^2 = 9
+
+
+def test_estimate_shrinkage_scales_with_the_noise() -> None:
+    quiet = _estimate_shrinkage(one_feature_cohort(200, 30, sigma=1.0, tau=1.0), *UNIT)[0]
+    noisy = _estimate_shrinkage(one_feature_cohort(200, 30, sigma=4.0, tau=1.0), *UNIT)[0]
+    assert noisy > 8.0 * quiet, "a noisier mode must demand far more maps"
+
+
+def test_estimate_shrinkage_flattens_a_cohort_that_does_not_differ() -> None:
+    """Every player has the same true score, so all the observed spread is
+    per-map noise. tau^2 estimates zero and is as likely to land just below it
+    as just above; either way the cohort must end up almost fully pooled, so
+    assert the shrinkage rather than the sign that produced it."""
+    members = one_feature_cohort(n_players=120, n_maps=25, sigma=2.0, tau=0.0)
+    k, _within, between, _n, _m, estimated = _estimate_shrinkage(members, *UNIT)
+    assert abs(between) < 0.05
+    if estimated:
+        assert _shrink(1.0, 50, k) < 0.15, "a 50-map season should keep almost nothing"
+    else:
+        assert k == SHRINK_FALLBACK
+
+
+def test_estimate_shrinkage_needs_replication() -> None:
+    members = one_feature_cohort(n_players=40, n_maps=1, sigma=2.0, tau=1.0)
+    assert _estimate_shrinkage(members, *UNIT) == (SHRINK_FALLBACK, 0.0, 0.0, 40, 40, False)
+
+
+def test_cohort_scale_carries_the_prior_and_falls_back_on_four_players() -> None:
+    """The synthetic cohort is deliberately tiny, and four players cannot
+    separate true spread from per-map noise: tau^2 comes out negative and the
+    scale says so. That is the guard working, and it is why the golden ratings
+    below are the fallback's."""
+    rows = synthetic_rows()
+    cohorts = v1_setup(rows)
+    fits = fit_mode_weights(build_game_diffs(rows, cohorts))
+    scale = build_cohort_scales(aggregate_players(rows, cohorts), fits)[(1, 1)]
+    assert (scale.n_players, scale.n_maps) == (4, 320)
+    assert not scale.shrink_estimated
+    assert scale.between_var < 0.0
+    assert scale.shrink_maps == SHRINK_FALLBACK
+
+
+def test_cohort_scale_estimates_the_prior_when_the_cohort_supports_it() -> None:
+    members = one_feature_cohort(n_players=150, n_maps=20, sigma=2.0, tau=1.0)
+    scale = build_cohort_scales(members, {(1, 1): _unit_fit()})[(1, 1)]
+    assert scale.shrink_estimated
+    assert scale.shrink_maps == pytest.approx(scale.within_var / scale.between_var)
+    assert 2.5 < scale.shrink_maps < 6.0  # sigma^2 / tau^2 = 4
 
 
 # ---------------------------------------------------------------- resolution
@@ -241,6 +352,105 @@ def test_every_feature_declares_its_denominator_sources(version: str) -> None:
                 assert any(s.endswith("rounds") for s in f.sources), f.key
             if f.denom_kind == "lives":
                 assert "num_lives" in f.sources, f.key
+
+
+# ------------------------------------------------------- weight uncertainty
+
+
+def test_rest_vs_slay_reads_the_boundary_the_model_defines() -> None:
+    w = {"kills_p10": 0.6, "deaths_p10": -0.4, "obj_p10": 1.0}
+    # slaying mean = 0.5, rest mean = 1.0
+    assert rest_vs_slay(w, ["kills_p10", "deaths_p10"]) == pytest.approx(2.0)
+
+
+def test_rest_vs_slay_is_none_when_one_side_is_empty() -> None:
+    """A cohort with nothing beyond the gunfight has no ratio, not a ratio of 0."""
+    assert rest_vs_slay({"kills_p10": 0.6, "deaths_p10": -0.4}, ["kills_p10", "deaths_p10"]) is None
+    assert rest_vs_slay({"obj_p10": 1.0}, []) is None
+
+
+def test_rest_vs_slay_is_none_when_the_gunfight_carries_no_weight() -> None:
+    assert rest_vs_slay({"kills_p10": 0.0, "obj_p10": 1.0}, ["kills_p10"]) is None
+
+
+def test_weight_intervals_bracket_the_full_sample_fit() -> None:
+    rows = synthetic_rows(n_games=200, seed=11)
+    cohorts = v1_setup(rows)
+    diffs = build_game_diffs(rows, cohorts)
+    fits = fit_mode_weights(diffs)
+    cis = bootstrap_mode_weights(diffs, cohorts, b=60)
+
+    ci = cis[(1, 1)]
+    assert ci.draws == 60
+    for key, weight in zip(cohorts[(1, 1)].feature_keys, fits[(1, 1)].weights, strict=True):
+        lo, hi = ci.weights[key]
+        assert lo < hi, key
+        assert lo <= weight <= hi, key
+
+
+def test_ratio_interval_excludes_one_when_the_gunfight_decides() -> None:
+    """On these maps kills and deaths carry all the signal and assists and the
+    objective are noise, so the interval must land wholly below 1x — the chart
+    and the finding both hang on which side of 1.0 it sits."""
+    rows = synthetic_rows(n_games=200, seed=11)
+    cohorts = v1_setup(rows)
+    cis = bootstrap_mode_weights(build_game_diffs(rows, cohorts), cohorts, b=60)
+
+    ratio = cis[(1, 1)].ratio
+    assert ratio is not None
+    lo, hi = ratio
+    assert 0.0 < lo < hi < 1.0
+
+
+def test_bootstrap_skips_cohorts_below_the_training_gate() -> None:
+    """The same floor fit_mode_weights uses: no fit, so nothing to put an
+    interval on."""
+    rows = synthetic_rows(n_games=MIN_TRAIN_GAMES - 1)
+    cohorts = v1_setup(rows)
+    assert bootstrap_mode_weights(build_game_diffs(rows, cohorts), cohorts, b=10) == {}
+
+
+class _LabelConn:
+    """Stand-in for the two label lookups weights_artifact makes."""
+
+    def __init__(self) -> None:
+        self._rows: list[tuple[object, ...]] = []
+
+    def execute(self, sql: str, *_args: object) -> "_LabelConn":
+        self._rows = [(1, 2018, "WWII")] if "FROM seasons" in sql else [(1, "Hardpoint")]
+        return self
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return self._rows
+
+
+def test_weights_artifact_publishes_the_ratio_with_its_interval() -> None:
+    rows = synthetic_rows(n_games=200, seed=11)
+    cohorts = v1_setup(rows)
+    diffs = build_game_diffs(rows, cohorts)
+    fits = fit_mode_weights(diffs)
+    cis = bootstrap_mode_weights(diffs, cohorts, b=40)
+
+    payload = weights_artifact(cast(Any, _LabelConn()), fits, cohorts, "1.0.0", cis)
+    (entry,) = payload["cohorts"]
+    assert set(entry["weight_ci"]) == set(entry["weights"])
+    lo, hi = entry["rest_vs_slay_ci"]
+    assert lo < entry["rest_vs_slay"] < hi
+    assert entry["ci_draws"] == 40
+    assert payload["bootstrap_b"] == BOOTSTRAP_B
+
+
+def test_weights_artifact_omits_the_interval_when_none_was_computed() -> None:
+    """Consumers must be able to tell 'not published' from 'wide'."""
+    rows = synthetic_rows(n_games=200, seed=11)
+    cohorts = v1_setup(rows)
+    fits = fit_mode_weights(build_game_diffs(rows, cohorts))
+
+    payload = weights_artifact(cast(Any, _LabelConn()), fits, cohorts, "1.0.0")
+    (entry,) = payload["cohorts"]
+    assert "rest_vs_slay" in entry
+    assert "rest_vs_slay_ci" not in entry
+    assert "weight_ci" not in entry
 
 
 # ------------------------------------------------------------------ golden

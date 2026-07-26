@@ -56,6 +56,9 @@ def series(*specs: tuple[int, int, int, bool]) -> list[fit.SeriesRow]:
             team2=t2,
             team1_won=won,
             played_at=datetime(2018, 1, 1 + i),
+            # One event per series: these fixtures test lineage carry-through,
+            # not period semantics, so each series stays its own rating period.
+            event_id=i,
         )
         for i, (sid, t1, t2, won) in enumerate(specs)
     ]

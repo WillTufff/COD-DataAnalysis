@@ -1,14 +1,23 @@
 """Glicko-2 (Glickman 2013, http://www.glicko.net/glicko/glicko2.pdf).
 
 Spec: /methodology#glicko2. Implementation follows the paper's steps exactly;
-tests pin the paper's worked example. Each series is treated as its own rating
-period (documented simplification: CWL events are dense, so periods of one
-series keep RD honest between events via the sigma-driven inflation).
+tests pin the paper's worked example.
+
+**Rating periods are real here.** An earlier version treated each series as its
+own period and only ever advanced the two teams playing it, which meant the
+volatility inflation never ran for an idle team: the rating deviation tracked
+games played rather than time elapsed, and a roster returning from a layoff was
+treated as exactly as well known as when it left. That is the specific failure
+the volatility term exists to prevent. `Glicko2.advance` now runs a period over
+a whole roster at once — every team is advanced, those with results by the
+paper's update and those without by inflation alone — which is also the shape
+the paper assumes (it wants 10-15 games per period, not one).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 INITIAL_R = 1500.0
@@ -71,11 +80,16 @@ def _new_sigma(sigma: float, phi: float, v: float, delta: float, tau: float) -> 
     return math.exp(big_a / 2.0)
 
 
-def rate(team: TeamState, opponents: list[tuple[TeamState, float]], tau: float) -> TeamState:
-    """One rating period for `team` against (opponent, score) results."""
+def rate(team: TeamState, opponents: Sequence[tuple[TeamState, float]], tau: float) -> TeamState:
+    """One rating period for `team` against (opponent, score) results.
+
+    With no results the rating is unchanged and only the deviation grows, capped
+    at INITIAL_RD: 350 already means "no information", and a team idle for three
+    years is not less known than a team that has never played.
+    """
     if not opponents:
         phi_star = math.sqrt(team.phi**2 + team.sigma**2)
-        return TeamState(team.r, phi_star * _GLICKO2_SCALE, team.sigma)
+        return TeamState(team.r, min(phi_star * _GLICKO2_SCALE, INITIAL_RD), team.sigma)
     mu, phi = team.mu, team.phi
     v_inv = 0.0
     delta_sum = 0.0
@@ -112,12 +126,43 @@ class Glicko2:
         return 1.0 / (1.0 + math.exp(-g * (a.mu - b.mu)))
 
     def update(self, team_a: int, team_b: int, a_won: bool) -> float:
-        """Rate one series as its own rating period; returns walk-forward P(A wins)."""
+        """Rate one series as its own rating period; returns walk-forward P(A wins).
+
+        A convenience for the degenerate one-series period. Note it advances only
+        the two teams involved — callers wanting real periods want `advance`.
+        """
         p = self.predict(team_a, team_b)
-        a, b = self.state(team_a), self.state(team_b)
         s = 1.0 if a_won else 0.0
-        new_a = rate(a, [(b, s)], self.tau)
-        new_b = rate(b, [(a, 1.0 - s)], self.tau)
-        self.teams[team_a] = new_a
-        self.teams[team_b] = new_b
+        self.advance({team_a: [(team_b, s)], team_b: [(team_a, 1.0 - s)]}, (team_a, team_b))
         return p
+
+    def advance(
+        self,
+        results: Mapping[int, Sequence[tuple[int, float]]],
+        roster: Iterable[int],
+    ) -> None:
+        """Close one rating period over `roster`.
+
+        `results` maps a team to its (opponent, score) results in the period.
+        Every team in `roster` is advanced whether or not it appears there, so
+        an idle team gets its deviation inflated instead of being frozen.
+
+        Opponent states are snapshotted before anything is written, so the order
+        teams happen to be iterated in cannot change the outcome — within a
+        period every result is scored against the ratings as they stood when the
+        period opened, which is what makes a period a period.
+        """
+        before = {t: self.state(t) for t in {*roster, *results}}
+        for played in results.values():
+            for opponent, _score in played:
+                before.setdefault(opponent, self.state(opponent))
+        self.teams.update(
+            {
+                team: rate(
+                    before[team],
+                    [(before[o], s) for o, s in results.get(team, ())],
+                    self.tau,
+                )
+                for team in before
+            }
+        )

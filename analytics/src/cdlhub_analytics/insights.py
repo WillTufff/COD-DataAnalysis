@@ -12,11 +12,17 @@ Five kinds read the era adjustment and the Elo run:
   era_context  league slaying pace shifts between consecutive seasons per mode
   h2h_edge     lopsided head-to-head records (>= 8 decided series, >= 70%)
 
-Three more read the newer models' outputs (player_rating, winprob):
+Four more read the newer models' outputs (player_rating, winprob, map_elo):
 
-  what_wins    per (season x mode): learned objective-vs-slaying map weights
+  what_wins    per (season x mode): learned map weights, gunfight vs everything else
   rating_top   highest open-player-rating seasons in the archive
   model_null   backtested non-results worth publishing (e.g. momentum)
+  mode_null    whether per-mode team strength beats one rating per team
+
+Two more read the series-dynamics run:
+
+  series_dynamics  what winning map 1 is worth against a race with no memory
+  model_null       the carryover null, once unmeasured team quality is allowed for
 
 Six more come from the metric layer; see insights_metrics.
 
@@ -32,6 +38,8 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import psycopg
+
+from .ratings.player_rating import rest_vs_slay
 
 MIN_MAPS_SEASON = 30  # outlier/trend eligibility: real seasons, not cameos
 MIN_CAREER_MAPS = 250  # floor for a career-volume milestone
@@ -64,7 +72,9 @@ MAX_PER_SUBJECT_KIND = 2
 
 # Kinds where one row per subject is already one fact, so a cap would only
 # discard real findings: league-wide rankings and per-cohort model summaries.
-UNCAPPED_KINDS = frozenset({"what_wins", "era_context", "meta_shift", "model_null"})
+UNCAPPED_KINDS = frozenset(
+    {"what_wins", "era_context", "meta_shift", "model_null", "series_dynamics"}
+)
 
 
 def cap_per_subject(atoms: list[Atom], limit: int = MAX_PER_SUBJECT_KIND) -> list[Atom]:
@@ -355,9 +365,34 @@ def h2h_edges(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
     return out
 
 
+def _ratio(v: float, *, dp: int = 1) -> str:
+    """One decimal, except where that would print a real ratio as "0.0"."""
+    return f"{v:.{2 if v < 0.1 else dp}f}"
+
+
+def _span(lo: float, hi: float) -> str:
+    """An interval's two ends at one precision, set by whichever needs more."""
+    dp = 2 if min(lo, hi) < 0.1 else 1
+    return f"{_ratio(lo, dp=dp)}–{_ratio(hi, dp=dp)}"
+
+
 def what_wins(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list[Atom]:
     """One finding per (season × mode): what the map-outcome regression says
-    a one-SD team edge is worth, objective play vs slaying."""
+    a one-SD team edge is worth, everything-else vs the gunfight.
+
+    The comparison is deliberately *not* framed as objective-vs-slaying. The
+    model defines exactly one boundary — which features are the kills/deaths
+    pair — and the remainder is a mix of objective columns, survival and trade
+    economy that varies by cohort. Naming the ratio after the half the model
+    actually delimits keeps the published sentence true for every feature-set
+    version. web/lib/analytics.ts:getModeWeights computes the same ratio.
+
+    A cohort whose bootstrap interval covers 1.0 publishes nothing. The ratio is
+    a few hundred maps of ridge coefficients over collinear features, and every
+    reading below — the gunfight decided, everything else did, they were equal —
+    is a claim about which side of 1.0 the truth lies on. Where the interval does
+    not answer that, there is no finding, only a point estimate.
+    """
     row = conn.execute(
         "SELECT payload FROM model_artifacts WHERE run_id = %s AND name = 'mode_weights'",
         (pr_run,),
@@ -373,45 +408,68 @@ def what_wins(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> list
         # respawn modes per 10 minutes. Team kills mirror opponent deaths, so the
         # pair is near-collinear and ridge splits it; read them jointly.
         slaying = cohort.get("slaying_features") or ["kills_p10", "deaths_p10"]
-        others = [k for k in w if k not in slaying]
-        if not slaying or not others:
-            continue
-        slay = sum(abs(float(w[k])) for k in slaying) / len(slaying)
         # Everything the cohort measured beyond the gunfight, by magnitude: a
-        # first-death rate earns its weight through a negative coefficient.
-        obj = sum(abs(float(w[k])) for k in others) / len(others)
-        if slay <= 0.0:
+        # first-death rate earns its weight through a negative coefficient. The
+        # fit publishes the ratio; recomputing it is the fallback for artifacts
+        # written before it did.
+        ratio = cohort.get("rest_vs_slay")
+        if ratio is None:
+            ratio = rest_vs_slay(w, slaying)
+        if ratio is None:
             continue
-        ratio = obj / slay
+        ratio = float(ratio)
+        ci = cohort.get("rest_vs_slay_ci")
+        if ci is not None and float(ci[0]) <= 1.0 <= float(ci[1]):
+            continue
         year, title, mode = cohort["year"], cohort["title"], cohort["mode"]
         if ratio >= 1.3:
             reading = (
-                f"the objective, not the gunfight, carried maps: a one-SD team edge in "
-                f"objective play was worth {ratio:.1f}x the same edge in slaying"
+                f"the gunfight was not what carried maps: a one-SD team edge in what the "
+                f"season measured beyond kills and deaths was worth {_ratio(ratio)}x the same "
+                f"edge in kills and deaths"
             )
         elif ratio <= 0.6:
             reading = (
-                f"slaying decided maps: a one-SD objective edge was worth only "
-                f"{ratio:.1f}x the equivalent slaying edge"
+                f"the gunfight decided maps: a one-SD edge in everything else was worth "
+                f"only {_ratio(ratio)}x the equivalent edge in kills and deaths"
             )
         else:
-            reading = f"objective play and slaying carried nearly equal weight ({ratio:.1f}x)"
+            reading = (
+                f"kills and deaths and everything else carried nearly equal "
+                f"weight ({_ratio(ratio)}x)"
+            )
+        # Published with its interval, not just its point: the ratio is the whole
+        # finding, and a reader given one number cannot tell 2.0x over 1,179 maps
+        # from 2.6x over 79.
+        span = f"; 95% CI {_span(float(ci[0]), float(ci[1]))}x" if ci is not None else ""
+        # Confidence follows the interval when there is one — the distance of its
+        # nearer end from 1.0, which is what the reading actually asserts — and
+        # falls back to the point estimate's distance when there is not.
+        margin = (
+            min(abs(float(ci[0]) - 1.0), abs(float(ci[1]) - 1.0))
+            if ci is not None
+            else abs(ratio - 1.0)
+        )
+        detail: dict[str, Any] = {
+            "year": year,
+            "title": title,
+            "mode": mode,
+            "n_maps": cohort["n_maps"],
+            "weights": w,
+            "rest_vs_slay": round(ratio, 2),
+            "player_rating_run_id": pr_run,
+        }
+        if ci is not None:
+            detail["rest_vs_slay_ci"] = [round(float(ci[0]), 2), round(float(ci[1]), 2)]
         out.append(
             Atom(
                 "season",
                 cast(int, cohort["season_id"]),
                 "what_wins",
-                f"In {year} {title} {mode}, {reading} (regression over {cohort['n_maps']} maps).",
-                {
-                    "year": year,
-                    "title": title,
-                    "mode": mode,
-                    "n_maps": cohort["n_maps"],
-                    "weights": w,
-                    "obj_vs_slay": round(ratio, 2),
-                    "player_rating_run_id": pr_run,
-                },
-                min(0.45 + abs(ratio - 1.0) * 0.3, 1.0),
+                f"In {year} {title} {mode}, {reading} "
+                f"(regression over {cohort['n_maps']} maps{span}).",
+                detail,
+                min(0.45 + margin * 0.3, 1.0),
             )
         )
     return out
@@ -470,48 +528,288 @@ def rating_top(conn: psycopg.Connection[tuple[object, ...]], pr_run: int) -> lis
 def model_null(
     conn: psycopg.Connection[tuple[object, ...]], wp_run: int, glicko_run: int
 ) -> list[Atom]:
-    """The momentum test: does anything beat Glicko-2 at series prediction?"""
-    sql = "SELECT brier, n_predictions FROM backtests WHERE run_id = %s"
+    """The momentum test: do form and head-to-head add anything to team strength?
+
+    This compares winprob against the Glicko-2 it is built on, which is only a
+    fair comparison because both are now fitted with the same rating period,
+    lineage map and tau — winprob takes those from the caller precisely so that
+    this atom is measuring the added features and nothing else.
+
+    Brier and accuracy are both reported. The two can disagree, and publishing
+    whichever one flatters the challenger is how a null gets talked out of.
+
+    A null also has to say what it could have found. The `model_gaps` artifact
+    carries the paired interval on this gap and the size of form effect 1,310
+    series could detect, and both go in the headline: "no effect" and "no effect
+    this archive could see" are different claims, and only the second is true.
+    """
+    sql = "SELECT brier, accuracy, n_predictions FROM backtests WHERE run_id = %s"
     wp = conn.execute(sql, (wp_run,)).fetchone()
     gl = conn.execute(sql, (glicko_run,)).fetchone()
     art = conn.execute(
         "SELECT payload FROM model_artifacts WHERE run_id = %s AND name = 'coefficients'",
         (wp_run,),
     ).fetchone()
+    gaps_row = conn.execute(
+        "SELECT payload FROM model_artifacts WHERE run_id = %s AND name = 'model_gaps'",
+        (wp_run,),
+    ).fetchone()
     if wp is None or gl is None or art is None:
         return []
-    wp_brier, n = float(cast(float, wp[0])), cast(int, wp[1])
-    gl_brier = float(cast(float, gl[0]))
+    wp_brier, wp_acc, n = float(cast(float, wp[0])), float(cast(float, wp[1])), cast(int, wp[2])
+    gl_brier, gl_acc = float(cast(float, gl[0])), float(cast(float, gl[1]))
     payload = cast("dict[str, Any]", art[0])
-    edge = gl_brier - wp_brier  # positive = challenger actually better
-    if edge > 0.005:
+    edge = gl_brier - wp_brier  # positive = winprob's row is the better one
+
+    # The interval on this exact contrast, and the effect size the archive could
+    # have resolved. Absent on runs written before the significance layer existed,
+    # in which case the headline says less rather than something invented.
+    gaps = cast("dict[str, Any] | None", gaps_row[0] if gaps_row else None)
+    span: tuple[float, float, float | None] | None = None  # (lo, hi, dm_p)
+    power = None
+    if gaps and gaps.get("available"):
+        found = next(
+            (p for p in gaps["pairs"] if {p["a"], p["b"]} == {"glicko2", "winprob_v1"}),
+            None,
+        )
+        if found is not None:
+            # The artifact fixes its own sign by pair order; `edge` is glicko
+            # minus winprob. Re-sign rather than assume, or the headline prints
+            # a gap and an interval that point opposite ways.
+            lo, hi = float(found["lo"]), float(found["hi"])
+            if found["a"] != "glicko2":
+                lo, hi = -hi, -lo
+            span = (lo, hi, found["dm_p"])
+        fp = gaps.get("form_power") or {}
+        power = fp if fp.get("beta_detectable") is not None else None
+
+    if edge > 0.005 and wp_acc >= gl_acc:
         headline = (
             f"Adding recent form, head-to-head history, and rating uncertainty to "
             f"Glicko-2 improved series prediction: Brier {wp_brier:.4f} vs "
             f"{gl_brier:.4f} over {n} series."
         )
     else:
+        interval = ""
+        if span is not None:
+            interval = f", 95% CI {span[0]:+.4f} to {span[1]:+.4f}"
         headline = (
             f"Adding recent form and head-to-head history to Glicko-2 did not "
             f"improve series prediction: Brier {wp_brier:.4f} vs {gl_brier:.4f} "
-            f"over {n} series."
+            f"(gap {edge:+.4f}{interval}) and accuracy {wp_acc:.1%} vs "
+            f"{gl_acc:.1%} over {n} series, both fitted the same way."
         )
-    return [
+        if power is not None:
+            headline += (
+                f" What {n} series could resolve is limited: only a form effect "
+                f"worth {power['swing_pp']:.0f} points of win probability between "
+                f"a 10-0 team and a 0-10 one would have been detectable, so this "
+                f"rules out a large momentum effect rather than any at all."
+            )
+    detail: dict[str, Any] = {
+        "winprob_brier": round(wp_brier, 4),
+        "glicko2_brier": round(gl_brier, 4),
+        "brier_gap": round(edge, 5),
+        "winprob_accuracy": round(wp_acc, 4),
+        "glicko2_accuracy": round(gl_acc, 4),
+        "n_series": n,
+        "final_weights": payload.get("final_weights"),
+        "winprob_run_id": wp_run,
+    }
+    if span is not None:
+        # Signed as glicko − winprob, the same way as brier_gap.
+        detail["brier_gap_lo"] = round(span[0], 5)
+        detail["brier_gap_hi"] = round(span[1], 5)
+        detail["dm_p"] = span[2]
+    if power is not None:
+        detail["detectable_form_beta"] = power["beta_detectable"]
+        detail["detectable_form_swing_pp"] = power["swing_pp"]
+    return [Atom("league", 0, "model_null", headline, detail, 0.85)]
+
+
+def mode_null(conn: psycopg.Connection[tuple[object, ...]], map_run: int) -> list[Atom]:
+    """Is "this roster is a Hardpoint team" a real thing?
+
+    Two results come out of `map_elo` and both belong in the feed, because both
+    cut against something the audience believes. The first is that a rating kept
+    per (team, mode) predicts map winners *worse* than one rating per team. The
+    second is the permutation null underneath it: the spread of per-mode ratings
+    does not clear what shuffled mode labels produce.
+
+    As with the momentum null, the headline has to say what the archive could
+    not have found. A spread too small for 5,087 maps to separate from noise is
+    not the same claim as no spread, and only the first is defensible.
+    """
+    rows = conn.execute(
+        "SELECT name, payload FROM model_artifacts WHERE run_id = %s"
+        " AND name IN ('mode_specialization', 'map_backtest')",
+        (map_run,),
+    ).fetchall()
+    art = {cast(str, r[0]): cast("dict[str, Any]", r[1]) for r in rows}
+    spec, bt = art.get("mode_specialization"), art.get("map_backtest")
+    if not spec or not spec.get("available") or not bt:
+        return []
+
+    gap = next(
+        (
+            p
+            for p in (bt.get("gaps", {}).get("pairs") or [])
+            if {p["a"], p["b"]} == {"global", "mode"}
+        ),
+        None,
+    )
+    if gap is None:
+        return []
+    # Sign as global − mode, so a negative number means the mode-specific
+    # rating is the worse one however the artifact ordered the pair. The
+    # interval has to turn with it, or the headline prints a gap and a range
+    # that point opposite ways — the same trap `model_null` guards.
+    delta, lo, hi = float(gap["delta"]), float(gap["lo"]), float(gap["hi"])
+    if gap["a"] != "global":
+        delta, lo, hi = -delta, -hi, -lo
+
+    arms = bt["arms"]
+    if delta < 0 and gap["excludes_zero"]:
+        headline = (
+            f"Rating teams separately per mode makes map prediction worse, not better: "
+            f"Brier {arms['mode']['brier']:.5f} against {arms['global']['brier']:.5f} for "
+            f"one rating per team over {bt['n_maps']:,} maps (gap {delta:+.5f}, "
+            f"95% CI {lo:+.5f} to {hi:+.5f}). "
+            f"And the per-mode spread itself does not clear noise: {spec['observed_sd']:.1f} "
+            f"rating points across {spec['n_cells']} (team, mode) cells against "
+            f"{spec['null_mean_sd']:.1f} when mode labels are shuffled within each event "
+            f"(p={spec['p_value']:.3f}). Mode specialization is not measurable in this "
+            f"archive — which rules out a large effect, not any effect."
+        )
+    else:
+        headline = (
+            f"Rating teams separately per mode scores Brier {arms['mode']['brier']:.5f} "
+            f"against {arms['global']['brier']:.5f} for one rating per team over "
+            f"{bt['n_maps']:,} maps (gap {delta:+.5f}, 95% CI "
+            f"{lo:+.5f} to {hi:+.5f})."
+        )
+
+    detail: dict[str, Any] = {
+        "n_maps": bt["n_maps"],
+        "brier_global": arms["global"]["brier"],
+        "brier_mode": arms["mode"]["brier"],
+        "brier_blend": arms["blend"]["brier"],
+        "brier_gap": round(delta, 5),
+        "brier_gap_lo": round(lo, 5),
+        "brier_gap_hi": round(hi, 5),
+        "dm_p": gap["dm_p"],
+        "mde80": gap["mde80"],
+        "n_cells": spec["n_cells"],
+        "observed_sd": spec["observed_sd"],
+        "null_mean_sd": spec["null_mean_sd"],
+        "null_lo": spec["null_lo"],
+        "null_hi": spec["null_hi"],
+        "permutation_p": spec["p_value"],
+        "exceeds_null": spec["exceeds_null"],
+        "map_elo_run_id": map_run,
+    }
+    return [Atom("league", 0, "mode_null", headline, detail, 0.85)]
+
+
+def series_null(conn: psycopg.Connection[tuple[object, ...]], sd_run: int) -> list[Atom]:
+    """What a 1-0 lead is worth, and whether any of it is momentum.
+
+    Two atoms, because the two halves are read by different people. The first
+    is the number everyone quotes — the map-1 winner takes three series in four
+    — stated next to the two things that produce it without any memory between
+    maps: the arithmetic of a race to three, and two teams being further apart
+    than their ratings said.
+
+    The second is the null underneath it. It only means anything with its power
+    beside it, so the headline carries the effect the archive could have
+    resolved, in the same points-of-win-probability unit as the estimate.
+    """
+    rows = conn.execute(
+        "SELECT name, payload FROM model_artifacts WHERE run_id = %s"
+        " AND name IN ('series_dynamics', 'series_momentum')",
+        (sd_run,),
+    ).fetchall()
+    art = {cast(str, r[0]): cast("dict[str, Any]", r[1]) for r in rows}
+    dyn, mom = art.get("series_dynamics"), art.get("series_momentum")
+    if not dyn or not mom:
+        return []
+    quality = mom.get("quality") or {}
+    if not quality.get("available"):
+        return []
+
+    m1 = dyn["map1"]
+    sweep = next(r for r in dyn["rates"] if r["event"] == "sweep")
+    n = dyn["n_series"]
+    out = [
+        Atom(
+            "league",
+            0,
+            "series_dynamics",
+            f"The team that wins map 1 wins {m1['observed']:.1%} of best-of-five series "
+            f"across {n:,} of them — but {m1['coin_flip']:.1%} of that is the arithmetic of "
+            f"a race to three between two identical teams, and at these teams' ratings, with "
+            f"no memory between maps, {m1['vs']['rating']['expected']:.1%} is expected. "
+            f"Allowing for the strength the ratings did not know about, "
+            f"{m1['vs']['quality']['expected']:.1%}: a 1-0 lead in this archive is worth "
+            f"almost exactly what a scoreboard says it is.",
+            {
+                "n_series": n,
+                "observed": m1["observed"],
+                "coin_flip": m1["coin_flip"],
+                "expected_rating": m1["vs"]["rating"]["expected"],
+                "expected_quality": m1["vs"]["quality"]["expected"],
+                "delta_quality": m1["vs"]["quality"]["delta"],
+                "delta_quality_lo": m1["vs"]["quality"]["lo"],
+                "delta_quality_hi": m1["vs"]["quality"]["hi"],
+                "sweep_observed": sweep["observed"],
+                "sweep_expected_quality": sweep["vs"]["quality"]["expected"],
+                "series_dynamics_run_id": sd_run,
+            },
+            0.88,
+        )
+    ]
+
+    if not quality["excludes_zero"]:
+        headline = (
+            f"Momentum inside a series does not show up in {n:,} best-of-fives. Winning a "
+            f"map moves the next one by {quality['swing_pp']:+.1f} points of win probability, "
+            f"95% CI {quality['swing_pp_lo']:+.1f} to {quality['swing_pp_hi']:+.1f}, once the "
+            f"teams' own quality is allowed for — and that allowance is the whole story: "
+            f"the same maps say {quality['full']['sigma']:.2f} logits of strength the ratings "
+            f"missed. What this archive could have found is an effect of "
+            f"{quality['mde80_swing_pp']:.1f} points, so it rules out a moderate momentum "
+            f"effect rather than any at all."
+        )
+    else:
+        headline = (
+            f"Winning a map moves the next one by {quality['swing_pp']:+.1f} points of win "
+            f"probability across {n:,} best-of-fives, 95% CI {quality['swing_pp_lo']:+.1f} to "
+            f"{quality['swing_pp_hi']:+.1f}, after allowing for quality the ratings missed."
+        )
+    out.append(
         Atom(
             "league",
             0,
             "model_null",
             headline,
             {
-                "winprob_brier": round(wp_brier, 4),
-                "glicko2_brier": round(gl_brier, 4),
                 "n_series": n,
-                "final_weights": payload.get("final_weights"),
-                "winprob_run_id": wp_run,
+                "n_maps": quality["n_maps"],
+                "gamma": quality["full"]["gamma"],
+                "gamma_lo": quality["full"]["gamma_lo"],
+                "gamma_hi": quality["full"]["gamma_hi"],
+                "swing_pp": quality["swing_pp"],
+                "swing_pp_lo": quality["swing_pp_lo"],
+                "swing_pp_hi": quality["swing_pp_hi"],
+                "sigma": quality["full"]["sigma"],
+                "p": quality["p"],
+                "mde80_swing_pp": quality["mde80_swing_pp"],
+                "series_dynamics_run_id": sd_run,
             },
-            0.85,
+            0.86,
         )
-    ]
+    )
+    return out
 
 
 def generate(
@@ -523,6 +821,8 @@ def generate(
     wp_run: int,
     glicko_run: int,
     metric_run: int | None = None,
+    map_run: int | None = None,
+    sd_run: int | None = None,
 ) -> int:
     from .insights_metrics import generate as metric_atoms
 
@@ -535,6 +835,8 @@ def generate(
         + what_wins(conn, pr_run)
         + rating_top(conn, pr_run)
         + model_null(conn, wp_run, glicko_run)
+        + (mode_null(conn, map_run) if map_run is not None else [])
+        + (series_null(conn, sd_run) if sd_run is not None else [])
         + (metric_atoms(conn, metric_run) if metric_run is not None else [])
     )
     # One subject must not be able to flood a kind with restatements of the

@@ -1,5 +1,13 @@
 """player_rating: the open composite player rating. Spec: /methodology#player-rating.
 
+Steps 1 and 2 below are the whole pipeline's front half and are shared by both
+estimators. Steps 3 and 4 describe the *z-and-shrink* estimator, which this
+module implements and which every rating published before `hierarchical.py`
+used. It is no longer the published one: the site now shows the posterior of the
+two-level model in that module, and this arm survives as the thing it is
+compared against, live, on every run. `prepare` builds the shared half once so
+the two can be told apart by exactly one step.
+
 The pipeline, in order:
 
 1. **Learn what wins maps.** For every (season × mode), each map becomes one
@@ -7,6 +15,9 @@ The pipeline, in order:
    standardized, regressed against which team won the map (L2 logistic, fit in
    regress.py). The coefficients are data-derived answers to "how much is a 1 SD
    edge in hill time worth vs a 1 SD edge in kills?" — per title, per mode.
+   Every coefficient ships with a percentile bootstrap interval over the maps
+   it was fitted on (see `bootstrap_mode_weights`), because cohorts are small
+   and their features collinear.
 
 2. **Score players with those weights.** Each player-season-mode aggregate is
    z-scored against its qualified cohort (>= MIN_MAPS maps, as in era.py) and
@@ -14,12 +25,19 @@ The pipeline, in order:
    a common scale.
 
 3. **Shrink small samples.** Scores are pulled toward the league mean by
-   m / (m + SHRINK_MAPS) where m is maps played — empirical-Bayes partial
-   pooling, so a hot 12-map season cannot outrank a great 200-map one.
+   m / (m + k) where m is maps played — empirical-Bayes partial pooling, so a
+   hot 12-map season cannot outrank a great 200-map one. The prior strength k
+   is the ratio of within-player to between-player score variance, estimated
+   per cohort from the same maps (see `_estimate_shrinkage`), not assumed.
+   `hierarchical.posterior` reaches the same expression from the model that
+   implies it, which is why that module replaced this one rather than
+   supplementing it.
 
 4. **Normalize.** Season rating = 1.0 + RATING_SCALE × (maps-weighted blend
    of mode scores); the qualified cohort averages 1.0 by construction.
-   rating_sd is a map-resampling bootstrap (B=200, fixed seed).
+   rating_sd is a map-resampling bootstrap (B=200, fixed seed) — the sampling
+   spread of the point estimate, which is not the same quantity as the
+   posterior SD the published estimator now stores in that column.
 
 Validation is walk-forward: within each (season × mode), each event's maps
 are predicted using weights trained only on earlier events. That backtest
@@ -47,7 +65,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
@@ -83,7 +101,7 @@ from ..metrics import (
 from ..regress import FloatArray, LogisticFit, fit_logistic_l2
 
 L2 = 1.0  # ridge strength on standardized map diffs
-SHRINK_MAPS = 15.0  # prior strength: maps at which a season keeps half its signal... see spec
+SHRINK_FALLBACK = 15.0  # prior strength used only when a cohort's variance ratio is unusable
 RATING_SCALE = 0.15  # rating = 1.0 + 0.15 × blended score (≈ league SD)
 MIN_TRAIN_GAMES = 40  # walk-forward: skip events until this much history exists
 BOOTSTRAP_B = 200
@@ -110,7 +128,7 @@ class Feature:
     denominator: Callable[[MapRow], float]
     denom_kind: str
     sources: tuple[str, ...]
-    slaying: bool = False  # part of the kills/deaths pair, for the obj-vs-slay reading
+    slaying: bool = False  # part of the kills/deaths pair, for the gunfight-vs-rest reading
     needs_feed: bool = False  # only computable on a reconciled kill-feed map
 
     def available(self, coverage: Coverage, title: str) -> bool:
@@ -357,6 +375,14 @@ ALL_VERSIONS: tuple[str, ...] = ("1.0.0", "2.0.0", "2.1.0")
 PUBLISHED_VERSION = "2.1.0"
 DEFAULT_VERSION = PUBLISHED_VERSION
 
+# Which estimator turns a season profile into a rating. Not a feature-set
+# version: it applies identically to all three, so it is recorded in the run's
+# params rather than in the version string. "z_shrink" is the estimator this
+# module implements and every rating published before it; "hierarchical" is the
+# posterior in hierarchical.py, and is what the site shows.
+ESTIMATORS: tuple[str, ...] = ("hierarchical", "z_shrink")
+PUBLISHED_ESTIMATOR = "hierarchical"
+
 
 def resolve_features(
     version: str, mode_slug: str, coverage: Coverage, title: str
@@ -597,6 +623,100 @@ def fit_mode_weights(
     return out
 
 
+def rest_vs_slay(weights: Mapping[str, float], slaying: Sequence[str]) -> float | None:
+    """Mean |weight| beyond the gunfight over mean |weight| in the slaying pair.
+
+    The one comparison the model itself delimits: which features are the
+    kills/deaths pair is a property of the cohort, and everything else is the
+    remainder, whatever mix of objective, survival and trade economy that is for
+    the title. Team kills mirror opponent deaths, so the pair is near-collinear
+    and the ridge splits its shared weight — hence read jointly, as a mean.
+
+    None when the cohort has nothing on one side of the boundary, or when the
+    slaying pair carries no weight at all and the ratio would not be finite.
+    insights.what_wins and web/lib/analytics.ts:getModeWeights compute the same
+    number; all three must agree, because they publish the same claim.
+    """
+    others = [k for k in weights if k not in slaying]
+    if not slaying or not others:
+        return None
+    slay = sum(abs(float(weights[k])) for k in slaying) / len(slaying)
+    if slay <= 0.0:
+        return None
+    return sum(abs(float(weights[k])) for k in others) / len(others) / slay
+
+
+@dataclass
+class WeightCI:
+    """Percentile bootstrap intervals for one cohort's learned weights."""
+
+    weights: dict[str, tuple[float, float]]  # feature key -> (lo, hi)
+    ratio: tuple[float, float] | None  # interval on rest_vs_slay
+    draws: int  # usable draws, of BOOTSTRAP_B
+
+
+def bootstrap_mode_weights(
+    diffs_by_cohort: dict[tuple[int, int], list[GameDiff]],
+    cohorts: dict[tuple[int, int], Cohort],
+    b: int = BOOTSTRAP_B,
+) -> dict[tuple[int, int], WeightCI]:
+    """How much of the learned weights is signal, by resampling the maps.
+
+    Cohorts here span a few hundred to a thousand maps, and the features inside
+    one are collinear by construction, so the coefficient ratios the site argues
+    from carry wide and very unequal error bars. Nothing reported them until now.
+
+    Each draw refits the cohort end to end — resample maps with replacement,
+    restandardize, refit the ridge — so the interval carries the standardization's
+    own sampling error rather than conditioning on it. The ratio is recomputed per
+    draw instead of being propagated from the per-weight intervals, which would
+    ignore that numerator and denominator move together.
+
+    Draws landing on a single winner are dropped: that fit is degenerate rather
+    than uncertain. The same map-resampling scheme and seed as `rating_sd`.
+    """
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    out: dict[tuple[int, int], WeightCI] = {}
+    for key, diffs in sorted(diffs_by_cohort.items()):
+        cohort = cohorts.get(key)
+        if cohort is None or len(diffs) < MIN_TRAIN_GAMES:
+            continue
+        feature_keys = list(cohort.feature_keys)
+        slaying = [f.key for f in cohort.features if f.slaying]
+        x_all = np.array([g.diff for g in diffs])
+        y_all = np.array([1.0 if g.a_won else 0.0 for g in diffs])
+        n = len(diffs)
+
+        drawn: list[FloatArray] = []
+        ratios: list[float] = []
+        for row in rng.integers(0, n, size=(b, n)):
+            y = y_all[row]
+            if y.min() == y.max():
+                continue
+            x = x_all[row]
+            mu, sd = x.mean(axis=0), x.std(axis=0, ddof=1)
+            sd[sd == 0.0] = 1.0
+            w = fit_logistic_l2(np.asarray((x - mu) / sd), np.asarray(y), l2=L2).weights
+            drawn.append(w)
+            r = rest_vs_slay(dict(zip(feature_keys, w, strict=True)), slaying)
+            if r is not None:
+                ratios.append(r)
+        if len(drawn) < 2:
+            continue
+
+        lo, hi = np.percentile(np.array(drawn), [2.5, 97.5], axis=0)
+        ratio_ci = None
+        if len(ratios) >= 2:
+            rlo, rhi = np.percentile(ratios, [2.5, 97.5])
+            ratio_ci = (float(rlo), float(rhi))
+        out[key] = WeightCI(
+            weights={k: (float(lo[i]), float(hi[i])) for i, k in enumerate(feature_keys)},
+            ratio=ratio_ci,
+            draws=len(drawn),
+        )
+    return out
+
+
 @dataclass
 class MapPrediction:
     """A walk-forward prediction with the map and cohort it came from, so two
@@ -693,12 +813,24 @@ def aggregate_players(
 
 @dataclass
 class CohortScale:
-    """Frozen standardization for one (season × mode) qualified cohort."""
+    """Frozen calibration for one (season × mode) cohort: the standardization
+    the scores are expressed in, and the shrinkage prior estimated from them.
+
+    Both are fitted from the same maps, so a caller refitting the pipeline on a
+    prefix of the season (the out-of-sample harness does exactly this) gets a
+    prior estimated from that prefix too, with no extra plumbing.
+    """
 
     feat_mu: FloatArray
     feat_sd: FloatArray
     score_mu: float
     score_sd: float
+    shrink_maps: float  # the k in m / (m + k)
+    within_var: float  # σ̂², per-map score variance around a player's own mean
+    between_var: float  # τ̂², true spread between players
+    n_players: int
+    n_maps: int
+    shrink_estimated: bool  # False when the variance ratio was unusable and k fell back
 
 
 def _score(agg_feats: FloatArray, scale: CohortScale, weights: FloatArray) -> float:
@@ -707,8 +839,75 @@ def _score(agg_feats: FloatArray, scale: CohortScale, weights: FloatArray) -> fl
     return (float(z @ weights) - scale.score_mu) / scale.score_sd
 
 
-def _shrink(score: float, maps: int) -> float:
-    return score * maps / (maps + SHRINK_MAPS)
+def _shrink(score: float, maps: int, k: float) -> float:
+    return score * maps / (maps + k)
+
+
+def map_scores(
+    agg: PlayerModeAgg, feat_mu: FloatArray, feat_sd: FloatArray, weights: FloatArray
+) -> FloatArray:
+    """This player's score computed one map at a time, on the cohort's scale.
+
+    Public because the hierarchical model reads the same per-map replication to
+    estimate σ², and two implementations of "what a single map said about this
+    player" would be two definitions of the noise the rating discounts.
+
+    Maps with a zero denominator on any feature are dropped rather than imputed,
+    the same rule `_profile` applies to a team's map. Left unstandardized by
+    score_sd: k is a ratio of two variances in the same units, so any common
+    rescaling of the score cancels out of it.
+    """
+    ok = np.all(agg.denominators > 0, axis=1)
+    if not ok.any():
+        return np.zeros(0)
+    z = (agg.numerators[ok] / agg.denominators[ok] - feat_mu) / feat_sd
+    return np.asarray(z @ weights)
+
+
+def _estimate_shrinkage(
+    members: Sequence[PlayerModeAgg],
+    feat_mu: FloatArray,
+    feat_sd: FloatArray,
+    weights: FloatArray,
+) -> tuple[float, float, float, int, int, bool]:
+    """The empirical-Bayes prior strength k for one cohort, from its own maps.
+
+    A player's m-map score is an average of m noisy per-map scores, so its
+    sampling variance is σ²/m around a true score drawn from a population of
+    variance τ². The posterior mean is then the observed score times
+    τ² / (τ² + σ²/m) = m / (m + σ²/τ²) — the shrinkage this module already
+    applies, with k = σ²/τ² rather than a constant chosen by hand.
+
+    σ̂² and τ̂² come from a one-way random-effects decomposition with players as
+    groups, in the unbalanced form (Searle's estimator), since map counts range
+    from one to a full season. Every player in the cohort counts, not just the
+    qualified ones: the shrinkage is applied to short seasons, so estimating its
+    strength from long ones only would be measuring a different population.
+
+    Returns (k, σ̂², τ̂², n_players, n_maps, estimated). `estimated` is False when
+    the cohort cannot support the estimate — fewer than two players, no
+    within-player replication, or τ̂² ≤ 0, which says the observed spread between
+    players is entirely explained by per-map noise. That last case is a real
+    answer (shrink everything to the mean) but not one a rating can publish, so
+    it falls back and says so rather than silently flattening the cohort.
+    """
+    groups = [g for g in (map_scores(a, feat_mu, feat_sd, weights) for a in members) if len(g)]
+    n = len(groups)
+    counts = np.array([len(g) for g in groups], dtype=float)
+    total = float(counts.sum())
+    if n < 2 or total <= n:
+        return (SHRINK_FALLBACK, 0.0, 0.0, n, int(total), False)
+
+    means = np.array([float(g.mean()) for g in groups])
+    grand = float(np.concatenate(groups).mean())
+    within = sum(float(((g - g.mean()) ** 2).sum()) for g in groups) / (total - n)
+    between = float((counts * (means - grand) ** 2).sum()) / (n - 1)
+    # Effective group size for the unbalanced case; equals m when balanced.
+    m0 = (total - float((counts**2).sum()) / total) / (n - 1)
+    tau2 = (between - within) / m0
+    if tau2 <= 0.0:
+        return (SHRINK_FALLBACK, within, tau2, n, int(total), False)
+    return (within / tau2, within, tau2, n, int(total), True)
 
 
 def build_cohort_scales(
@@ -728,11 +927,20 @@ def build_cohort_scales(
         sd[sd == 0.0] = 1.0
         scores = np.array([float(((a.feats - mu) / sd) @ fit.weights) for a in qualified])
         score_sd = float(scores.std(ddof=1))
+        k, within, between, n_players, n_maps, estimated = _estimate_shrinkage(
+            members, np.asarray(mu), np.asarray(sd), fit.weights
+        )
         out[key] = CohortScale(
             feat_mu=np.asarray(mu),
             feat_sd=np.asarray(sd),
             score_mu=float(scores.mean()),
             score_sd=score_sd if score_sd > 0.0 else 1.0,
+            shrink_maps=k,
+            within_var=within,
+            between_var=between,
+            n_players=n_players,
+            n_maps=n_maps,
+            shrink_estimated=estimated,
         )
     return out
 
@@ -751,7 +959,15 @@ def compute_ratings(
     aggs: Sequence[PlayerModeAgg],
     fits: dict[tuple[int, int], ModeFit],
     scales: dict[tuple[int, int], CohortScale],
+    bootstrap: bool = True,
 ) -> list[SeasonRating]:
+    """Ratings for every player-season-mode, plus an all-mode blended row.
+
+    `bootstrap=False` skips the 200-draw resampling and leaves `rating_sd` None.
+    The published run always wants the interval; the out-of-sample harness refits
+    this once per event and only needs the point estimate, where paying for
+    ~17 discarded bootstraps would dominate its runtime.
+    """
     rng = np.random.default_rng(BOOTSTRAP_SEED)
     by_player_season: dict[tuple[int, int], list[PlayerModeAgg]] = defaultdict(list)
     for a in aggs:
@@ -766,7 +982,7 @@ def compute_ratings(
         for j, a in enumerate(modes):
             key = (a.season_id, a.mode_id)
             scale, fit = scales[key], fits[key]
-            s = _shrink(_score(a.feats, scale, fit.weights), a.maps)
+            s = _shrink(_score(a.feats, scale, fit.weights), a.maps, scale.shrink_maps)
             out.append(
                 SeasonRating(
                     player_id=pid,
@@ -779,6 +995,8 @@ def compute_ratings(
             )
             shrunk.append(s)
             weights_m.append(a.maps)
+            if not bootstrap:
+                continue
             idx = rng.integers(0, a.maps, size=(BOOTSTRAP_B, a.maps))
             for b in range(BOOTSTRAP_B):
                 totals = a.denominators[idx[b]].sum(axis=0)
@@ -786,11 +1004,14 @@ def compute_ratings(
                     boot[b, j] = s
                     continue
                 feats = np.asarray(a.numerators[idx[b]].sum(axis=0) / totals)
-                boot[b, j] = _shrink(_score(feats, scale, fit.weights), a.maps)
+                boot[b, j] = _shrink(_score(feats, scale, fit.weights), a.maps, scale.shrink_maps)
 
         total_maps = sum(weights_m)
         blend = float(np.average(shrunk, weights=weights_m))
-        boot_blend = np.average(boot, axis=1, weights=weights_m)
+        sd = None
+        if bootstrap:
+            boot_blend = np.average(boot, axis=1, weights=weights_m)
+            sd = RATING_SCALE * float(np.asarray(boot_blend).std(ddof=1))
         out.append(
             SeasonRating(
                 player_id=pid,
@@ -798,7 +1019,7 @@ def compute_ratings(
                 mode_id=None,
                 maps=total_maps,
                 rating=1.0 + RATING_SCALE * blend,
-                rating_sd=RATING_SCALE * float(np.asarray(boot_blend).std(ddof=1)),
+                rating_sd=sd,
             )
         )
     return out
@@ -829,34 +1050,104 @@ def weights_artifact(
     fits: dict[tuple[int, int], ModeFit],
     cohorts: dict[tuple[int, int], Cohort],
     version: str,
+    cis: dict[tuple[int, int], WeightCI] | None = None,
 ) -> dict[str, Any]:
     """The learned weights, labeled for /methodology and the findings layer.
 
     Feature sets differ per cohort, so each entry carries its own feature list
-    and flags which of them are the slaying pair — the objective-vs-slaying
+    and flags which of them are the slaying pair — the gunfight-vs-everything-else
     reading has to be computed against the features that cohort actually used.
+
+    `rest_vs_slay` and its interval ship on the entry because both consumers of
+    this artifact make that one claim, and neither should be recomputing a ratio
+    the fit can state once. Entries written before the bootstrap existed carry
+    neither key, so consumers must treat a missing interval as "not published"
+    rather than as a wide one.
     """
     seasons, modes = label_context(conn)
+    cis = cis or {}
     entries = []
     for key, fit in sorted(fits.items()):
         cohort = cohorts[key]
         named = list(zip(cohort.feature_keys, fit.weights, strict=True))
+        slaying = [f.key for f in cohort.features if f.slaying]
+        ratio = rest_vs_slay(dict(named), slaying)
+        ci = cis.get(key)
+        entry: dict[str, Any] = {
+            "season_id": cohort.season_id,
+            "year": seasons[cohort.season_id]["year"],
+            "title": seasons[cohort.season_id]["title"],
+            "mode_id": cohort.mode_id,
+            "mode": modes[cohort.mode_id],
+            "n_maps": fit.n_games,
+            "features": list(cohort.feature_keys),
+            "slaying_features": slaying,
+            "labels": {f.key: f.label for f in cohort.features},
+            "weights": {f: round(float(w), 4) for f, w in named},
+            "odds_per_sd": {f: round(float(np.exp(w)), 3) for f, w in named},
+        }
+        if ratio is not None:
+            entry["rest_vs_slay"] = round(ratio, 4)
+        if ci is not None:
+            entry["weight_ci"] = {
+                k: [round(lo, 4), round(hi, 4)] for k, (lo, hi) in ci.weights.items()
+            }
+            entry["ci_draws"] = ci.draws
+            if ci.ratio is not None:
+                entry["rest_vs_slay_ci"] = [round(ci.ratio[0], 4), round(ci.ratio[1], 4)]
+        entries.append(entry)
+    return {
+        "version": version,
+        "l2": L2,
+        "bootstrap_b": BOOTSTRAP_B,
+        "ci": "95% percentile bootstrap, maps resampled within cohort",
+        "cohorts": entries,
+    }
+
+
+def shrinkage_artifact(
+    conn: psycopg.Connection[tuple[object, ...]],
+    scales: dict[tuple[int, int], CohortScale],
+    version: str,
+) -> dict[str, Any]:
+    """The estimated prior strength per cohort, against the constant it replaced.
+
+    `half_signal_maps` is k restated in the units a reader has: the number of
+    maps at which a season keeps half of whatever it measured. `vs_fallback` is
+    how far the cohort sits from the 15 this pipeline used to assert for all of
+    them, which is the whole point of estimating it.
+    """
+    seasons, modes = label_context(conn)
+    entries = []
+    for (season_id, mode_id), scale in sorted(scales.items()):
         entries.append(
             {
-                "season_id": cohort.season_id,
-                "year": seasons[cohort.season_id]["year"],
-                "title": seasons[cohort.season_id]["title"],
-                "mode_id": cohort.mode_id,
-                "mode": modes[cohort.mode_id],
-                "n_maps": fit.n_games,
-                "features": list(cohort.feature_keys),
-                "slaying_features": [f.key for f in cohort.features if f.slaying],
-                "labels": {f.key: f.label for f in cohort.features},
-                "weights": {f: round(float(w), 4) for f, w in named},
-                "odds_per_sd": {f: round(float(np.exp(w)), 3) for f, w in named},
+                "season_id": season_id,
+                "year": seasons[season_id]["year"],
+                "title": seasons[season_id]["title"],
+                "mode_id": mode_id,
+                "mode": modes[mode_id],
+                "n_players": scale.n_players,
+                "n_maps": scale.n_maps,
+                "within_var": round(scale.within_var, 4),
+                "between_var": round(scale.between_var, 4),
+                "shrink_maps": round(scale.shrink_maps, 2),
+                "half_signal_maps": round(scale.shrink_maps, 1),
+                "vs_fallback": round(scale.shrink_maps - SHRINK_FALLBACK, 2),
+                "estimated": scale.shrink_estimated,
             }
         )
-    return {"version": version, "l2": L2, "cohorts": entries}
+    estimated = [e["shrink_maps"] for e in entries if e["estimated"]]
+    return {
+        "version": version,
+        "estimator": "one-way random effects, unbalanced (Searle); k = within/between",
+        "fallback": SHRINK_FALLBACK,
+        "n_fell_back": sum(1 for e in entries if not e["estimated"]),
+        "median": round(float(np.median(estimated)), 2) if estimated else None,
+        "min": min(estimated) if estimated else None,
+        "max": max(estimated) if estimated else None,
+        "cohorts": entries,
+    }
 
 
 def load(
@@ -869,31 +1160,84 @@ def load(
     return loaded.rows, loaded.coverage
 
 
+@dataclass
+class Fitted:
+    """Everything a rating estimator needs, fitted once.
+
+    The pipeline up to this point — which cohorts exist, what wins a map in each
+    of them, and each player's season profile — is shared by both estimators, so
+    it is built once and handed to whichever one is being run. That is what makes
+    the comparison between them a comparison of estimators and not of pipelines.
+    """
+
+    version: str
+    cohorts: dict[tuple[int, int], Cohort]
+    diffs: dict[tuple[int, int], list[GameDiff]]
+    fits: dict[tuple[int, int], ModeFit]
+    preds: list[MapPrediction]
+    aggs: list[PlayerModeAgg]
+    scales: dict[tuple[int, int], CohortScale]
+
+
+def prepare(rows: Sequence[MapRow], coverage: Coverage, version: str) -> Fitted:
+    cohorts = build_cohorts(rows, coverage, version)
+    diffs = build_game_diffs(rows, cohorts)
+    fits = fit_mode_weights(diffs)
+    aggs = aggregate_players(rows, cohorts)
+    return Fitted(
+        version=version,
+        cohorts=cohorts,
+        diffs=diffs,
+        fits=fits,
+        preds=backtest_maps(diffs),
+        aggs=aggs,
+        scales=build_cohort_scales(aggs, fits),
+    )
+
+
+def fit_artifacts(
+    conn: psycopg.Connection[tuple[object, ...]], fitted: Fitted, version: str
+) -> dict[str, dict[str, Any]]:
+    """What the shared fit learned about itself, whichever estimator ran."""
+    return {
+        "mode_weights": weights_artifact(
+            conn,
+            fitted.fits,
+            fitted.cohorts,
+            version,
+            bootstrap_mode_weights(fitted.diffs, fitted.cohorts),
+        ),
+        "rating_shrinkage": shrinkage_artifact(conn, fitted.scales, version),
+    }
+
+
 def compute(
     conn: psycopg.Connection[tuple[object, ...]],
     version: str,
     rows: Sequence[MapRow] | None = None,
     coverage: Coverage | None = None,
-) -> tuple[list[SeasonRating], list[MapPrediction], dict[str, Any]]:
-    """Fit weights and rate players for one feature-set version. Callers that
-    run several versions load the map rows once and pass them in."""
+) -> tuple[list[SeasonRating], list[MapPrediction], dict[str, dict[str, Any]]]:
+    """Fit weights and rate players for one feature-set version, by the z-and-shrink
+    estimator this module describes. Callers that run several versions load the map
+    rows once and pass them in.
+
+    The published rating is `hierarchical.compute`; this arm survives as the thing
+    it is compared against, and as the estimator every prior published rating used.
+
+    The third element maps artifact name to payload, so a new thing the fit
+    learned about itself ships with the run instead of needing its own path."""
     if rows is None or coverage is None:
         rows, coverage = load(conn)
-    cohorts = build_cohorts(rows, coverage, version)
-    diffs = build_game_diffs(rows, cohorts)
-    fits = fit_mode_weights(diffs)
-    preds = backtest_maps(diffs)
-    aggs = aggregate_players(rows, cohorts)
-    scales = build_cohort_scales(aggs, fits)
-    ratings = compute_ratings(aggs, fits, scales)
-    return ratings, preds, weights_artifact(conn, fits, cohorts, version)
+    fitted = prepare(rows, coverage, version)
+    ratings = compute_ratings(fitted.aggs, fitted.fits, fitted.scales)
+    return ratings, fitted.preds, fit_artifacts(conn, fitted, version)
 
 
 def write(
     conn: psycopg.Connection[tuple[object, ...]],
     run_id: int,
     ratings: Sequence[SeasonRating],
-    artifact: dict[str, Any],
+    artifacts: dict[str, dict[str, Any]],
 ) -> int:
     conn.cursor().executemany(
         "INSERT INTO player_season_adjusted (run_id, player_id, season_id, mode_id,"
@@ -904,9 +1248,9 @@ def write(
             for r in ratings
         ],
     )
-    conn.execute(
+    conn.cursor().executemany(
         "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
-        (run_id, "mode_weights", json.dumps(artifact)),
+        [(run_id, name, json.dumps(payload)) for name, payload in sorted(artifacts.items())],
     )
     return len(ratings)
 
@@ -917,12 +1261,12 @@ def compute_and_write(
     version: str = DEFAULT_VERSION,
     rows: Sequence[MapRow] | None = None,
     coverage: Coverage | None = None,
-) -> tuple[int, list[Prediction], dict[str, Any]]:
-    """Fit, rate, write rows + artifact. Returns
-    (n_rating_rows, walk-forward predictions, weights artifact)."""
-    ratings, preds, artifact = compute(conn, version, rows, coverage)
+) -> tuple[int, list[Prediction], dict[str, dict[str, Any]]]:
+    """Fit, rate, write rows + artifacts. Returns
+    (n_rating_rows, walk-forward predictions, artifacts by name)."""
+    ratings, preds, artifacts = compute(conn, version, rows, coverage)
     return (
-        write(conn, run_id, ratings, artifact),
+        write(conn, run_id, ratings, artifacts),
         [m.prediction for m in preds],
-        artifact,
+        artifacts,
     )

@@ -190,7 +190,12 @@ def test_sum_then_divide_not_mean_of_per_map_ratios() -> None:
 
 
 def test_build_rows_marks_qualification_by_denominator() -> None:
-    """Below-threshold players still get rows, scored against the qualified cohort."""
+    """Below-threshold players still get rows, scored against the qualified cohort.
+
+    The qualified cohort is sized past cohort.MIN_Z_COHORT so this exercises the
+    qualification rule rather than the z publication floor, which is its own test
+    in test_era.py.
+    """
     aggs = [
         make_agg(
             player_id=i,
@@ -199,7 +204,7 @@ def test_build_rows_marks_qualification_by_denominator() -> None:
             first_bloods=float(i),
             snd_rounds=100.0,
         )
-        for i in range(1, 6)
+        for i in range(1, 16)
     ]
     aggs.append(
         make_agg(
@@ -211,10 +216,10 @@ def test_build_rows_marks_qualification_by_denominator() -> None:
         )  # under the 50-round minimum
     )
     rows = metrics.build_rows(1, Loaded(aggs, full_coverage()), [metric_by_key("snd_fb_rate")])
-    assert len(rows) == 6
+    assert len(rows) == 16
     by_player = {r[1]: r for r in rows}
     assert by_player[99][9] is False
-    assert all(by_player[i][9] is True for i in range(1, 6))
+    assert all(by_player[i][9] is True for i in range(1, 16))
     # The unqualified player is still scored, and sits above the cohort.
     assert by_player[99][7] is not None
     assert by_player[99][7] > 0

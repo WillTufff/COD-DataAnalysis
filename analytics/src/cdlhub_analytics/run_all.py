@@ -13,12 +13,27 @@ import argparse
 import json
 import sys
 
-from . import backtest, era, insights, metrics
+from . import backtest, cohort, era, insights, metrics, roundwp, seriesdyn, style
 from .db import connect
-from .ratings import comparison, fit, player_rating, winprob
+from .ratings import (
+    comparison,
+    fit,
+    hierarchical,
+    holdout,
+    leakage,
+    maplevel,
+    player_rating,
+    rapm,
+    significance,
+    sweep,
+    winprob,
+)
 
 ELO_K = 32.0
 GLICKO_TAU = 0.5
+# A CWL event is a few days of dense play then weeks of nothing, which is the
+# shape Glicko-2's rating periods assume. See fit.PERIODS and the sweep artifact.
+GLICKO_PERIOD = fit.DEFAULT_PERIOD
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,7 +54,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(series)} decided series through {through}")
         print(f"org lineage: {n_merged} teams rated under an earlier brand")
 
-        era_run = open_run(conn, "era_adjust", "1.0.0", {"min_maps": era.MIN_MAPS}, through)
+        era_run = open_run(
+            conn,
+            "era_adjust",
+            "1.1.0",
+            {"min_maps": era.MIN_MAPS, "min_z_cohort": cohort.MIN_Z_COHORT},
+            through,
+        )
         n = era.compute_and_write(conn, era_run)
         print(f"era_adjust run {era_run}: {n} player-season-mode rows")
 
@@ -49,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             metrics.VERSION,
             {
                 "min_maps": era.MIN_MAPS,
+                "min_z_cohort": cohort.MIN_Z_COHORT,
                 "min_snd_rounds": metrics.MIN_SND_ROUNDS,
                 "min_ctrl_rounds": metrics.MIN_CTRL_ROUNDS,
                 "min_shots": metrics.MIN_SHOTS,
@@ -63,6 +85,75 @@ def main(argv: list[str] | None = None) -> int:
         n = metrics.compute_and_write(conn, metric_run)
         print(f"metric_layer run {metric_run}: {n} player-metric rows")
 
+        # The event tier's own model: P(win round | survivors), and the win
+        # probability each kill added. Independent of everything below it —
+        # nothing in the ratings reads it, deliberately, for the reason the
+        # reliability block gives.
+        round_run = open_run(
+            conn,
+            roundwp.MODEL,
+            roundwp.VERSION,
+            roundwp.params(),
+            through,
+        )
+        round_arts = roundwp.build_artifacts(conn)
+        for name, payload in round_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (round_run, name, json.dumps(payload)),
+            )
+        if round_arts:
+            rwp = round_arts["round_win_prob"]
+            bt = rwp["backtest"]
+            print(
+                f"round_wp run {round_run}: {rwp['table']['n_rounds']} SnD rounds, "
+                f"{len(rwp['table']['cells'])} states"
+            )
+            if bt["available"]:
+                scored = {m["model"]: m["brier"] for m in bt["models"]}
+                print(
+                    f"  walk-forward over {bt['n_rounds']} rounds in "
+                    f"{bt['n_events_scored']} events: state table brier "
+                    f"{scored['state_table']:.5f} vs coin flip {scored['coin_flip']:.5f}"
+                )
+                for p in bt["nested"]:
+                    verdict = "resolved" if p["excludes_zero"] else "no difference"
+                    print(
+                        f"  {p['a']} − {p['b']}: {p['delta']:+.6f} "
+                        f"[{p['lo']:+.6f}, {p['hi']:+.6f}] p={p['dm_p']:.3f} "
+                        f"({verdict}; detectable at {p['mde80']:.6f})"
+                    )
+            tl = round_arts["round_timeline"]
+            lat = tl["trade_latency"]
+            print(
+                f"  timeline: {tl['n_rounds_spanned']} rounds on a "
+                f"{tl['bin_ms'] // 1000}s grid "
+                f"({tl['n_rounds_span_conflict']} dropped for a span the feed contradicts)"
+            )
+            for d in tl["leader_drift"]:
+                verdict = "resolves" if d["excludes_zero"] else "no difference"
+                print(
+                    f"  the side ahead at {d['t_s']}s: won {d['observed']:.3f} against the "
+                    f"table's {d['model']:.3f}, gap {d['gap']:+.4f} ±{d['se']:.4f} ({verdict})"
+                )
+            print(
+                f"  trade answers: {lat['n_answered']} of {lat['n_deaths']} deaths ever "
+                f"answered, median {lat['median_ms'] / 1000:.1f}s, "
+                f"{lat['within_of_answered']:.3f} of them inside the "
+                f"{lat['window_ms'] // 1000}s window"
+            )
+            rel = round_arts["round_wpa"]["reliability"]
+            if rel["available"]:
+                resid = next(c for c in rel["cells"] if c["key"] == "wpa_resid")
+                print(
+                    f"  WPA per round correlates {rel['corr_wpa_kills']:.3f} with kill rate; "
+                    f"with kill rate removed it repeats at r={resid['r']:+.3f} "
+                    f"[{resid['lo']:+.3f}, {resid['hi']:+.3f}] over {rel['n_players']} players "
+                    f"(detectable at {rel['r_detectable']:.3f}) — not a rating input"
+                )
+        else:
+            print(f"round_wp run {round_run}: no kill feed in this database, nothing to fit")
+
         elo_run = open_run(
             conn,
             "elo",
@@ -70,11 +161,11 @@ def main(argv: list[str] | None = None) -> int:
             {"k": ELO_K, "level": "series", "lineage_merged_teams": n_merged},
             through,
         )
-        preds = fit.fit_elo(conn, elo_run, series, k=ELO_K, lineage=lineage)
-        report = backtest.evaluate(preds)
+        elo_preds = fit.fit_elo(conn, elo_run, series, k=ELO_K, lineage=lineage)
+        report = backtest.evaluate(elo_preds)
         backtest.write(conn, elo_run, report)
         print(
-            f"elo run {elo_run}: {len(preds)} predictions, "
+            f"elo run {elo_run}: {len(elo_preds)} predictions, "
             f"brier {report.brier:.4f}, log-loss {report.log_loss:.4f}, "
             f"accuracy {report.accuracy:.3f}"
         )
@@ -82,17 +173,39 @@ def main(argv: list[str] | None = None) -> int:
         glicko_run = open_run(
             conn,
             "glicko2",
-            "1.0.0",
-            {"tau": GLICKO_TAU, "period": "series", "lineage_merged_teams": n_merged},
+            "1.1.0",
+            {
+                "tau": GLICKO_TAU,
+                "period": GLICKO_PERIOD,
+                "lineage_merged_teams": n_merged,
+            },
             through,
         )
-        preds = fit.fit_glicko2(conn, glicko_run, series, tau=GLICKO_TAU, lineage=lineage)
-        report = backtest.evaluate(preds)
+        glicko_preds = fit.fit_glicko2(
+            conn, glicko_run, series, tau=GLICKO_TAU, lineage=lineage, period=GLICKO_PERIOD
+        )
+        report = backtest.evaluate(glicko_preds)
         backtest.write(conn, glicko_run, report)
         print(
-            f"glicko2 run {glicko_run}: {len(preds)} predictions, "
+            f"glicko2 run {glicko_run}: {len(glicko_preds)} predictions, "
             f"brier {report.brier:.4f}, log-loss {report.log_loss:.4f}, "
             f"accuracy {report.accuracy:.3f}"
+        )
+
+        # Sensitivity, stored against the Glicko run: how much K, tau and the
+        # period granularity actually move the numbers. Never used to pick them.
+        grid = sweep.sweep(
+            series, lineage, elo_k=ELO_K, glicko_tau=GLICKO_TAU, glicko_period=GLICKO_PERIOD
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (glicko_run, "hyperparameter_sweep", json.dumps(grid)),
+        )
+        best_g, best_e = grid["best_by_brier"]["glicko2"], grid["best_by_brier"]["elo"]
+        print(
+            f"sweep: best elo K={best_e['k']:g} brier {best_e['brier']:.5f}; "
+            f"best glicko tau={best_g['tau']:g} period={best_g['period']} "
+            f"brier {best_g['brier']:.5f} (published settings kept)"
         )
 
         # Every feature-set version is fitted and backtested; the published one
@@ -106,16 +219,18 @@ def main(argv: list[str] | None = None) -> int:
                 version,
                 {
                     "l2": player_rating.L2,
-                    "shrink_maps": player_rating.SHRINK_MAPS,
+                    "estimator": player_rating.PUBLISHED_ESTIMATOR,
+                    "shrink_fallback": player_rating.SHRINK_FALLBACK,
                     "rating_scale": player_rating.RATING_SCALE,
                     "min_train_games": player_rating.MIN_TRAIN_GAMES,
                     "bootstrap_b": player_rating.BOOTSTRAP_B,
+                    "em_tol": hierarchical.EM_TOL,
                     "published": version == player_rating.PUBLISHED_VERSION,
                 },
                 through,
             )
             rating_runs[version] = run
-            n, pr_preds, _ = player_rating.compute_and_write(
+            n, pr_preds, pr_artifacts = hierarchical.compute_and_write(
                 conn, run, version, rating_rows, rating_coverage
             )
             report = backtest.evaluate(pr_preds)
@@ -126,6 +241,35 @@ def main(argv: list[str] | None = None) -> int:
                 f"map-level walk-forward: {report.n} predictions, "
                 f"brier {report.brier:.4f}, accuracy {report.accuracy:.3f}"
             )
+            shrink = pr_artifacts["rating_shrinkage"]
+            print(
+                f"  shrinkage k estimated per cohort: median {shrink['median']:g}, "
+                f"range {shrink['min']:g}-{shrink['max']:g} "
+                f"(fallback {shrink['fallback']:g} used by {shrink['n_fell_back']})"
+            )
+            post = pr_artifacts["rating_posterior"]
+            moved = post["vs_z_shrink"]
+            print(
+                f"  posterior fit over {post['n_cohorts']} cohorts: median k "
+                f"{post['median_k']:g}, {post['n_collapsed']} with no measurable spread, "
+                f"{post['n_fell_back']} fell back; signal share "
+                f"{min(c['signal_share'] for c in post['cohorts']):.2f}-"
+                f"{max(c['signal_share'] for c in post['cohorts']):.2f}"
+            )
+            if moved["available"]:
+                print(
+                    f"  vs z-and-shrink: rating moves {moved['mean_abs_delta']:.4f} on average "
+                    f"({moved['max_abs_delta']:.4f} at most), rank corr "
+                    f"{moved['spearman']:.4f}, {moved['top10_unchanged']}/10 of the top ten kept; "
+                    f"intervals x{moved['interval']['median']:.2f} the bootstrap's"
+                )
+            check = post["calibration"]
+            if check["available"]:
+                print(
+                    f"  observation variance calibrated over {check['n_player_seasons']} "
+                    f"player-seasons: resampled SD is {check['median']:.3f}x the assumed "
+                    f"sigma/sqrt(m) (cohort range {check['min']:.3f}-{check['max']:.3f})"
+                )
 
         pr_run = rating_runs[player_rating.PUBLISHED_VERSION]
         versus = comparison.compare(
@@ -147,19 +291,122 @@ def main(argv: list[str] | None = None) -> int:
             f"{player_rating.PUBLISHED_VERSION} brier {best['brier']:.4f}"
         )
 
+        # How much of that accuracy is the scoreboard predicting itself. Stored
+        # with the published rating so the map backtest is never read without it.
+        leak = leakage.measure(conn, player_rating.PUBLISHED_VERSION, rating_rows, rating_coverage)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (pr_run, "feature_sign_baseline", json.dumps(leak)),
+        )
+        worst = min(leak["by_cohort"], key=lambda c: c["model_gain"])
+        print(
+            f"sign-rule baseline: {worst['year']} {worst['title']} {worst['mode']} "
+            f"best column {worst['best_feature']['key']} alone picks "
+            f"{worst['best_feature']['accuracy']:.1%} vs model "
+            f"{worst['model_accuracy']:.1%} ({worst['model_gain'] * 100:+.1f} pt)"
+        )
+
+        # The two tests the rating can fail: does it persist for a player, and
+        # does a roster forecast future map wins. Whatever they say gets stored.
+        persist = holdout.persistence(conn, pr_run, era_run)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (pr_run, "rating_persistence", json.dumps(persist)),
+        )
+        kd_cell, r_cell = persist["cells"]["kd->kd"], persist["cells"]["rating->kd"]
+        verdict = "separates" if persist["contrasts"]["kd"]["excludes_zero"] else "no difference"
+        print(
+            f"persistence over {persist['n_pairs']} season pairs: predicting next "
+            f"K/D z, rating r={r_cell['r']:.3f} vs K/D z r={kd_cell['r']:.3f} "
+            f"({verdict})"
+        )
+
+        # Player value measured in wins rather than box scores. Stored with the
+        # published rating because its whole purpose is to be read against it.
+        usable_rows = [r for r in rating_rows if player_rating.usable(r)]
+        published_ratings = holdout.fit_prefix(
+            usable_rows, rating_coverage, player_rating.PUBLISHED_VERSION
+        )
+        rapm_art = rapm.artifact(usable_rows, published_ratings)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (pr_run, "rapm", json.dumps(rapm_art)),
+        )
+        if rapm_art["available"]:
+            print(
+                f"rapm over {rapm_art['n_maps']} maps, {rapm_art['n_players']} players: "
+                f"{rapm_art['n_resolved']} coefficients exceed 1.96 SE; "
+                f"{rapm_art['n_concentrated']} players never play apart from one teammate "
+                f"(median concentration {rapm_art['concentration_median']:.2f})"
+            )
+
+        forecast = holdout.roster_forecast(
+            conn, player_rating.PUBLISHED_VERSION, glicko_run, rating_rows, rating_coverage
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (pr_run, "roster_forecast", json.dumps(forecast)),
+        )
+        if forecast["common"]["available"]:
+            cp = forecast["common"]["predictors"]
+            print(f"roster forecast over {forecast['common']['n_maps']} future maps:")
+            vs_flip = forecast["contrasts"].get("vs_coin_flip", {})
+            for name, score in sorted(cp.items(), key=lambda kv: kv[1]["brier"]):
+                gap = vs_flip.get(name)
+                tail = ""
+                if gap:
+                    verdict = "resolved" if gap["excludes_zero"] else "spans zero"
+                    tail = (
+                        f" — vs coin flip {gap['delta']:+.5f} "
+                        f"[{gap['lo']:+.5f}, {gap['hi']:+.5f}] ({verdict}"
+                        + (
+                            f", detectable at {gap['mde80']:.5f})"
+                            if gap.get("mde80") is not None
+                            else ")"
+                        )
+                    )
+                print(f"  {name:14s} brier {score['brier']:.5f} acc {score['accuracy']:.4f}{tail}")
+            # The one contrast this run exists to settle: the published estimator
+            # against the one it replaced, on identical maps.
+            swap = forecast["contrasts"].get("brier", {}).get("rating_zshrink")
+            if swap:
+                verdict = "resolved" if swap["excludes_zero"] else "spans zero"
+                print(
+                    f"  posterior − z-and-shrink: {swap['delta']:+.5f} "
+                    f"[{swap['lo']:+.5f}, {swap['hi']:+.5f}] ({verdict}"
+                    + (
+                        f"; detectable at {swap['mde80']:.5f})"
+                        if swap.get("mde80") is not None
+                        else ")"
+                    )
+                )
+
+        # winprob's baseline features are only a baseline if they come from the
+        # same fits as the rows it is tabled against, so the rating settings are
+        # handed over here rather than restated inside the module.
         wp_run = open_run(
             conn,
             "winprob",
-            "1.0.0",
+            "1.1.0",
             {
                 "l2": winprob.L2,
                 "min_train": winprob.MIN_TRAIN,
                 "refit_every": winprob.REFIT_EVERY,
                 "form_window": winprob.FORM_WINDOW,
+                "k": ELO_K,
+                "tau": GLICKO_TAU,
+                "period": GLICKO_PERIOD,
+                "lineage_merged_teams": n_merged,
             },
             through,
         )
-        wp_preds, wp_artifact = winprob.fit_walk_forward(series)
+        wp_preds, wp_artifact, wp_trace = winprob.fit_walk_forward(
+            series,
+            lineage=lineage,
+            period=GLICKO_PERIOD,
+            elo_k=ELO_K,
+            glicko_tau=GLICKO_TAU,
+        )
         winprob.write_artifact(conn, wp_run, wp_artifact)
         report = backtest.evaluate(wp_preds)
         backtest.write(conn, wp_run, report)
@@ -169,10 +416,178 @@ def main(argv: list[str] | None = None) -> int:
             f"accuracy {report.accuracy:.3f}"
         )
 
+        # The gaps in the backtest table, with intervals, and what size of form
+        # effect this archive could have found. Stored against winprob because it
+        # is winprob's null the pair of them defends.
+        gaps = significance.model_gaps(
+            {"elo": elo_preds, "glicko2": glicko_preds, "winprob_v1": wp_preds}
+        )
+        gaps["form_power"] = significance.form_power(wp_trace)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (wp_run, "model_gaps", json.dumps(gaps)),
+        )
+        if gaps["available"]:
+            resolved = [p for p in gaps["pairs"] if p["excludes_zero"]]
+            print(
+                f"model gaps over {gaps['n_series']} series: "
+                f"{len(resolved)}/{len(gaps['pairs'])} Brier differences exclude zero"
+            )
+            for p in gaps["pairs"]:
+                print(
+                    f"  {p['a']} − {p['b']}: {p['delta']:+.5f} "
+                    f"[{p['lo']:+.5f}, {p['hi']:+.5f}] "
+                    f"DM t={p['dm_t']:+.2f} p={p['dm_p']:.3f}, "
+                    f"detectable at {p['mde80']:.5f}"
+                )
+            fp = gaps["form_power"]
+            if fp["available"] and fp["beta_detectable"] is not None:
+                print(
+                    f"  form power: a coefficient of {fp['beta_detectable']:.2f} on form_diff "
+                    f"(a 10-0 vs 0-10 swing worth {fp['swing_pp']:.1f} pt of win probability) "
+                    f"would have been detectable; the fit found "
+                    f"{wp_artifact['final_weights']['form_diff']:+.2f}"
+                )
+
+        # The same teams rated on the 5,087 maps underneath those series, and
+        # once per mode. Fitted after winprob because its series rollup is
+        # compared against the whole series-level table, not scored alone.
+        maps = maplevel.load_maps(conn)
+        map_run = open_run(conn, maplevel.MODEL, maplevel.VERSION, maplevel.params(), through)
+        map_arts, map_series_preds = maplevel.build_artifacts(
+            conn,
+            maps,
+            lineage,
+            {"elo": elo_preds, "glicko2": glicko_preds, "winprob_v1": wp_preds},
+        )
+        for name, payload in map_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (map_run, name, json.dumps(payload)),
+            )
+        # The backtest row is the published arm's *series* rollup, so this model
+        # lands in the same table as Elo and Glicko-2 on the same units.
+        report = backtest.evaluate(map_series_preds)
+        backtest.write(conn, map_run, report)
+        mb = map_arts["map_backtest"]
+        print(
+            f"map_elo run {map_run}: {mb['n_maps']} maps, "
+            + ", ".join(f"{arm} brier {mb['arms'][arm]['brier']:.5f}" for arm in maplevel.ARMS)
+            + f" (coin flip {mb['coin_flip_brier']:.5f})"
+        )
+        if mb["gaps"]["available"]:
+            for p in mb["gaps"]["pairs"]:
+                verdict = "resolved" if p["excludes_zero"] else "no difference"
+                print(
+                    f"  map {p['a']} − {p['b']}: {p['delta']:+.5f} "
+                    f"[{p['lo']:+.5f}, {p['hi']:+.5f}] p={p['dm_p']:.3f} "
+                    f"({verdict}; detectable at {p['mde80']:.5f})"
+                )
+        sp = map_arts["mode_specialization"]
+        if sp["available"]:
+            verdict = "exceeds the null" if sp["exceeds_null"] else "inside the null"
+            print(
+                f"  mode specialization over {sp['n_cells']} (team, mode) cells: "
+                f"spread {sp['observed_sd']:.1f} pts vs permuted {sp['null_mean_sd']:.1f} "
+                f"[{sp['null_lo']:.1f}, {sp['null_hi']:.1f}] p={sp['p_value']:.4f} ({verdict})"
+            )
+        ro = map_arts["series_rollup"]
+        print(
+            f"  series rollup over {ro['n_series']} series: "
+            + ", ".join(f"{k} brier {v['brier']:.5f}" for k, v in ro["arms"].items())
+        )
+        if ro["gaps"]["available"]:
+            for p in ro["gaps"]["pairs"]:
+                if not p["a"].startswith("map_") and not p["b"].startswith("map_"):
+                    continue
+                verdict = "resolved" if p["excludes_zero"] else "no difference"
+                print(
+                    f"  series {p['a']} − {p['b']}: {p['delta']:+.5f} "
+                    f"[{p['lo']:+.5f}, {p['hi']:+.5f}] p={p['dm_p']:.3f} ({verdict})"
+                )
+
+        # What a series is, as opposed to what its teams are: the value of a 1-0
+        # lead, how often a race to three sweeps or goes the distance, and
+        # whether any of it is memory rather than the two teams being further
+        # apart than the rating said. Fitted after map_elo because it freezes the
+        # same map-level ratings at the start of each series.
+        sd_run = open_run(conn, seriesdyn.MODEL, seriesdyn.VERSION, seriesdyn.params(), through)
+        sd_arts = seriesdyn.build_artifacts(conn, lineage)
+        for name, payload in sd_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (sd_run, name, json.dumps(payload)),
+            )
+        if sd_arts:
+            dyn, mom = sd_arts["series_dynamics"], sd_arts["series_momentum"]
+            print(f"series_dynamics run {sd_run}: {dyn['n_series']} best-of-five series")
+            print(f"  {seriesdyn.headline(dyn, mom)}")
+            for row in dyn["rates"]:
+                rating, quality = row["vs"]["rating"], row["vs"]["quality"]
+                print(
+                    f"  {row['event']:16s} {row['observed']:.3f} observed; "
+                    f"vs rating {rating['delta']:+.3f} "
+                    f"[{rating['lo']:+.3f}, {rating['hi']:+.3f}], "
+                    f"vs quality {quality['delta']:+.3f} "
+                    f"[{quality['lo']:+.3f}, {quality['hi']:+.3f}]"
+                )
+            q = mom["quality"]
+            naive = next(
+                t
+                for s in mom["map2"]["specs"]
+                if s["spec"] == "strength_prev"
+                for t in s["terms"]
+                if t["term"] == "prev"
+            )
+            print(
+                f"  winning map 1 is worth {naive['swing_pp']:+.1f} pt on map 2 against the "
+                f"rating alone; against a series quality offset of "
+                f"{q['full']['sigma']:.2f} logits it is {q['swing_pp']:+.1f} pt "
+                f"[{q['swing_pp_lo']:+.1f}, {q['swing_pp_hi']:+.1f}] "
+                f"(p={q['p']:.3f}, detectable at {q['mde80_swing_pp']:.1f} pt)"
+            )
+            first3 = q["first_three"]
+            print(
+                f"  on maps 1-3, the one panel with no stopping rule: "
+                f"{first3['swing_pp']:+.1f} pt "
+                f"[{first3['swing_pp_lo']:+.1f}, {first3['swing_pp_hi']:+.1f}]"
+            )
+        else:
+            print(f"series_dynamics run {sd_run}: no usable series, nothing to fit")
+
+        # What a player is, as opposed to how good they are: the continuous
+        # style axes left in the metric layer once the composite rating is
+        # projected out of it, and the archetype taxonomy that does not survive
+        # a cloud with no clusters in it. Fitted after the ratings because it
+        # residualises against the published composite.
+        style_run = open_run(conn, style.MODEL, style.VERSION, style.params(), through)
+        orientation = {m.key: m.higher_is_better for m in metrics.CATALOG}
+        style_arts, style_fit = style.build_artifacts(conn, metric_run, pr_run, orientation)
+        for name, payload in style_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (style_run, name, json.dumps(payload)),
+            )
+        if style_fit is not None:
+            rows = style.axis_rows(style_fit)
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_style_season "
+                    "(run_id, player_id, season_id, axis, score, pctl) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [(style_run, *r) for r in rows],
+                )
+            print(f"player_style run {style_run}: {len(rows)} player-season-axis rows")
+            print(f"  {style.headline(style_fit)}")
+            for axis in style_arts["player_style"]["bases"][0]["axes"]:
+                print(f"  axis {axis['index']} {axis['name']}: {axis['share']:.1%} of residual")
+        else:
+            print(f"player_style run {style_run}: too few complete rows, nothing fitted")
+
         ins_run = open_run(
             conn,
             "insights",
-            "1.2.0",
+            "1.3.0",
             {
                 "era_run_id": era_run,
                 "elo_run_id": elo_run,
@@ -180,11 +595,13 @@ def main(argv: list[str] | None = None) -> int:
                 "player_rating_run_id": pr_run,
                 "winprob_run_id": wp_run,
                 "metric_run_id": metric_run,
+                "map_elo_run_id": map_run,
+                "series_dynamics_run_id": sd_run,
             },
             through,
         )
         n = insights.generate(
-            conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run, metric_run
+            conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run, metric_run, map_run, sd_run
         )
         print(f"insights run {ins_run}: {n} atoms")
 
@@ -198,10 +615,14 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "era_adjust": [era_run],
                 "metric_layer": [metric_run],
+                roundwp.MODEL: [round_run],
                 "elo": [elo_run],
                 "glicko2": [glicko_run],
                 "player_rating": list(rating_runs.values()),
                 "winprob": [wp_run],
+                maplevel.MODEL: [map_run],
+                seriesdyn.MODEL: [sd_run],
+                style.MODEL: [style_run],
                 "insights": [ins_run],
             },
         )

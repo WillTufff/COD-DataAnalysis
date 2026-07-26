@@ -20,6 +20,12 @@ class Prediction:
     p: float  # P(team1 wins), computed before the update
     won: bool  # team1 actually won
     when: date
+    # Which series this was, where the caller knows. Two models' Brier scores can
+    # only be differenced series by series if their predictions can be lined up,
+    # and lining them up by position assumes an iteration order that Glicko-2's
+    # rating periods do not guarantee. None on map-level predictions, which carry
+    # their identity in MapPrediction instead.
+    series_id: int | None = None
 
 
 @dataclass

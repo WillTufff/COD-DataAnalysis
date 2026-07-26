@@ -43,15 +43,23 @@ def fit_logistic_l2(
     l2: float = 1.0,
     max_iter: int = 100,
     tol: float = 1e-8,
+    offset: FloatArray | None = None,
 ) -> LogisticFit:
     """Fit y ∈ {0,1} on x (n × k). Returns intercept + per-feature weights.
 
     Penalty applies to feature weights only, never the intercept. The ridge
     term also makes the Newton system positive definite, so collinear or
     tiny cohorts (Uplink) degrade toward zero weights instead of blowing up.
+
+    `offset` is a per-row logit added to the linear predictor and not fitted.
+    It is what turns a ridge toward zero into a ridge toward a *prior*: to
+    shrink weights toward some m rather than toward 0, pass x @ m as the offset
+    and add m back to the fitted weights afterwards. Everything the penalty
+    does is then measured from m instead of from nothing.
     """
     n, k = x.shape
     xd = np.hstack([np.ones((n, 1)), x])
+    off = np.zeros(n) if offset is None else np.asarray(offset, dtype=float)
     w = np.zeros(k + 1)
     penalty = np.full(k + 1, l2)
     penalty[0] = 0.0  # unpenalized intercept
@@ -60,7 +68,7 @@ def fit_logistic_l2(
     it = 0
     while it < max_iter:
         it += 1
-        p = _sigmoid(xd @ w)
+        p = _sigmoid(off + xd @ w)
         grad = xd.T @ (y - p) - penalty * w
         if float(np.linalg.norm(grad)) < tol * n:
             converged = True
