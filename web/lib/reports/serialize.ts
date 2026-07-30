@@ -16,8 +16,9 @@ export function toCsv(matrix: ExportMatrix): string {
   };
   const lines = [matrix.headers.map(esc).join(",")];
   for (const row of matrix.rows) lines.push(row.map(esc).join(","));
-  // CRLF line endings, as the spec prefers.
-  return lines.join("\r\n");
+  // BOM-prefixed: without it Excel opens a double-clicked .csv as the system
+  // codepage and mangles any non-ASCII handle. CRLF endings, as the spec prefers.
+  return "\uFEFF" + lines.join("\r\n");
 }
 
 /**

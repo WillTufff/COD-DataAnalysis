@@ -7,6 +7,12 @@
 // between versions, and a stale preset must degrade to its surviving columns,
 // never crash the page.
 
+// Landing preset: the all-mode engagement core, so a bare visit covers every
+// season and mode rather than one mode's specialism. Shared by the page and the
+// export route — both must resolve a bare URL to the same report, or a download
+// of the default view 400s.
+export const DEFAULT_PRESET = "slaying-core";
+
 export type ReportPreset = {
   id: string;
   name: string;

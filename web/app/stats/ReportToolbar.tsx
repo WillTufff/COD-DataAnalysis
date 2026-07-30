@@ -12,9 +12,8 @@ export const CELL_MODES: { id: CellMode; label: string }[] = [
   { id: "z", label: "vs cohort" },
 ];
 
-// Data formats link to the export route carrying the live URL state; PDF is
-// handled client-side by the browser's print dialog against the print
-// stylesheet, so it needs no server render.
+// Each format links to the export route carrying the live URL state, so the
+// file always matches the on-screen report.
 const DATA_FORMATS: { format: string; label: string }[] = [
   { format: "csv", label: "CSV" },
   { format: "xlsx", label: "Excel" },
@@ -85,16 +84,6 @@ function ExportMenu() {
               {f.label}
             </a>
           ))}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              window.print();
-            }}
-            className="block w-full px-2.5 py-1.5 text-left text-ink-secondary hover:bg-surface-raised hover:text-ink"
-          >
-            PDF
-          </button>
         </div>
       )}
     </div>

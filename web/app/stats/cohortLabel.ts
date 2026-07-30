@@ -1,17 +1,6 @@
 import type { ScopeSeason } from "@/lib/analytics";
 
-export const MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
-};
-
-export function modeLabel(slug: string | undefined): string {
-  if (slug === undefined) return "All modes combined";
-  return MODE_LABELS[slug] ?? slug;
-}
+export { MODE_LABELS, modeLabel } from "@/lib/reports/labels";
 
 /**
  * How a player or team pick names itself, on the same scale as seasons: none

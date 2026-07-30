@@ -16,7 +16,7 @@ import {
   queryReport,
   queryTeamReport,
 } from "@/lib/analytics";
-import { REPORT_PRESETS } from "@/lib/reports/presets";
+import { DEFAULT_PRESET, REPORT_PRESETS } from "@/lib/reports/presets";
 import { parseEntity, resolveReport } from "@/lib/reports/resolve";
 import {
   type SearchParams,
@@ -29,10 +29,6 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Report builder" };
 
 const TIER_ORDER = ["gold", "gold-fun", "standard", "fun"];
-
-// Landing preset: the all-mode engagement core, so the first thing a visitor
-// sees covers every season and mode rather than one mode's specialism.
-const DEFAULT_PRESET = "slaying-core";
 
 const CATEGORY_LABELS: Record<string, string> = {
   team: "Team",

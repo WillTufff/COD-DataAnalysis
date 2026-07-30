@@ -4,15 +4,8 @@
 // always matches the table it came from.
 
 import { type ReportColumn, type ReportRow } from "@/lib/analytics";
+import { MODE_LABELS } from "./labels";
 import { type ResolvedReport } from "./resolve";
-
-const MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
-};
 
 // A hard ceiling so a pathological request can't stream an unbounded file. The
 // matrix records when it bit, so a truncated export is never silent.

@@ -10,6 +10,7 @@ import {
   queryTeamReport,
 } from "@/lib/analytics";
 import { buildExportMatrix, cohortSlug } from "@/lib/reports/export";
+import { DEFAULT_PRESET } from "@/lib/reports/presets";
 import { parseEntity, resolveReport } from "@/lib/reports/resolve";
 import { toCsv, toJson, toXml } from "@/lib/reports/serialize";
 import { buildXlsx } from "@/lib/reports/xlsx";
@@ -64,11 +65,16 @@ export async function GET(request: Request) {
   }
 
   const sp = Object.fromEntries(searchParams);
+  const entity = parseEntity(sp);
   const metrics =
-    parseEntity(sp) === "teams"
+    entity === "teams"
       ? await getTeamMetricCatalog(run.id)
       : catalog.metrics.filter((m) => m.titles.length > 0);
-  const resolved = await resolveReport(run.id, sp, metrics);
+  // Same fallback as the page: a bare visit shows the default preset's report,
+  // so exporting from it must resolve those same columns, not an empty set.
+  const resolved = await resolveReport(run.id, sp, metrics, {
+    fallbackPreset: entity === "players" ? DEFAULT_PRESET : undefined,
+  });
   if (resolved.selected.length === 0) {
     return new Response("Select at least one metric column to export.", {
       status: 400,
@@ -85,10 +91,12 @@ export async function GET(request: Request) {
   });
 
   const { body, contentType, ext } = serialize(matrix);
+  // Date-stamped so repeated exports of the same cohort don't collide on disk.
+  const stamp = matrix.meta.generatedAt.slice(0, 10);
   return new Response(body, {
     headers: {
       "Content-Type": contentType,
-      "Content-Disposition": `attachment; filename="cdlhub-report-${cohortSlug(resolved)}.${ext}"`,
+      "Content-Disposition": `attachment; filename="cdlhub-report-${cohortSlug(resolved)}-${stamp}.${ext}"`,
       // The matrix caps rows; surface it in a header so a truncated file is
       // never silently short.
       ...(matrix.meta.truncated
