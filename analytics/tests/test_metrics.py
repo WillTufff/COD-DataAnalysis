@@ -417,15 +417,9 @@ def test_team_metric_absent_when_inputs_missing() -> None:
 def test_team_series_win_rate_counts_each_series_once() -> None:
     maps = [
         # A 3-1 win: four maps, one series result.
-        *[
-            make_team_map(series_id=10, series_score=3, series_opp_score=1)
-            for _ in range(4)
-        ],
+        *[make_team_map(series_id=10, series_score=3, series_opp_score=1) for _ in range(4)],
         # A 1-3 loss.
-        *[
-            make_team_map(series_id=11, series_score=1, series_opp_score=3)
-            for _ in range(4)
-        ],
+        *[make_team_map(series_id=11, series_score=1, series_opp_score=3) for _ in range(4)],
         # Undecided (a draw or an unscored series) contributes nothing.
         make_team_map(series_id=12, series_score=1, series_opp_score=1),
         make_team_map(series_id=13),
@@ -483,7 +477,7 @@ def test_team_kill_diff_averages_over_maps_with_an_opponent() -> None:
 
 
 def test_build_team_rows_keeps_series_metrics_off_mode_slices() -> None:
-    maps = []
+    maps: list[metrics.TeamMap] = []
     for team_id in (1, 2):
         for s in range(6):
             won = team_id == 1

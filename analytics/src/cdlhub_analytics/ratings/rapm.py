@@ -380,10 +380,7 @@ def player_rows(
     full = fit(rows)
     if full is None:
         return []
-    return [
-        (p.player_id, p.maps, p.coef, p.se, p.teammate_concentration)
-        for p in full.players
-    ]
+    return [(p.player_id, p.maps, p.coef, p.se, p.teammate_concentration) for p in full.players]
 
 
 def artifact(

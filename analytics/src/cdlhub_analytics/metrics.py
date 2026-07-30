@@ -2675,9 +2675,7 @@ def _team_metric_value(key: str, maps: list[TeamMap]) -> float | None:
         return sum(1.0 for o in outcomes if o) / len(outcomes) if outcomes else None
     if key == "kill_diff_per_map":
         diffs = [
-            sum(m.kills_by_player.values()) - m.opp_kills
-            for m in maps
-            if m.opp_kills is not None
+            sum(m.kills_by_player.values()) - m.opp_kills for m in maps if m.opp_kills is not None
         ]
         return sum(diffs) / len(diffs) if diffs else None
     if key == "hp_avg_margin":

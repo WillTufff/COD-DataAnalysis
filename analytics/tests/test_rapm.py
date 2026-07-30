@@ -325,9 +325,7 @@ def test_player_rows_cover_everyone_the_artifact_truncates() -> None:
     rows = _rotating_league(31)
     emitted = rapm.player_rows(rows)
     art = rapm.artifact(rows, top_n=2)
-    listed = {p["player_id"] for p in art["leaders"]} | {
-        p["player_id"] for p in art["trailers"]
-    }
+    listed = {p["player_id"] for p in art["leaders"]} | {p["player_id"] for p in art["trailers"]}
     assert len(emitted) == art["n_players"]
     assert len(listed) < len(emitted)
     # Every truncated player is still recoverable from the rows.
