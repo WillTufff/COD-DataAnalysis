@@ -154,12 +154,21 @@ measured season coverage, ships as an artifact of the same run that computes the
 The stat explorer and the metric glossary both render from it, so a definition and a
 number cannot drift apart.
 
-Team metrics use the same machinery with the roster as the subject, and cover map and
-round win rates, average Hardpoint margin, and three measures of how a roster spreads
-its work: the Gini coefficient of hill time across the four players, the Herfindahl
-index of first bloods, and the spread of kill shares. Those describe style, not quality.
-A roster that shares hill duty evenly is not thereby better than one that assigns a
-specialist.
+Team metrics use the same machinery with the roster as the subject. Results come in two
+shapes. Map-shaped metrics — map win rate, kill differential per map, average Hardpoint
+margin, Search and Destroy round win rate — sum over a team's maps exactly as player
+metrics sum over a player's. Series-shaped metrics are built from series outcomes
+instead: series win rate, and deciding-map win rate, the record on maps where both
+teams stood one map from taking the series. A series is one result spanning several
+modes, so these exist only for the all-modes cohort — slicing a series by mode would
+count it once per mode it touched. The archive does not record a series format, but
+every covered format is strictly first-to-N, so the winner's map count is the target;
+a series whose maps are not all present is skipped rather than replayed wrongly.
+
+Three more measure how a roster spreads its work: the Gini coefficient of hill time
+across the four players, the Herfindahl index of first bloods, and the spread of kill
+shares. Those describe style, not quality. A roster that shares hill duty evenly is not
+thereby better than one that assigns a specialist.
 
 ## Tier 1c: Structured event tier (shipped)
 

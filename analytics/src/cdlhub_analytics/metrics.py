@@ -45,7 +45,10 @@ from .maprows import (
 MODEL = "metric_layer"
 # 2.0.0 adds the Phase B kill-feed layer (trades, clutch, man-advantage) and the
 # weapon/engagement-distance artifacts on top of the 1.x box-score catalog.
-VERSION = "2.0.0"
+# 2.1.0 adds the series-shaped team metrics (series win rate, deciding-map win
+# rate, kill differential), giving the all-modes team cohort more than two
+# populated columns.
+VERSION = "2.1.0"
 
 ALL_MODES = "__all__"
 
@@ -2336,6 +2339,8 @@ def compute_and_write(conn: psycopg.Connection[tuple[object, ...]], run_id: int)
 # ---------- team metrics ----------
 
 MIN_TEAM_MAPS = 8.0
+MIN_TEAM_SERIES = 5.0
+MIN_TEAM_DECIDERS = 4.0
 
 _TEAM_SQL = """
 SELECT g.id AS game_id, se.id AS season_id, g.mode_id, gm.slug AS mode_slug,
@@ -2344,7 +2349,9 @@ SELECT g.id AS game_id, se.id AS season_id, g.mode_id, gm.slug AS mode_slug,
        COALESCE(gps.hill_time, 0) AS hill_time,
        COALESCE(gps.first_bloods, 0) AS first_bloods,
        g.winner_team_id, g.team1_score, g.team2_score,
-       s.team1_id, s.team2_id
+       s.team1_id, s.team2_id,
+       s.id AS series_id, g.ordinal,
+       s.team1_score AS series_team1_score, s.team2_score AS series_team2_score
 FROM game_player_stats gps
 JOIN games g       ON g.id = gps.game_id
 JOIN series s      ON s.id = g.series_id
@@ -2357,7 +2364,8 @@ WHERE g.duration_s IS NOT NULL
 
 @dataclass
 class TeamMap:
-    """One team's showing on one map."""
+    """One team's showing on one map, with enough series context to see whether
+    the map decided anything beyond itself."""
 
     team_id: int
     season_id: int
@@ -2366,6 +2374,11 @@ class TeamMap:
     won: bool | None
     score: int | None
     opp_score: int | None
+    series_id: int | None = None
+    ordinal: int | None = None
+    series_score: int | None = None  # the series' map score, from this team's side
+    series_opp_score: int | None = None
+    opp_kills: float | None = None  # the other team's kills on this map
     kills_by_player: dict[int, float] = field(default_factory=dict)
     hill_by_player: dict[int, float] = field(default_factory=dict)
     fb_by_player: dict[int, float] = field(default_factory=dict)
@@ -2389,16 +2402,26 @@ def load_teams(conn: psycopg.Connection[tuple[object, ...]]) -> list[TeamMap]:
             team2_score,
             team1_id,
             team2_id,
+            series_id,
+            ordinal,
+            series_team1_score,
+            series_team2_score,
         ) = row
         key = (cast(int, game_id), cast(int, team_id))
         tm = maps.get(key)
         if tm is None:
             score: int | None = None
             opp: int | None = None
+            s_score: int | None = None
+            s_opp: int | None = None
             if team_id == team1_id:
                 score, opp = cast("int | None", team1_score), cast("int | None", team2_score)
+                s_score = cast("int | None", series_team1_score)
+                s_opp = cast("int | None", series_team2_score)
             elif team_id == team2_id:
                 score, opp = cast("int | None", team2_score), cast("int | None", team1_score)
+                s_score = cast("int | None", series_team2_score)
+                s_opp = cast("int | None", series_team1_score)
             tm = TeamMap(
                 team_id=cast(int, team_id),
                 season_id=cast(int, season_id),
@@ -2407,12 +2430,27 @@ def load_teams(conn: psycopg.Connection[tuple[object, ...]]) -> list[TeamMap]:
                 won=None if winner_team_id is None else winner_team_id == team_id,
                 score=score,
                 opp_score=opp,
+                series_id=cast("int | None", series_id),
+                ordinal=cast("int | None", ordinal),
+                series_score=s_score,
+                series_opp_score=s_opp,
             )
             maps[key] = tm
         pid = cast(int, player_id)
         tm.kills_by_player[pid] = float(cast(int, kills))
         tm.hill_by_player[pid] = float(cast(int, hill_time))
         tm.fb_by_player[pid] = float(cast(int, first_bloods))
+
+    # Second pass: each map knows its opponent's kill total, so a kill
+    # differential never has to re-find the other side of the game.
+    by_game: dict[int, list[TeamMap]] = {}
+    for (game_id, _team_id), tm in maps.items():
+        by_game.setdefault(game_id, []).append(tm)
+    for pair in by_game.values():
+        if len(pair) == 2:
+            a, b = pair
+            a.opp_kills = sum(b.kills_by_player.values())
+            b.opp_kills = sum(a.kills_by_player.values())
     return list(maps.values())
 
 
@@ -2454,6 +2492,12 @@ class TeamMetric:
     formula: str
     modes: tuple[str, ...]
     note: str | None = None
+    denom_kind: str = "maps"
+    min_denom: float = MIN_TEAM_MAPS
+    # A series is one result spanning several modes, so a metric built from
+    # series outcomes only makes sense on the all-modes slice — computing it
+    # inside one mode would count each series once per mode it touched.
+    series_level: bool = False
 
     def catalog_entry(self, _coverage: Coverage) -> dict[str, Any]:
         return {
@@ -2464,13 +2508,15 @@ class TeamMetric:
             "unit": self.unit,
             "higher_is_better": self.higher_is_better,
             "formula": self.formula,
-            "denom_kind": "maps",
-            "min_denom": MIN_TEAM_MAPS,
+            "denom_kind": self.denom_kind,
+            "min_denom": self.min_denom,
             "modes": list(self.modes),
             "note": self.note,
         }
 
 
+# Ordered all-modes first: the report builder's default team cohort is "all
+# modes combined", and the catalog order is the column order it seeds.
 TEAM_CATALOG: tuple[TeamMetric, ...] = (
     TeamMetric(
         key="map_win_rate",
@@ -2479,6 +2525,49 @@ TEAM_CATALOG: tuple[TeamMetric, ...] = (
         unit="share of maps",
         higher_is_better=True,
         formula="maps won / maps played",
+        modes=(ALL_MODES,),
+    ),
+    TeamMetric(
+        key="series_win_rate",
+        label="Series win rate",
+        tier="standard",
+        unit="share of series",
+        higher_is_better=True,
+        formula="series won / series decided",
+        modes=(ALL_MODES,),
+        denom_kind="series",
+        min_denom=MIN_TEAM_SERIES,
+        series_level=True,
+    ),
+    TeamMetric(
+        key="decider_win_rate",
+        label="Deciding-map win rate",
+        tier="gold",
+        unit="share of maps",
+        higher_is_better=True,
+        formula="winner-take-all maps won / played (both teams one map from the series)",
+        modes=(ALL_MODES,),
+        note="Game 5s in a best-of-five, game 3s in a best-of-three.",
+        denom_kind="deciding maps",
+        min_denom=MIN_TEAM_DECIDERS,
+        series_level=True,
+    ),
+    TeamMetric(
+        key="kill_diff_per_map",
+        label="Kill differential",
+        tier="standard",
+        unit="kills per map",
+        higher_is_better=True,
+        formula="mean(team kills - opponent kills) over maps",
+        modes=(ALL_MODES,),
+    ),
+    TeamMetric(
+        key="slay_balance",
+        label="Slaying spread",
+        tier="standard",
+        unit="std dev of share",
+        higher_is_better=False,
+        formula="standard deviation of the roster's kill shares, averaged over maps",
         modes=(ALL_MODES,),
     ),
     TeamMetric(
@@ -2519,16 +2608,57 @@ TEAM_CATALOG: tuple[TeamMetric, ...] = (
         modes=(MODE_SND,),
         note="0.25 is first bloods spread evenly across four players; 1.0 is a single opener.",
     ),
-    TeamMetric(
-        key="slay_balance",
-        label="Slaying spread",
-        tier="standard",
-        unit="std dev of share",
-        higher_is_better=False,
-        formula="standard deviation of the roster's kill shares, averaged over maps",
-        modes=(ALL_MODES,),
-    ),
 )
+
+
+def _series_outcomes(maps: list[TeamMap]) -> list[bool]:
+    """One result per decided series these maps belong to, from this team's side."""
+    seen: dict[int, bool] = {}
+    for m in maps:
+        if (
+            m.series_id is None
+            or m.series_score is None
+            or m.series_opp_score is None
+            or m.series_score == m.series_opp_score
+        ):
+            continue
+        seen.setdefault(m.series_id, m.series_score > m.series_opp_score)
+    return list(seen.values())
+
+
+def _decider_outcomes(maps: list[TeamMap]) -> list[bool]:
+    """The result of each winner-take-all map: both teams one map from the series.
+
+    The archive does not record a best-of, but every covered format is strictly
+    first-to-N, so the winner's map count *is* the target. `target >= 2` keeps
+    an abandoned 1-0 series from counting its only map as a decider. Cumulative
+    map wins are replayed in ordinal order, so the series is skipped unless
+    every decided map is present — a gap in the archive would otherwise
+    mislabel which map was the decider.
+    """
+    by_series: dict[int, list[TeamMap]] = {}
+    for m in maps:
+        if m.series_id is not None:
+            by_series.setdefault(m.series_id, []).append(m)
+    out: list[bool] = []
+    for ms in by_series.values():
+        s_score, s_opp = ms[0].series_score, ms[0].series_opp_score
+        if s_score is None or s_opp is None or s_score == s_opp:
+            continue
+        target = max(s_score, s_opp)
+        decided = [m for m in ms if m.won is not None]
+        if target < 2 or len(decided) != s_score + s_opp:
+            continue
+        wins = losses = 0
+        for m in sorted(decided, key=lambda m: m.ordinal or 0):
+            if wins == target - 1 and losses == target - 1:
+                out.append(bool(m.won))
+                break
+            if m.won:
+                wins += 1
+            else:
+                losses += 1
+    return out
 
 
 def _team_metric_value(key: str, maps: list[TeamMap]) -> float | None:
@@ -2537,6 +2667,19 @@ def _team_metric_value(key: str, maps: list[TeamMap]) -> float | None:
         if not decided:
             return None
         return sum(1.0 for m in decided if m.won) / len(decided)
+    if key == "series_win_rate":
+        outcomes = _series_outcomes(maps)
+        return sum(1.0 for o in outcomes if o) / len(outcomes) if outcomes else None
+    if key == "decider_win_rate":
+        outcomes = _decider_outcomes(maps)
+        return sum(1.0 for o in outcomes if o) / len(outcomes) if outcomes else None
+    if key == "kill_diff_per_map":
+        diffs = [
+            sum(m.kills_by_player.values()) - m.opp_kills
+            for m in maps
+            if m.opp_kills is not None
+        ]
+        return sum(diffs) / len(diffs) if diffs else None
     if key == "hp_avg_margin":
         margins = [
             float(m.score - m.opp_score)
@@ -2573,6 +2716,16 @@ def _team_metric_value(key: str, maps: list[TeamMap]) -> float | None:
     return None
 
 
+def _team_metric_denom(key: str, maps: list[TeamMap]) -> float:
+    """What the metric's sample actually is — maps for map-shaped metrics,
+    series or deciders for the series-shaped ones."""
+    if key == "series_win_rate":
+        return float(len(_series_outcomes(maps)))
+    if key == "decider_win_rate":
+        return float(len(_decider_outcomes(maps)))
+    return float(len(maps))
+
+
 TeamRow = tuple[int, int, int, int | None, str, float, float, float | None, float | None, bool]
 
 
@@ -2588,6 +2741,8 @@ def build_team_rows(
     for metric in catalog:
         by_cohort: dict[tuple[int, int | None], list[tuple[int, float, float]]] = {}
         for (team_id, season_id, mode_id), maps in by_slice.items():
+            if metric.series_level and mode_id is not None:
+                continue
             if ALL_MODES not in metric.modes and (
                 mode_id is None or maps[0].mode_slug not in metric.modes
             ):
@@ -2596,11 +2751,11 @@ def build_team_rows(
             if value is None or not math.isfinite(value):
                 continue
             by_cohort.setdefault((season_id, mode_id), []).append(
-                (team_id, value, float(len(maps)))
+                (team_id, value, _team_metric_denom(metric.key, maps))
             )
 
         for (season_id, mode_id), members in by_cohort.items():
-            qualified_ids = [t for t, _, d in members if d >= MIN_TEAM_MAPS]
+            qualified_ids = [t for t, _, d in members if d >= metric.min_denom]
             stats = z_and_pctl({t: v for t, v, _ in members}, qualified_ids)
             qualified = set(qualified_ids)
             for team_id, value, denom in members:

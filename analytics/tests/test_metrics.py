@@ -326,6 +326,11 @@ def make_team_map(
     won: bool | None = True,
     score: int | None = None,
     opp_score: int | None = None,
+    series_id: int | None = None,
+    ordinal: int | None = None,
+    series_score: int | None = None,
+    series_opp_score: int | None = None,
+    opp_kills: float | None = None,
     kills: dict[int, float] | None = None,
     hill: dict[int, float] | None = None,
     fb: dict[int, float] | None = None,
@@ -338,6 +343,11 @@ def make_team_map(
         won=won,
         score=score,
         opp_score=opp_score,
+        series_id=series_id,
+        ordinal=ordinal,
+        series_score=series_score,
+        series_opp_score=series_opp_score,
+        opp_kills=opp_kills,
         kills_by_player=kills or {},
         hill_by_player=hill or {},
         fb_by_player=fb or {},
@@ -402,6 +412,97 @@ def test_team_hp_margin_uses_signed_difference() -> None:
 def test_team_metric_absent_when_inputs_missing() -> None:
     assert metrics._team_metric_value("hp_avg_margin", [make_team_map()]) is None
     assert metrics._team_metric_value("map_win_rate", [make_team_map(won=None)]) is None
+
+
+def test_team_series_win_rate_counts_each_series_once() -> None:
+    maps = [
+        # A 3-1 win: four maps, one series result.
+        *[
+            make_team_map(series_id=10, series_score=3, series_opp_score=1)
+            for _ in range(4)
+        ],
+        # A 1-3 loss.
+        *[
+            make_team_map(series_id=11, series_score=1, series_opp_score=3)
+            for _ in range(4)
+        ],
+        # Undecided (a draw or an unscored series) contributes nothing.
+        make_team_map(series_id=12, series_score=1, series_opp_score=1),
+        make_team_map(series_id=13),
+    ]
+    assert metrics._team_metric_value("series_win_rate", maps) == pytest.approx(0.5)
+    assert metrics._team_metric_denom("series_win_rate", maps) == pytest.approx(2.0)
+
+
+def _series_maps(series_id: int, results: list[bool]) -> list[metrics.TeamMap]:
+    wins = sum(1 for r in results if r)
+    return [
+        make_team_map(
+            series_id=series_id,
+            ordinal=i + 1,
+            won=r,
+            series_score=wins,
+            series_opp_score=len(results) - wins,
+        )
+        for i, r in enumerate(results)
+    ]
+
+
+def test_team_decider_win_rate_finds_the_winner_take_all_map() -> None:
+    maps = [
+        # 2-2 into a game five, won: the fifth map is the decider.
+        *_series_maps(20, [True, False, True, False, True]),
+        # A 3-0 sweep never reaches one: no decider.
+        *_series_maps(21, [True, True, True]),
+        # 2-2 into a game five, lost.
+        *_series_maps(22, [False, True, False, True, False]),
+    ]
+    assert metrics._team_metric_value("decider_win_rate", maps) == pytest.approx(0.5)
+    assert metrics._team_metric_denom("decider_win_rate", maps) == pytest.approx(2.0)
+
+
+def test_team_decider_skips_series_it_cannot_replay() -> None:
+    # The series says 3-2 but only four decided maps are present, so replaying
+    # the cumulative score would mislabel the decider — skip it.
+    incomplete = _series_maps(30, [True, False, True, True])
+    for m in incomplete:
+        m.series_score, m.series_opp_score = 3, 2
+    assert metrics._team_metric_value("decider_win_rate", incomplete) is None
+    # An abandoned 1-0 series has no target to be one map from; its only map
+    # must not read as winner-take-all.
+    assert metrics._team_metric_value("decider_win_rate", _series_maps(31, [True])) is None
+
+
+def test_team_kill_diff_averages_over_maps_with_an_opponent() -> None:
+    maps = [
+        make_team_map(kills={1: 20.0, 2: 25.0}, opp_kills=35.0),  # +10
+        make_team_map(kills={1: 15.0, 2: 15.0}, opp_kills=40.0),  # -10
+        make_team_map(kills={1: 30.0}),  # opponent side missing: excluded
+    ]
+    assert metrics._team_metric_value("kill_diff_per_map", maps) == pytest.approx(0.0)
+
+
+def test_build_team_rows_keeps_series_metrics_off_mode_slices() -> None:
+    maps = []
+    for team_id in (1, 2):
+        for s in range(6):
+            won = team_id == 1
+            maps.extend(
+                make_team_map(
+                    team_id=team_id,
+                    mode_id=1,
+                    mode_slug="hardpoint",
+                    won=won if i == 2 else (i % 2 == 0),
+                    series_id=team_id * 100 + s,
+                    ordinal=i + 1,
+                    series_score=2 if won else 1,
+                    series_opp_score=1 if won else 2,
+                )
+                for i in range(3)
+            )
+    rows = metrics.build_team_rows(1, maps)
+    series_rows = [r for r in rows if r[4] == "series_win_rate"]
+    assert series_rows and all(r[3] is None for r in series_rows)
 
 
 def test_build_team_rows_scopes_mode_specific_metrics() -> None:
