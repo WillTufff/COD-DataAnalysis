@@ -92,7 +92,32 @@ jobs:
             exit 1
           fi
 
+  # Everything about the site that can be checked without a database: lint,
+  # types, and the Vitest suite over lib/reports (URL resolution, the export
+  # matrix, the serializers). Split from web-build deliberately — these need no
+  # Postgres, so making them wait on a container, migrations and seeds would
+  # turn a ten-second answer into a multi-minute one.
   web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  # The half that does need real rows: player and team pages are prerendered at
+  # build time, so a build is also a query check over every one of them, and
+  # db:check verifies the schema the site expects against the migrated database.
+  web-build:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -126,12 +151,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      # The report builder's URL resolution, export matrix and serializers.
-      # These need no database, so they run before the build rather than after
-      # it: a broken serializer should fail in seconds, not minutes.
-      - run: npm test
       - run: npm run build
       - name: Drizzle schema <-> DB smoke check
         run: npm run db:check
