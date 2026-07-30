@@ -859,8 +859,8 @@ function RapmSection({ rapm }: { rapm: PlayerRapm }) {
           </>
         ) : (
           <>
-            This interval covers zero, so the sign is not evidence: the honest
-            reading is that the model cannot separate this player from average.
+            This interval covers zero, so the sign is not evidence: the model
+            cannot separate this player from average.
             That is true of 189 of the 196 players it rates.
           </>
         )}{" "}

@@ -602,9 +602,9 @@ export function EloExplorer({
             series. The shaded band is the rating deviation — the model&rsquo;s own
             uncertainty about where the rating sits, which Elo has no way to
             express. It starts wide for a team with no record and narrows as the
-            team plays. Note that each series is its own rating period, so the
-            deviation tracks games played rather than time elapsed: it does not
-            widen over a layoff.
+            team plays. One event is one rating period and every rated team
+            advances at its close, so the deviation also widens while a team
+            sits out.
           </>
         ) : (
           <>Series-level Elo (K=32, initial 1500) after each rated series.</>

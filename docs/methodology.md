@@ -62,7 +62,7 @@ shared back under CC-BY-SA 3.0.
 
 Project code is licensed AGPL-3.0.
 
-### Completeness is published, not guessed
+### Completeness is published
 
 Map-level statistics do not exist for much of the pre-2018 record. The schema can
 represent "series known, stats unknown" directly, and no value is ever fabricated to
@@ -122,7 +122,7 @@ measured column into a published, era-scored metric, so a player's season can be
 across 93 different lenses instead of four.
 
 Metrics are stored in long form, one row per player, season, mode, and metric, each
-carrying its own qualification denominator. That denominator is the honest sample size
+carrying its own qualification denominator. That denominator is the real sample size
 for that metric: maps for rate-per-map statistics, rounds for Search and Destroy round
 rates, kills for kill-denominated shares, shots for accuracy. Qualification thresholds
 are 8 maps, 50 rounds, 100 kills, and 1,000 shots. Rows below the threshold are still
@@ -335,7 +335,7 @@ than a seam in the data, and it leaves more revenge kills outside than it counts
 are also front-loaded: a quarter of deaths in the opening five seconds are answered in
 time, against 16% of deaths at a minute in, when there are fewer teammates left to answer.
 
-Three exclusions, stated rather than absorbed. The figure's axis stops at 105 seconds,
+Three exclusions. The figure's axis stops at 105 seconds,
 where 1.5% of rounds remain. 166 rounds of 9,282 record a length that ends before their own
 last death — by 38 seconds at the median, so not rounding — and are dropped from the three
 state panels, which need to know when a round stopped; they are kept for the trade
@@ -384,8 +384,7 @@ recomputed on every rerun.
 full history at series level. The rating chart on the overview and team pages toggles
 between the two, and the Glicko-2 view shades each team's rating deviation, which is the
 thing Elo cannot express: a team's first few series carry a deviation near the 350
-starting value, and it narrows as the record accumulates. A map-margin-weighted variant
-is planned as a sensitivity check.
+starting value, and it narrows as the record accumulates.
 
 **Rating periods.** Glicko-2's deviation is only meaningful if it grows while a team is
 idle, and that requires periods. One event is one period: a CWL event is a few days of
@@ -421,7 +420,7 @@ so a rebrand continues one curve instead of restarting at 1500. The stored rows 
 name the team that actually played, so the site shows the brand of the day on a
 continuous line, and a lineage is rated under its founding team.
 
-Two honest notes on how much that currently does. Lineage membership is declared in the
+Two notes on how much that currently does. Lineage membership is declared in the
 importer's identity file, and it is asserted only where two brands' series windows do
 *not* overlap — a same-brand roster playing concurrently is an academy team, not a
 rebrand, so `Mindfreak` / `Mindfreak Black`, `EZG` / `EZG Blue` and the three `GGEA`
@@ -443,7 +442,7 @@ expanding window every 50 series; until 200 series of history exist it passes th
 Glicko-2 probability through unchanged, so its backtest covers the same series as the
 baselines and any improvement is attributable to the added features.
 
-That last clause is load-bearing, and for a while it was false. The rating systems moved
+That last clause matters, and for a while it was false. The rating systems moved
 to whole-roster rating periods while this model went on advancing its own copy of
 Glicko-2 one series at a time, so its "pass the Glicko-2 probability through unchanged"
 phase passed through a Glicko-2 that appeared nowhere else on the site, and the backtest
@@ -528,8 +527,7 @@ with intervals rather than a leaderboard to be read off:
 A negative gap favours the first model. Among the three series-level models, two of the
 three contrasts separate: **Elo genuinely outscores both Glicko-2 and `winprob_v1` on
 Brier over this archive**, and that is the one ordering among them the data supports. The
-simplest model here beats both of the ones built to improve on it, which is worth stating
-plainly rather than explaining away.
+simplest model here beats both of the ones built to improve on it.
 
 The last contrast is the momentum null and it does not separate, with an interval four
 times the width of the gap. Note also that Elo's Brier edge over Glicko-2 sits *inside*
@@ -544,7 +542,7 @@ page. Its blend arm beats Elo by 0.00460 with an interval clear of zero *and* cl
 its own 80%-power threshold (0.00349) — the only model gap in this project that passes
 both tests. It beats Glicko-2 and `winprob_v1` by more. The two contrasts *within*
 `map_elo` do not clear power (+0.00277 against 0.00336, +0.00359 against 0.00369), so the
-honest reading is that rating maps beats rating series, while the choice among the three
+supportable reading is that rating maps beats rating series, while the choice among the three
 map-level arms is not settled here. What the extra data buys is set out next.
 
 The whole table is computed by `ratings/significance.py` and stored as a `model_gaps`
@@ -596,8 +594,8 @@ below holds at all eight values, which is the point of publishing it.
 **Staying comparable.** A map Brier cannot be read against a series Brier, so each arm
 also rolls up. At the moment a series starts the ratings are frozen, a win probability is
 computed for each of the five maps the title's rotation would play, and those are combined
-into P(win the series) as a best-of-five. The rotation is a league rule, known before a
-ball is thrown — Hardpoint, Search, then Uplink (IW) or Capture the Flag (WWII) or Control
+into P(win the series) as a best-of-five. The rotation is a league rule, known before the
+series starts — Hardpoint, Search, then Uplink (IW) or Capture the Flag (WWII) or Control
 (BO4), then Hardpoint and Search again — and the archive confirms it: 737 of 740 WWII
 opening maps are Hardpoint. The number of maps *actually* played is not known in advance
 and is never read, because it is the result: a series that went five was 3-2 by
@@ -658,7 +656,7 @@ against a permuted null of 51.4 (95% range 47.4 to 55.5) over 300 refits: **p = 
 inside the null.** About 3.4 points of spread survive what noise alone supplies, out of
 54.8.
 
-That is the honest verdict, and it is a null: **this archive cannot show that Call of Duty
+The verdict is a null: **this archive cannot show that Call of Duty
 teams have real per-mode strengths, distinct from being good or bad in general.** The
 per-mode table is still stored and shown, because the ordering is the thing readers ask
 for and hiding it would not make it less tempting elsewhere — but it is published with
@@ -736,9 +734,9 @@ predicted using weights trained only on earlier events. That number establishes 
 narrow thing — that the learned weights generalize across events rather than memorizing
 them — and it is not evidence that the model can forecast anything. Several of the
 features *are* the win condition, so the map accuracy is largely a decomposition of the
-final score. The size of that effect is measured, not waved at, in
+final score. The size of that effect is measured in
 [what the map backtest does not establish](#what-the-map-backtest-does-not-establish)
-below; read the two together or not at all.
+below; read the two together.
 
 ### The rating is a posterior
 
@@ -815,7 +813,7 @@ new estimator and the old one are both run through the roster forecast in
 identical weights, identical prefixes, differing only in the step being tested. The
 posterior wins by −0.00112 of Brier [−0.00220, −0.00010]. The interval excludes zero,
 and the gap is smaller than the 0.00148 those 3,760 maps could resolve at 80% power, so
-the honest reading is a small improvement that clears its interval but not its power
+the result is a small improvement that clears its interval but not its power
 threshold — and on pick rate the two are indistinguishable (56.4% against 56.7%). The
 case for the change rests on the specification and the intervals; the forecast says it
 costs nothing, which is what it had to say.
@@ -981,9 +979,8 @@ learned anything. Thrown deaths qualify because they are counted from alive-coun
 alone; the code computes them with an empty round-winner map so that outcome
 information cannot reach the feature even by accident.
 
-That exclusion is right, and it is also incomplete, which is worth stating plainly
-rather than leaving for a reader to notice. The same test applied to the objective
-columns condemns them faster: Capture the Flag is won by scoring the most captures, and
+That exclusion is right, and it is also incomplete. The same test applied to the
+objective columns condemns them faster: Capture the Flag is won by scoring the most captures, and
 `ctf_caps` is captures. Hardpoint awards a point per second of hill control, and
 `hill_time` is that occupancy. A Search and Destroy round ends on a plant or a defuse.
 These are not proxies for winning that happen to correlate; on the winning side of the
@@ -1010,7 +1007,7 @@ totals would let a version look better simply by predicting an easier subset. On
 | **2.1.0 (+ kill feed)** | **0.0416** | **0.1422** | 94.4% |
 
 Brier falls 22% against the box-score baseline for 2.0.0, and 23% for the published
-2.1.0. The kill-feed layer on top is a much smaller gain, and an honest reading is
+2.1.0. The kill-feed layer on top is a much smaller gain, and a fair reading is
 that it is close to a wash overall — it is published as the default because it wins on
 both proper scoring rules, not because the margin is decisive.
 
@@ -1027,7 +1024,7 @@ per-cohort breakdown is more informative than the total, and less flattering:
 | 2019 BO4 Search & Destroy | 518 | 0.0712 | **0.0468** | **0.0468** |
 | 2019 BO4 Control | 401 | **0.0627** | 0.0628 | 0.0628 |
 
-Three things are worth saying plainly. Capture the Flag improves enormously, and this is
+Three caveats. Capture the Flag improves enormously, and this is
 the row that should be read most sceptically: per-map captures is the CTF score, where
 captures *per ten minutes* was that score divided by map length. So 2.0.0 did not
 discover anything about Capture the Flag — it stopped dividing the win condition by a
@@ -1187,17 +1184,17 @@ to 0.09 and the ordering's correlation with the lightest fit falls to 0.53. The 
 doing much of the work, and nothing here tunes it against the held-out maps — that would
 turn the forecast above into a selection statistic rather than a test.
 
-**The blend.** The task this was built from called for combining RAPM with the box-score
-rating as an informative prior, which is a one-line change to what the penalty shrinks
+**The blend.** A natural extension is to use the box-score rating as an informative prior
+on RAPM, which is a one-line change to what the penalty shrinks
 toward: instead of zero, each player's coefficient is pulled toward their composite rating
 converted into map-win logits, at an exchange rate estimated on the training maps rather
 than assumed. The blended coefficients correlate 0.980 with plain RAPM, and in the forecast
 the blend is *worse* on Brier (0.24601 vs 0.24467) and slightly better on accuracy (59.7%
-vs 59.3%). It is reported because it was asked for and because a mixed result is a result;
-it is not adopted, because nothing in these numbers says it should be.
+vs 59.3%). A mixed result is a result, so it is reported; it is not adopted, because
+nothing in these numbers says it should be.
 
 **What RAPM is actually measuring.** At a median teammate concentration of 0.81, a player's
-coefficient is substantially their lineup's. That is the honest explanation for the shape of
+coefficient is substantially their lineup's. That explains the shape of
 the table above: RAPM's accuracy (59.3%) lands much closer to Glicko-2's team rating (60.5%)
 than to the box-score rating's (56.7%), and it does so while never being told which team is
 playing. It behaves like a team rating expressed one player at a time. That makes it the
@@ -1215,8 +1212,8 @@ winning maps in that season and mode, and the leakage section above says plainly
 map backtest scores as high as it does. It is not a forecasting tool, the site does not
 present it as one, and the numbers above are the reason.
 
-Two directions were named here as ways to change that verdict rather than restate it, and
-both have now been tried. The round-level model in Tier 1d works as a model of a round, but
+Two directions were named here as ways to change that verdict, and both have now been
+tried. The round-level model in Tier 1d works as a model of a round, but
 the player value derived from it — win probability added per kill — turns out to be kill
 rate in another unit, and the part that is not kill rate does not reproduce across a
 player's own games. Plus-minus does better: RAPM posts the best Brier and a clearly

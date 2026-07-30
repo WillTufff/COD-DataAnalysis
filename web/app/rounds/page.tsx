@@ -163,7 +163,7 @@ function ClockCaption({ timeline }: { timeline: RoundTimeline }) {
       <Link href="/methodology#round-win-probability" className="underline">
         methodology
       </Link>
-      . Three things are left out rather than drawn thin: the axis stops at{" "}
+      . Three things are left out: the axis stops at{" "}
       {last.t_s} s, where {(last.live_share * 100).toFixed(1)}% of rounds are
       still going; {timeline.n_rounds_span_conflict.toLocaleString()} rounds
       whose recorded length contradicts their own feed are excluded from the

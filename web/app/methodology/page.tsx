@@ -503,8 +503,9 @@ export default async function MethodologyPage() {
             logistic expectation with scale 400, constant K=32, series-level
             (map scores ignored). <strong className="text-ink">Glicko-2</strong>{" "}
             (Glickman 2013, implemented against the worked example in the
-            paper): each series is its own rating period, τ=0.5, so rating
-            deviation (RD) grows when a team is idle and shrinks with evidence.
+            paper): one event is one rating period, τ=0.5, and every rated team
+            advances at each period&rsquo;s close, so rating deviation (RD)
+            grows when a team is idle and shrinks with evidence.
             That is the ±RD shown on{" "}
             <Link className="underline" href="/teams">
               /teams
@@ -822,7 +823,7 @@ export default async function MethodologyPage() {
               frozen, a win probability is computed for each of the five maps
               the title&rsquo;s rotation would play, and those combine into P(win
               the series) as a best-of-five. The rotation is a league rule known
-              before a ball is thrown; the number of maps <em>actually</em>{" "}
+              before the series starts; the number of maps <em>actually</em>{" "}
               played is never read, because it is the result — a series that went
               five was 3-2 by definition. All{" "}
               {mapElo.seriesRollup.n_series.toLocaleString()} series roll up.
@@ -1263,9 +1264,9 @@ export default async function MethodologyPage() {
                 maps, over features the caveat above already calls collinear, so it
                 ships with a 95% percentile bootstrap: resample a cohort&rsquo;s maps
                 with replacement, refit the standardization and the ridge end to end,
-                recompute the ratio, 200 draws. It was published as a bare point
-                until recently, which reported a ratio measured on a full title the
-                same way as one measured on a single event&rsquo;s worth of maps.{" "}
+                recompute the ratio, 200 draws. Without the interval, a ratio
+                measured on a full title would read the same as one measured on a
+                single event&rsquo;s worth of maps.{" "}
                 {weightCiCohorts.length - unresolvedCohorts.length} of{" "}
                 {weightCiCohorts.length} intervals exclude 1×, so the side they land
                 on survives.{" "}
@@ -1275,7 +1276,7 @@ export default async function MethodologyPage() {
                     — {unresolvedCohorts.map((c) => `${c.year} ${c.mode}`).join(", ")}{" "}
                     — {unresolvedCohorts.length === 1 ? "is" : "are"} drawn faded and
                     publish no finding at all: which half carried those maps is
-                    unresolved, and a hedge is not a substitute for an answer.
+                    unresolved.
                   </>
                 )}
               </p>
@@ -1949,8 +1950,7 @@ export default async function MethodologyPage() {
                 {rapm.n_players} players with at least {rapm.min_maps} of them.
               </p>
               <p>
-                Two things decide how much the leaderboard means, and both are
-                published rather than assumed away.
+                Two things decide how much the leaderboard means.
               </p>
             </div>
 
@@ -2058,7 +2058,7 @@ export default async function MethodologyPage() {
               <strong>What RAPM is actually measuring.</strong> At a median teammate
               concentration of {rapm.concentration_median.toFixed(2)}, a
               player&rsquo;s coefficient is substantially their lineup&rsquo;s. That
-              is the honest explanation for the table above: RAPM&rsquo;s accuracy
+              explains the table above: RAPM&rsquo;s accuracy
               lands much closer to Glicko-2&rsquo;s team rating than to the box-score
               rating&rsquo;s, while never being told which team is playing. It
               behaves like a team rating expressed one player at a time — the best
@@ -2109,7 +2109,7 @@ export default async function MethodologyPage() {
             {momentum && (
               <>
                 {" "}
-                That gap now has an interval rather than an eyeball: the Brier
+                That gap carries an interval: the Brier
                 improvement over Glicko-2 is {signed(momentum.delta)}, 95% CI{" "}
                 {signed(momentum.lo)} to {signed(momentum.hi)} over{" "}
                 {modelGaps?.nSeries.toLocaleString()} paired series
@@ -2130,8 +2130,7 @@ export default async function MethodologyPage() {
                 between a team on a 10-0 run and one on 0-10. The fit found{" "}
                 {winprobArt?.finalWeights.form_diff?.toFixed(2).replace("-", "−") ??
                   "≈0"}
-                . So the
-                honest reading of this null is narrower than “form does not
+                . So this null is narrower than “form does not
                 matter”: an effect that large is ruled out, a realistic one is
                 not, and 1,310 series is not enough to settle it.
               </>
@@ -2207,8 +2206,8 @@ export default async function MethodologyPage() {
               gives the interval. The Diebold-Mariano statistic is the same mean
               over its standard error. “Detectable” is the smallest gap this many
               series could resolve at 80% power — the answer to “was this
-              underpowered?”, which for a published null is the load-bearing
-              number.
+              underpowered?”, which is the number that matters most for a
+              published null.
             </p>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full max-w-3xl text-left text-sm">
@@ -2524,7 +2523,7 @@ export default async function MethodologyPage() {
         )}
 
         <p className="mt-6 max-w-3xl text-sm leading-relaxed text-ink-secondary">
-          Two limits are stated rather than papered over. The per-kill distance field
+          Two limits. The per-kill distance field
           is Infinite Warfare only and, despite the box column&rsquo;s metres label, is
           in engine units — it correlates with that column at r&nbsp;=&nbsp;0.97 per
           player-season but on a fixed ~5.75&times; scale, so it is reported as engine
@@ -2759,7 +2758,7 @@ export default async function MethodologyPage() {
                 it is a cut across a smooth decay rather than a seam in the data.
               </p>
               <p>
-                Three exclusions rather than thin lines:{" "}
+                Three exclusions:{" "}
                 {roundWp.timeline.n_rounds_span_conflict.toLocaleString()} rounds
                 record a length that ends before their own last death — by 38
                 seconds at the median, so not rounding — and are dropped from the
