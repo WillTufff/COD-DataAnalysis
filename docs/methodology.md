@@ -1525,5 +1525,3 @@ These are permanent commitments rather than gaps in the roadmap.
   tournament coverage pages. Raw results appear only as thin drill-down views
   supporting an analysis.
 - Also out of scope: fantasy, forums, news and editorial, live scores, user accounts.
-</content>
-</invoke>

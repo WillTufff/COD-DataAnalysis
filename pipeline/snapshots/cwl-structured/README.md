@@ -6,7 +6,7 @@ the importer (no extraction needed). Each contains one JSON per game with `event
 (death, spawn, roundstart, roundend), player rosters, and map/mode metadata.
 
 These come from the **same** `Activision/cwl-data` repository as the box scores in
-`../cwl-archive/`, under the same **BSD 3-Clause** licence (see `../cwl-archive/LICENSE`).
+`../cwl-archive/`, under the same **BSD 3-Clause** licence (text retained here as `LICENSE`).
 The 2019 Black Ops 4 games in that repository carry empty event lists, so only 2017–2018
 is present here.
 

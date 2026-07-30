@@ -145,7 +145,9 @@ what you have.
 - CDL-era statistics will come from [Liquipedia](https://liquipedia.net/callofduty)
   (CC-BY-SA 3.0) through the LPDB API, within the published rate limits and with an
   identifying User-Agent. No HTML scraping. Derived data is shared under CC-BY-SA 3.0.
+  The ingestion design assumes the published 60 requests/hour LPDB limit: a nightly
+  incremental pull of matches new since the last run, every response persisted to
+  Postgres so nothing is ever fetched twice, and one-off backfills throttled well
+  under the limit and spread across days rather than run as a burst.
 - Code is AGPL-3.0 (see [LICENSE](LICENSE)).
 - The project will not build anything betting-related.
-</content>
-</invoke>
