@@ -20,8 +20,14 @@ export const MAX_EXPORT_ROWS = 10_000;
 
 export type ExportMeta = {
   generatedAt: string;
+  entity: "players" | "teams";
   run: { model: string; version: string };
-  cohort: { year: number | "all"; mode: string };
+  cohort: {
+    seasons: number[] | "all";
+    mode: string;
+    players: string[] | "all";
+    teams: string[] | "all";
+  };
   sort: string;
   dir: "asc" | "desc";
   qualifiedOnly: boolean;
@@ -42,9 +48,22 @@ export type ExportMatrix = {
 
 /** A filesystem-safe cohort tag for the download filename, e.g. `hardpoint-2018`. */
 export function cohortSlug(resolved: ResolvedReport): string {
+  const entity = resolved.entity === "teams" ? "teams-" : "";
   const mode = resolved.modeSlug ?? "all-modes";
-  const year = resolved.year !== undefined ? String(resolved.year) : "all-seasons";
-  return `${mode}-${year}`.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+  const seasons =
+    resolved.years.length > 0 ? resolved.years.join("-") : "all-seasons";
+  // A filter names itself when it fits; past three picks it's just a count.
+  const named = (slugs: string[], noun: string) =>
+    slugs.length === 0
+      ? ""
+      : slugs.length <= 3
+        ? `-${slugs.join("-")}`
+        : `-${slugs.length}-${noun}`;
+  const players = named(resolved.playerSlugs, "players");
+  const teamsPart = named(resolved.teamSlugs, "teams");
+  return `${entity}${mode}-${seasons}${teamsPart}${players}`
+    .replace(/[^a-z0-9-]+/gi, "-")
+    .toLowerCase();
 }
 
 /**
@@ -62,7 +81,10 @@ export function buildExportMatrix(
   const detail = false; // reserved for a future ?detail=1; value-only for v1
   const showMode = resolved.modeSlug === undefined;
 
-  const headers: string[] = ["Player", "Season"];
+  const headers: string[] = [
+    resolved.entity === "teams" ? "Team" : "Player",
+    "Season",
+  ];
   if (showMode) headers.push("Mode");
   for (const c of columns) {
     headers.push(c.label);
@@ -91,10 +113,14 @@ export function buildExportMatrix(
     columns,
     meta: {
       generatedAt: new Date().toISOString(),
+      entity: resolved.entity,
       run,
       cohort: {
-        year: resolved.year ?? "all",
+        seasons: resolved.years.length > 0 ? resolved.years : "all",
         mode: resolved.modeSlug ?? "all",
+        players:
+          resolved.playerSlugs.length > 0 ? resolved.playerSlugs : "all",
+        teams: resolved.teamSlugs.length > 0 ? resolved.teamSlugs : "all",
       },
       sort: resolved.sort,
       dir: resolved.dir,

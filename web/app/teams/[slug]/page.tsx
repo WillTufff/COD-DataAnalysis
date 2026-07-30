@@ -54,9 +54,7 @@ function buildStyleRows(
   values: TeamMetricValue[],
   catalog: MetricCatalog | null,
 ): StyleRow[] {
-  const teamCatalog = (catalog as (MetricCatalog & {
-    team_metrics?: MetricCatalog["metrics"];
-  }) | null)?.team_metrics;
+  const teamCatalog = catalog?.team_metrics;
   if (!teamCatalog) return [];
   const byKey = new Map(teamCatalog.map((m) => [m.key, m]));
   return values

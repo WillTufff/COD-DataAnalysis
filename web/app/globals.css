@@ -68,6 +68,13 @@ body {
   color: #0d0e10;
 }
 
+/* Keyboard focus, in the site's own colour: the browser default is a 1px blue
+   hairline, which all but disappears against these surfaces. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Broadcast eyebrow: the structural label used for insight kinds & sections */
 .eyebrow {
   font-family: var(--font-display), var(--font-body), sans-serif;
@@ -111,4 +118,48 @@ body {
   letter-spacing: 0.02em;
   text-transform: none;
   color: var(--ink-muted);
+}
+
+/* Report builder: the column controls live in the table header itself. The
+   reveal is a three-step cascade — hovering anywhere on the header row surfaces
+   every grip faintly (one hover teaches all the columns), hovering one header
+   brightens that column's own grip, and the grip itself goes accent. Utility
+   classes can express each step but not their precedence, so the cascade is
+   written out here. */
+.rh-grip,
+.rh-x {
+  color: transparent;
+  transition: color 0.1s;
+}
+.rh-row:hover .rh-grip {
+  color: var(--baseline);
+}
+.rh-col:hover .rh-grip {
+  color: var(--ink-muted);
+}
+.rh-col:hover .rh-x {
+  color: var(--ink-muted);
+}
+/* Scoped to `.rh-col` only to match the specificity of the rules above and win
+   on order — a bare `.rh-grip:hover` loses to `.rh-col:hover .rh-grip`, which
+   is always matching at the same time. */
+.rh-col .rh-grip:hover,
+.rh-col .rh-x:hover,
+.rh-col .rh-grip:focus-visible,
+.rh-col .rh-x:focus-visible {
+  color: var(--accent);
+}
+.rh-grip {
+  cursor: grab;
+}
+.rh-grip[data-dragging="true"] {
+  cursor: grabbing;
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-grip,
+  .rh-x {
+    transition: none;
+  }
 }

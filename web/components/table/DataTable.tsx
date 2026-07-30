@@ -14,6 +14,10 @@ export type Column<T> = {
   header: ReactNode;
   align?: "left" | "right";
   headerClassName?: string;
+  // Chrome rendered inside the header cell but *outside* the sort button, so a
+  // table can hang per-column controls off its header without them stealing the
+  // click that sorts.
+  headerPrefix?: ReactNode;
   cellClassName?: string;
   // A sortable column supplies the value the sort reads and the direction it
   // starts in. Omit for a static column (links, sparklines, bars).
@@ -41,6 +45,9 @@ export function DataTable<T>({
   initialSort = null,
   defaultSort = null,
   syncUrl = true,
+  headerRowClassName,
+  trailingHeader,
+  trailingHeaderClassName,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -54,6 +61,14 @@ export function DataTable<T>({
   initialSort?: SortState;
   defaultSort?: SortState;
   syncUrl?: boolean;
+  /** Extra classes on the header `<tr>` — the hook a table needs to drive
+   *  row-wide hover states across its header cells. */
+  headerRowClassName?: string;
+  /** A final header cell after every column, with an empty body cell per row.
+   *  The report builder puts its "add a column" affordance here, where the next
+   *  column would appear. */
+  trailingHeader?: ReactNode;
+  trailingHeaderClassName?: string;
 }) {
   const sortSpecs = useMemo(() => {
     const specs: Record<string, SortSpec<T>> = {};
@@ -92,15 +107,30 @@ export function DataTable<T>({
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-hairline text-xs text-ink-muted">
+            <tr
+              className={`border-b border-hairline text-xs text-ink-muted ${headerRowClassName ?? ""}`}
+            >
               {rank && <th className="py-2 pr-3 font-normal">#</th>}
               {columns.map((c) => {
                 const active = state.sort?.id === c.id;
                 const alignCls = c.align === "right" ? "text-right" : "";
                 if (c.sortable && c.sortValue) {
+                  const sortButton = (
+                    <button
+                      type="button"
+                      onClick={() => state.toggleSort(c.id)}
+                      className={active ? "text-ink hover:text-accent" : "hover:text-ink"}
+                    >
+                      {c.header}
+                      <span aria-hidden="true" className="ml-1 text-accent">
+                        {active ? (state.sort?.dir === "asc" ? "▲" : "▼") : ""}
+                      </span>
+                    </button>
+                  );
                   return (
                     <th
                       key={c.id}
+                      data-col-id={c.id}
                       className={`py-2 pr-4 font-normal ${alignCls} ${c.headerClassName ?? ""}`}
                       aria-sort={
                         active
@@ -110,28 +140,43 @@ export function DataTable<T>({
                           : "none"
                       }
                     >
-                      <button
-                        type="button"
-                        onClick={() => state.toggleSort(c.id)}
-                        className={active ? "text-ink hover:text-accent" : "hover:text-ink"}
-                      >
-                        {c.header}
-                        <span aria-hidden="true" className="ml-1 text-accent">
-                          {active ? (state.sort?.dir === "asc" ? "▲" : "▼") : ""}
+                      {c.headerPrefix ? (
+                        // One inline-flex line, so the prefix chrome can never
+                        // wrap above the label in a narrow cell.
+                        <span className="inline-flex items-center whitespace-nowrap">
+                          {c.headerPrefix}
+                          {sortButton}
                         </span>
-                      </button>
+                      ) : (
+                        sortButton
+                      )}
                     </th>
                   );
                 }
                 return (
                   <th
                     key={c.id}
+                    data-col-id={c.id}
                     className={`py-2 pr-4 font-normal ${alignCls} ${c.headerClassName ?? ""}`}
                   >
-                    {c.header}
+                    {c.headerPrefix ? (
+                      <span className="inline-flex items-center whitespace-nowrap">
+                        {c.headerPrefix}
+                        {c.header}
+                      </span>
+                    ) : (
+                      c.header
+                    )}
                   </th>
                 );
               })}
+              {trailingHeader !== undefined && (
+                <th
+                  className={`py-2 font-normal ${trailingHeaderClassName ?? ""}`}
+                >
+                  {trailingHeader}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -155,6 +200,7 @@ export function DataTable<T>({
                       {c.render(row, absIndex)}
                     </td>
                   ))}
+                  {trailingHeader !== undefined && <td aria-hidden="true" />}
                 </tr>
               );
             })}

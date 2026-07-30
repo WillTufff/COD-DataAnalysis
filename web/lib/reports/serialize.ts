@@ -52,10 +52,22 @@ export function toXml(matrix: ExportMatrix): string {
   const parts: string[] = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     "<report>",
-    `  <meta generatedAt="${xmlEscape(meta.generatedAt)}" run="${xmlEscape(
+    `  <meta generatedAt="${xmlEscape(meta.generatedAt)}" entity="${meta.entity}" run="${xmlEscape(
       `${meta.run.model} v${meta.run.version}`,
-    )}" season="${xmlEscape(String(meta.cohort.year))}" mode="${xmlEscape(
+    )}" seasons="${xmlEscape(
+      Array.isArray(meta.cohort.seasons)
+        ? meta.cohort.seasons.join(",")
+        : meta.cohort.seasons,
+    )}" mode="${xmlEscape(
       meta.cohort.mode,
+    )}" players="${xmlEscape(
+      Array.isArray(meta.cohort.players)
+        ? meta.cohort.players.join(",")
+        : meta.cohort.players,
+    )}" teams="${xmlEscape(
+      Array.isArray(meta.cohort.teams)
+        ? meta.cohort.teams.join(",")
+        : meta.cohort.teams,
     )}" sort="${xmlEscape(meta.sort)}" dir="${meta.dir}" qualifiedOnly="${meta.qualifiedOnly}" rowCount="${meta.rowCount}"${meta.truncated ? ' truncated="true"' : ""}/>`,
     "  <columns>",
     ...matrix.columns.map(

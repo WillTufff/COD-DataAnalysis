@@ -2,9 +2,15 @@
 // sort, qualified gate), resolved through the same `resolveReport`, so the file
 // mirrors the on-screen table. Not cached — the report is request-shaped.
 
-import { getMetricCatalog, latestRun, queryReport } from "@/lib/analytics";
+import {
+  getMetricCatalog,
+  getTeamMetricCatalog,
+  latestRun,
+  queryReport,
+  queryTeamReport,
+} from "@/lib/analytics";
 import { buildExportMatrix, cohortSlug } from "@/lib/reports/export";
-import { resolveReport } from "@/lib/reports/resolve";
+import { parseEntity, resolveReport } from "@/lib/reports/resolve";
 import { toCsv, toJson, toXml } from "@/lib/reports/serialize";
 import { buildXlsx } from "@/lib/reports/xlsx";
 
@@ -58,7 +64,10 @@ export async function GET(request: Request) {
   }
 
   const sp = Object.fromEntries(searchParams);
-  const metrics = catalog.metrics.filter((m) => m.titles.length > 0);
+  const metrics =
+    parseEntity(sp) === "teams"
+      ? await getTeamMetricCatalog(run.id)
+      : catalog.metrics.filter((m) => m.titles.length > 0);
   const resolved = await resolveReport(run.id, sp, metrics);
   if (resolved.selected.length === 0) {
     return new Response("Select at least one metric column to export.", {
@@ -66,11 +75,10 @@ export async function GET(request: Request) {
     });
   }
 
-  const { columns, rows } = await queryReport(
-    run.id,
-    resolved.query,
-    resolved.selectedEntries,
-  );
+  const { columns, rows } =
+    resolved.entity === "teams"
+      ? await queryTeamReport(run.id, resolved.query, resolved.selectedEntries)
+      : await queryReport(run.id, resolved.query, resolved.selectedEntries);
   const matrix = buildExportMatrix(resolved, columns, rows, {
     model: "metric_layer",
     version: run.version,

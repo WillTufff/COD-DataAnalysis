@@ -6,7 +6,9 @@
 import {
   type MetricCatalogEntry,
   type ReportQuery,
+  type ScopeSeason,
   getReportScope,
+  getTeamReportScope,
 } from "@/lib/analytics";
 import { type SearchParams, one } from "@/lib/paging";
 import {
@@ -15,17 +17,38 @@ import {
   sanitizePresetMetrics,
 } from "./presets";
 
-export type ReportScope = { years: number[]; modes: string[]; allModes: boolean };
+export type ReportScope = {
+  years: number[];
+  seasons: ScopeSeason[];
+  modes: string[];
+  allModes: boolean;
+};
 
-const EMPTY_SCOPE: ReportScope = { years: [], modes: [], allModes: false };
+const EMPTY_SCOPE: ReportScope = {
+  years: [],
+  seasons: [],
+  modes: [],
+  allModes: false,
+};
+
+/** What a row of the report is. Players are the default; teams are the mirror. */
+export type ReportEntity = "players" | "teams";
+
+/** The row entity: `?entity=teams` switches the builder; anything else is players. */
+export function parseEntity(sp: SearchParams): ReportEntity {
+  return one(sp, "entity") === "teams" ? "teams" : "players";
+}
 
 export type ResolvedReport = {
+  entity: ReportEntity;
   selected: string[];
   selectedEntries: MetricCatalogEntry[];
   activePreset?: ReportPreset;
-  scope: ReportScope; // union across columns — what the dropdowns offer
+  scope: ReportScope; // union across columns — what the pickers offer
   rankedScope: ReportScope; // ranked column's own coverage — the default cohort
-  year?: number;
+  years: number[]; // empty = every covered season, combined
+  playerSlugs: string[]; // empty = everyone
+  teamSlugs: string[]; // empty = every team
   modeSlug?: string;
   qualifiedOnly: boolean;
   sort: string;
@@ -34,6 +57,54 @@ export type ResolvedReport = {
   defaultDir: "asc" | "desc";
   query: ReportQuery;
 };
+
+/**
+ * The season cohort: a CSV of years on `?years=`, tolerant of the legacy
+ * single-season `?year=`. An absent or empty key means every covered season,
+ * combined — seasons are additive, so "none picked" and "all picked" are the
+ * same report and only one of them needs to ride the URL.
+ */
+export function parseYears(sp: SearchParams): number[] {
+  const raw = one(sp, "years") || one(sp, "year");
+  if (!raw) return [];
+  const seen = new Set<number>();
+  for (const part of raw.split(",")) {
+    const n = Number(part.trim());
+    if (Number.isInteger(n)) seen.add(n);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+/**
+ * A slug-CSV filter key. Absent or empty means unfiltered — like seasons, "no
+ * pick" and "all" are the same report. Unknown slugs are kept rather than
+ * validated away: they match no rows, which a stale link should surface as an
+ * empty filter, not silently become the unfiltered field.
+ */
+function parseSlugCsv(sp: SearchParams, key: string): string[] {
+  const raw = one(sp, key);
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const slug = part.trim().toLowerCase();
+    if (slug && !seen.has(slug)) {
+      seen.add(slug);
+      out.push(slug);
+    }
+  }
+  return out;
+}
+
+/** The player filter: `?players=` as a CSV of player slugs. */
+export function parsePlayers(sp: SearchParams): string[] {
+  return parseSlugCsv(sp, "players");
+}
+
+/** The team filter: `?teams=` as a CSV of team slugs. */
+export function parseTeams(sp: SearchParams): string[] {
+  return parseSlugCsv(sp, "teams");
+}
 
 /** The ordered column CSV, tolerant of the legacy single-metric `?metric=` key. */
 export function parseMetrics(sp: SearchParams): string[] {
@@ -67,36 +138,53 @@ export async function resolveReport(
     fallbackPreset?: string;
   } = {},
 ): Promise<ResolvedReport> {
+  const entity = parseEntity(sp);
   const byKey = new Map(metrics.map((m) => [m.key, m]));
   const knownKeys = new Set(byKey.keys());
 
   // Explicit `metrics` (or the legacy single `metric`) always wins; a `preset`
   // only seeds columns when none were named, so editing a preset's columns —
   // which writes explicit `metrics` and drops `preset` — is respected.
+  // Presets are player reports; the team catalog is six metrics, so its bare
+  // visit simply shows all of them.
   const explicit = parseMetrics(sp).filter((k) => byKey.has(k));
   const untouched =
     !("metrics" in sp) && !("metric" in sp) && !("preset" in sp);
+  const namedPresetId = entity === "players" ? one(sp, "preset") : "";
   const presetId =
-    one(sp, "preset") || (untouched ? (opts.fallbackPreset ?? "") : "");
-  const activePreset =
+    namedPresetId ||
+    (entity === "players" && untouched ? (opts.fallbackPreset ?? "") : "");
+  const preset =
     explicit.length === 0 && presetId ? presetById(presetId) : undefined;
+  // The fallback seeds a preset's columns, sort and mode, but only a preset
+  // named in the URL counts as *chosen* — a bare visit shows a default report,
+  // not a pre-selected tile.
+  const activePreset = namedPresetId ? preset : undefined;
   const selected =
     explicit.length > 0
       ? explicit
-      : activePreset
-        ? sanitizePresetMetrics(activePreset, knownKeys)
-        : [];
+      : preset
+        ? sanitizePresetMetrics(preset, knownKeys)
+        : entity === "teams" && untouched
+          ? metrics.map((m) => m.key)
+          : [];
   const selectedEntries = selected.map((k) => byKey.get(k)!);
 
   const qualifiedOnly = one(sp, "all") !== "1";
+  const playerSlugs = parsePlayers(sp);
+  const teamSlugs = parseTeams(sp);
 
   if (selected.length === 0) {
     return {
+      entity,
       selected,
       selectedEntries,
       activePreset,
       scope: EMPTY_SCOPE,
       rankedScope: EMPTY_SCOPE,
+      years: [],
+      playerSlugs,
+      teamSlugs,
       qualifiedOnly,
       sort: "player",
       dir: "asc",
@@ -109,8 +197,8 @@ export async function resolveReport(
   // Sort defaults to the preset's ranked column when active and still present,
   // else the first column, best-first. A stale `?sort=` falls back here.
   const presetSortKey =
-    activePreset?.defaultSort && selected.includes(activePreset.defaultSort)
-      ? activePreset.defaultSort
+    preset?.defaultSort && selected.includes(preset.defaultSort)
+      ? preset.defaultSort
       : undefined;
   const defaultSortKey = presetSortKey ?? selected[0];
   const defaultDir = byKey.get(defaultSortKey)!.higher_is_better ? "desc" : "asc";
@@ -131,43 +219,62 @@ export async function resolveReport(
   // dropdowns offer; the ranked column's own coverage drives the default cohort
   // so a fresh report lands on a populated table.
   const rankedKey = sort === "player" ? defaultSortKey : sort;
+  const scopeOf = entity === "teams" ? getTeamReportScope : getReportScope;
   const [scope, rankedScope] = await Promise.all([
-    getReportScope(runId, selected),
-    getReportScope(runId, [rankedKey]),
+    scopeOf(runId, selected),
+    scopeOf(runId, [rankedKey]),
   ]);
 
-  const yearRaw = Number(one(sp, "year"));
-  const year = scope.years.includes(yearRaw) ? yearRaw : undefined;
+  // Seasons combine: the cohort is the set of picked years, dropping any the
+  // chosen columns don't cover. Picking every offered season is the same report
+  // as picking none, so both normalise to the empty "all covered" set.
+  const askedYears = parseYears(sp).filter((y) => scope.years.includes(y));
+  const years = askedYears.length === scope.years.length ? [] : askedYears;
 
-  // The cohort fixes a single mode. An active preset seeds its mode; otherwise
-  // "all modes combined" is the default only when the ranked column has
-  // all-modes rows, else that column's first real mode.
+  // The cohort fixes a single mode — modes are compared, not combined. An
+  // active preset seeds its mode; otherwise "all modes combined" is the default
+  // only when the ranked column has all-modes rows, else that column's first
+  // real mode. An explicitly empty `?mode=` is a deliberate pick of "combined"
+  // and outranks the preset's seed.
   const modeRaw = one(sp, "mode");
+  const modeExplicitAll = "mode" in sp && modeRaw === "" && rankedScope.allModes;
   const presetMode =
-    activePreset?.defaultMode && scope.modes.includes(activePreset.defaultMode)
-      ? activePreset.defaultMode
+    preset?.defaultMode && scope.modes.includes(preset.defaultMode)
+      ? preset.defaultMode
       : undefined;
   const modeDefault =
     presetMode ?? (rankedScope.allModes ? undefined : rankedScope.modes[0]);
   const modeSlug = scope.modes.includes(modeRaw)
     ? modeRaw
-    : modeRaw === "" && rankedScope.allModes && !presetMode
+    : modeExplicitAll
       ? undefined
       : modeDefault;
 
   return {
+    entity,
     selected,
     selectedEntries,
     activePreset,
     scope,
     rankedScope,
-    year,
+    years,
+    playerSlugs,
+    teamSlugs,
     modeSlug,
     qualifiedOnly,
     sort,
     dir,
     defaultSortKey,
     defaultDir,
-    query: { metrics: selected, year, modeSlug, qualifiedOnly, sort, dir },
+    query: {
+      metrics: selected,
+      years,
+      modeSlug,
+      players: playerSlugs,
+      teams: teamSlugs,
+      qualifiedOnly,
+      sort,
+      dir,
+    },
   };
 }

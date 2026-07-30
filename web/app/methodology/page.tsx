@@ -2905,6 +2905,53 @@ export default async function MethodologyPage() {
             </table>
           </div>
         )}
+        {metricCatalog?.team_metrics && metricCatalog.team_metrics.length > 0 && (
+          <div className="mt-8">
+            <h3 className="eyebrow text-[10px] text-ink-secondary">
+              Team metrics
+            </h3>
+            <p className="mt-2 text-sm text-ink-secondary">
+              Scored the same way, with teams as the cohort. Series-shaped
+              metrics (series and deciding-map win rates) exist only for the
+              all-modes cohort — a series is one result spanning several modes,
+              so slicing it by mode would count it once per mode it touched.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-3 font-normal">Metric</th>
+                    <th className="py-2 pr-3 font-normal">Definition</th>
+                    <th className="py-2 pr-3 font-normal">Modes</th>
+                    <th className="py-2 font-normal">Qualifies at</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metricCatalog.team_metrics.map((m) => (
+                    <tr key={m.key} className="border-b border-hairline/60 align-top">
+                      <td className="py-2 pr-3">
+                        <div className="font-medium text-ink">{m.label}</div>
+                        <div className="font-mono text-[10px] text-ink-muted">{m.key}</div>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <div className="font-mono text-xs text-ink-secondary">{m.formula}</div>
+                        {m.note && (
+                          <div className="mt-1 text-xs text-ink-muted">{m.note}</div>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 font-mono text-xs text-ink-secondary">
+                        {m.modes.map((s) => (s === "__all__" ? "all" : s)).join(", ")}
+                      </td>
+                      <td className="py-2 font-mono text-xs text-ink-secondary">
+                        {m.min_denom} {m.denom_kind}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         {metricCatalog && metricCatalog.untracked_columns.length > 0 && (
           <div className="mt-8">
             <h3 className="eyebrow text-[10px] text-ink-secondary">
