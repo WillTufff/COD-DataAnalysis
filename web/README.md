@@ -14,5 +14,7 @@ npm run dev   # http://localhost:3000
 `npm run build` needs a populated database; the filterable views (report builder,
 rounds, loadout meta) render per request.
 
-Other scripts: `npm run db:check` verifies the schema matches what the site
-expects, `npm run typecheck` and `npm run lint` do what they say.
+Other scripts: `npm test` runs the Vitest suite over `lib/reports/` — how a URL
+becomes a report, the export matrix, and the CSV/JSON/XML serializers, none of
+which need a database. `npm run db:check` verifies the schema matches what the
+site expects; `npm run typecheck` and `npm run lint` do what they say.

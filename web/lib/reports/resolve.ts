@@ -12,6 +12,7 @@ import {
 } from "@/lib/analytics";
 import { type SearchParams, one } from "@/lib/paging";
 import {
+  DEFAULT_PRESET,
   type ReportPreset,
   presetById,
   sanitizePresetMetrics,
@@ -119,6 +120,24 @@ export function parseMetrics(sp: SearchParams): string[] {
     }
   }
   return out;
+}
+
+/**
+ * What a URL means to this site: `resolveReport` plus the landing fallback the
+ * page and the export route have to agree on. Both go through here rather than
+ * choosing their own options, because they once chose differently — the page
+ * fell back to the default preset on a bare visit while the export route did
+ * not, so downloading the very report a first-time visitor sees returned 400.
+ */
+export function resolveReportForUrl(
+  runId: number,
+  sp: SearchParams,
+  metrics: MetricCatalogEntry[],
+): Promise<ResolvedReport> {
+  return resolveReport(runId, sp, metrics, {
+    // Presets are player reports; a bare team visit shows the whole catalog.
+    fallbackPreset: parseEntity(sp) === "players" ? DEFAULT_PRESET : undefined,
+  });
 }
 
 /**

@@ -10,8 +10,7 @@ import {
   queryTeamReport,
 } from "@/lib/analytics";
 import { buildExportMatrix, cohortSlug } from "@/lib/reports/export";
-import { DEFAULT_PRESET } from "@/lib/reports/presets";
-import { parseEntity, resolveReport } from "@/lib/reports/resolve";
+import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import { toCsv, toJson, toXml } from "@/lib/reports/serialize";
 import { buildXlsx } from "@/lib/reports/xlsx";
 
@@ -70,11 +69,9 @@ export async function GET(request: Request) {
     entity === "teams"
       ? await getTeamMetricCatalog(run.id)
       : catalog.metrics.filter((m) => m.titles.length > 0);
-  // Same fallback as the page: a bare visit shows the default preset's report,
-  // so exporting from it must resolve those same columns, not an empty set.
-  const resolved = await resolveReport(run.id, sp, metrics, {
-    fallbackPreset: entity === "players" ? DEFAULT_PRESET : undefined,
-  });
+  // The same entry point the page uses, so a bare download resolves the report
+  // a bare visit renders rather than an empty set.
+  const resolved = await resolveReportForUrl(run.id, sp, metrics);
   if (resolved.selected.length === 0) {
     return new Response("Select at least one metric column to export.", {
       status: 400,

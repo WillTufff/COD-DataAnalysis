@@ -16,8 +16,8 @@ import {
   queryReport,
   queryTeamReport,
 } from "@/lib/analytics";
-import { DEFAULT_PRESET, REPORT_PRESETS } from "@/lib/reports/presets";
-import { parseEntity, resolveReport } from "@/lib/reports/resolve";
+import { REPORT_PRESETS } from "@/lib/reports/presets";
+import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import {
   type SearchParams,
   parsePage,
@@ -90,13 +90,10 @@ export default async function StatsPage({
   const knownKeys = new Set(metrics.map((m) => m.key));
 
   // One resolution, shared with the export route so a download always matches
-  // the table it came from.
-  // A bare visit lands on a real report rather than an empty frame: this page
-  // fronts every published metric, so it should show what one looks like.
-  // (A bare team visit shows all six team metrics; presets are player reports.)
-  const resolved = await resolveReport(run.id, sp, metrics, {
-    fallbackPreset: entity === "players" ? DEFAULT_PRESET : undefined,
-  });
+  // the table it came from. A bare visit lands on a real report rather than an
+  // empty frame: this page fronts every published metric, so it should show
+  // what one looks like.
+  const resolved = await resolveReportForUrl(run.id, sp, metrics);
   const { selected, selectedEntries, activePreset, scope, rankedScope } =
     resolved;
 

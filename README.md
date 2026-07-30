@@ -110,6 +110,24 @@ cd ../web && npm install && npm run dev   # http://localhost:3000
 Copy `.env.example` to `.env` and adjust if needed; the defaults match
 `docker-compose.yml`.
 
+### Tests and checks
+
+Each half runs its own checks. `pipeline/` and `analytics/` use `uv run ruff
+check .`, `uv run ruff format --check .`, `uv run mypy` and `uv run pytest`;
+`web/` uses `npm run lint`, `npm run typecheck` and `npm test` (Vitest, over the
+report builder's URL resolution, export matrix and serializers). CI runs all of
+them, plus a build of the site and a full ingest of the committed snapshots that
+re-checks the kill-feed reconciliation figures against real data.
+
+The fast ones can run before every push:
+
+```sh
+git config core.hooksPath scripts/git-hooks
+```
+
+That takes about ten seconds and skips the slow gates, which stay in CI. Use
+`git push --no-verify` to bypass it once.
+
 ### A note on the two datasets
 
 The dev dataset is real. It lives in `pipeline/snapshots/cwl-archive/` and is

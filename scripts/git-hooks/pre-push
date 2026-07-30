@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Fast pre-push checks: the CI steps that catch a red build in seconds rather
+# than minutes. Enable with:
+#
+#   git config core.hooksPath scripts/git-hooks
+#
+# Deliberately excludes the slow gates — pytest, next build, and the real-data
+# ingest — which stay in CI. This is here to catch formatting and type errors
+# before they cost a round trip, not to reproduce the whole pipeline. Skip a
+# one-off push with `git push --no-verify`.
+set -uo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+failed=()
+
+# Run a check, remembering its name if it fails. Never exits early: one push
+# should report every problem it has, not the first one.
+run() {
+  local label="$1" dir="$2"
+  shift 2
+  if ! (cd "$root/$dir" && "$@" >/tmp/cdlhub-prepush.log 2>&1); then
+    printf '  \033[31mFAIL\033[0m %s\n' "$label"
+    sed 's/^/       /' /tmp/cdlhub-prepush.log | tail -20
+    failed+=("$label")
+  else
+    printf '  \033[32mok\033[0m   %s\n' "$label"
+  fi
+}
+
+for project in pipeline analytics; do
+  if [ -d "$root/$project/.venv" ]; then
+    echo "$project"
+    run "ruff check" "$project" uv run ruff check .
+    run "ruff format" "$project" uv run ruff format --check .
+    run "mypy" "$project" uv run mypy
+  else
+    echo "$project (skipped: no .venv — run 'uv sync' in $project/)"
+  fi
+done
+
+if [ -d "$root/web/node_modules" ]; then
+  echo "web"
+  run "eslint" web npm run lint
+  run "typecheck" web npm run typecheck
+  run "vitest" web npm test
+else
+  echo "web (skipped: no node_modules — run 'npm install' in web/)"
+fi
+
+rm -f /tmp/cdlhub-prepush.log
+
+if [ ${#failed[@]} -gt 0 ]; then
+  printf '\nPush aborted: %s\n' "$(IFS=', '; echo "${failed[*]}")"
+  echo "Fix the above, or push anyway with --no-verify."
+  exit 1
+fi
