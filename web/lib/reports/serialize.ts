@@ -70,6 +70,10 @@ export function toXml(matrix: ExportMatrix): string {
         ? meta.cohort.teams.join(",")
         : meta.cohort.teams,
     )}" sort="${xmlEscape(meta.sort)}" dir="${meta.dir}" qualifiedOnly="${meta.qualifiedOnly}" rowCount="${meta.rowCount}"${meta.truncated ? ' truncated="true"' : ""}/>`,
+    "  <attribution>",
+    `    <note>${xmlEscape(meta.attribution.derived)}</note>`,
+    ...meta.attribution.sources.map((s) => `    <source>${xmlEscape(s)}</source>`),
+    "  </attribution>",
     "  <columns>",
     ...matrix.columns.map(
       (c) =>

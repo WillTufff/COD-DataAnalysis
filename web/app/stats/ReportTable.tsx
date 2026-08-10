@@ -10,7 +10,7 @@ import type { ReportColumn, ReportRow } from "@/lib/analytics";
 import type { ReportEntity } from "@/lib/reports/resolve";
 import { AddColumnMenu, type MetricOption } from "./AddColumnMenu";
 import { type CellMode, ReportToolbar } from "./ReportToolbar";
-import { modeLabel } from "./cohortLabel";
+import { type ModeCatalog, modeLabel } from "./cohortLabel";
 import { useReportUrl } from "./reportUrl";
 
 // Mirrors the single-metric table's formatting: shares render as percentages,
@@ -82,6 +82,7 @@ export function ReportTable({
   rows,
   catalog,
   categoryLabels,
+  modeCatalog,
   showMode,
   qualifiedOnly,
   initialPer,
@@ -94,6 +95,7 @@ export function ReportTable({
   rows: ReportRow[];
   catalog: MetricOption[];
   categoryLabels: Record<string, string>;
+  modeCatalog: ModeCatalog;
   showMode: boolean;
   qualifiedOnly: boolean;
   initialPer: Per;
@@ -255,7 +257,7 @@ export function ReportTable({
         id: "mode",
         header: "Mode",
         cellClassName: "text-ink-secondary",
-        render: (r) => (r.mode ? modeLabel(r.mode) : "All"),
+        render: (r) => modeLabel(modeCatalog, r.mode, "All"),
       });
     }
     for (const key of order) {
@@ -323,6 +325,7 @@ export function ReportTable({
   }, [
     byKey,
     entity,
+    modeCatalog,
     order,
     selected,
     showMode,

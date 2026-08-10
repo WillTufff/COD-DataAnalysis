@@ -1,6 +1,11 @@
 import type { ScopeSeason } from "@/lib/analytics";
 
-export { MODE_LABELS, modeLabel } from "@/lib/reports/labels";
+export {
+  type ModeCatalog,
+  ALL_MODES_LABEL,
+  EMPTY_MODE_CATALOG,
+  modeLabel,
+} from "@/lib/reports/labels";
 
 /**
  * How a player or team pick names itself, on the same scale as seasons: none

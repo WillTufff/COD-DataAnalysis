@@ -1,16 +1,9 @@
 // Mode display names, shared by the on-screen cohort labels and the export
 // matrix so a downloaded file can never disagree with the table about what a
-// mode is called.
+// mode is called. The names come from `game_modes` via `lib/modes`; this module
+// only pins the wording of the all-modes slice, which is not a row in that
+// table.
 
-export const MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
-};
+export { type ModeCatalog, EMPTY_MODE_CATALOG, modeLabel } from "@/lib/modes";
 
-export function modeLabel(slug: string | undefined): string {
-  if (slug === undefined) return "All modes combined";
-  return MODE_LABELS[slug] ?? slug;
-}
+export const ALL_MODES_LABEL = "All modes combined";

@@ -6,6 +6,8 @@ export type PresetTile = {
   blurb: string;
   category: string;
   columns: number;
+  /** Titles the preset's columns are published for, in archive order. */
+  titles: string[];
 };
 
 /**
@@ -14,13 +16,20 @@ export type PresetTile = {
  * Each tile links to `?preset=<id>`, which the page resolves to columns plus a
  * cohort default; editing any column then drops the preset. Pure links, so this
  * stays a server component.
+ *
+ * Each tile carries the span its columns are published for, read from the live
+ * catalog. A preset whose columns stop short of the archive says so on the tile
+ * rather than at the moment its Season control turns out to hold one option.
  */
 export function PresetPicker({
   presets,
   activeId,
+  allTitles,
 }: {
   presets: PresetTile[];
   activeId?: string;
+  /** Every title the catalog publishes, so "every season" is a comparison. */
+  allTitles: string[];
 }) {
   const groups = new Map<string, PresetTile[]>();
   for (const p of presets) {
@@ -59,6 +68,13 @@ export function PresetPicker({
                     </span>
                   </div>
                   <span className="text-xs text-ink-secondary">{p.blurb}</span>
+                  {p.titles.length > 0 && (
+                    <span className="font-mono text-[10px] text-ink-muted">
+                      {p.titles.length === allTitles.length
+                        ? "every season"
+                        : p.titles.join(" · ")}
+                    </span>
+                  )}
                 </Link>
               );
             })}

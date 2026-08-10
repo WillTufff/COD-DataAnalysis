@@ -44,11 +44,15 @@ export const REPORT_PRESETS: ReportPreset[] = [
     name: "Clutch Report",
     blurb: "Last-alive win rates, from the even 1v1 to the stacked 1v3.",
     category: "Search & Destroy",
+    // The by-N breakdown is read from the kill feed and stops with it; the
+    // per-round rate is a box-score column and runs the other way, so the two
+    // together cover the archive end to end rather than half of it.
     metrics: [
       "clutch_win_rate",
       "clutch_1v1_win_rate",
       "clutch_1v2_win_rate",
       "clutch_1v3_win_rate",
+      "clutch_wins_pr",
     ],
     defaultMode: "search-and-destroy",
     defaultSort: "clutch_win_rate",
@@ -72,15 +76,19 @@ export const REPORT_PRESETS: ReportPreset[] = [
     name: "Hardpoint Objective Report",
     blurb: "Hill time, captures and defends — objective work, not just kills.",
     category: "Objective modes",
+    // Ranked on the per-map form: map time is recorded only where the source
+    // ships a duration, so ranking on the per-10-minute form would default the
+    // report to the seasons that have one.
     metrics: [
-      "hill_time_p10",
+      "hill_time_pm",
       "hill_time_share",
+      "hill_time_p10",
       "hill_caps_p10",
       "hill_defends_p10",
       "hp_obj_slay_split",
     ],
     defaultMode: "hardpoint",
-    defaultSort: "hill_time_p10",
+    defaultSort: "hill_time_pm",
   },
   {
     id: "control",
@@ -115,24 +123,44 @@ export const REPORT_PRESETS: ReportPreset[] = [
   {
     id: "slaying-core",
     name: "Slaying Core",
-    blurb: "The engagement core — kills, deaths, plus-minus and trade discipline.",
+    blurb: "The engagement core — kills, deaths, plus-minus and share of the team's work.",
+    category: "All-mode cores",
+    // Per-map rather than per-10-minute: map time is recorded only in the CWL
+    // archive, so the per-10-minute forms of these stop at 2019. As the landing
+    // preset this one has to cover every season, which is what per map buys.
+    metrics: [
+      "plus_minus_pm",
+      "kills_pm",
+      "deaths_pm",
+      "kd",
+      "kill_share",
+      "damage_pm",
+    ],
+    defaultSort: "plus_minus_pm",
+  },
+  {
+    id: "pace-tempo",
+    name: "Pace & Tempo",
+    blurb: "How much of the map a player spends in a fight, and what comes of it.",
     category: "All-mode cores",
     metrics: [
-      "plus_minus_p10",
-      "kills_p10",
-      "deaths_p10",
-      "ekia_p10",
+      "engagement_pm",
+      "kills_pm",
+      "deaths_pm",
+      "assists_pm",
       "kill_share",
-      "kill_answered_rate",
-      "time_per_life_s",
     ],
-    defaultSort: "plus_minus_p10",
+    defaultSort: "engagement_pm",
   },
   {
     id: "discipline-survival",
     name: "Discipline & Survival",
     blurb: "Staying alive and staying useful: clean kills, trades, mistakes.",
-    category: "All-mode cores",
+    // Every column here is read from the kill feed or the archive's extras, so
+    // this preset stops where those do. It sits under its own heading rather
+    // than beside the all-season cores, which would imply it spans them; the
+    // seasons it actually reaches are stamped on the tile from the catalog.
+    category: "Part-archive columns",
     metrics: [
       "clean_kill_rate",
       "kill_answered_rate",

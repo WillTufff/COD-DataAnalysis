@@ -4,16 +4,29 @@
 // always matches the table it came from.
 
 import { type ReportColumn, type ReportRow } from "@/lib/analytics";
-import { MODE_LABELS } from "./labels";
+import { type ModeCatalog, modeLabel } from "./labels";
 import { type ResolvedReport } from "./resolve";
 
 // A hard ceiling so a pathological request can't stream an unbounded file. The
 // matrix records when it bit, so a truncated export is never silent.
 export const MAX_EXPORT_ROWS = 10_000;
 
+// Attribution travels with the file. These are derived season aggregates, never
+// the underlying box scores, which is what the CDL-era source's licence allows
+// to leave the site at all.
+export const EXPORT_ATTRIBUTION = {
+  derived: "Derived season aggregates. Not a redistribution of any source's box scores.",
+  sources: [
+    "Box scores 2017-2019: Activision Publishing (cwl-data), BSD-3-Clause.",
+    "Box scores 2020-2026: data via Cito, carrying Breaking Point match data, used with attribution.",
+    "Tournaments, placements, rosters, transfers, bios: Liquipedia, CC-BY-SA 3.0.",
+  ],
+} as const;
+
 export type ExportMeta = {
   generatedAt: string;
   entity: "players" | "teams";
+  attribution: typeof EXPORT_ATTRIBUTION;
   run: { model: string; version: string };
   cohort: {
     seasons: number[] | "all";
@@ -70,6 +83,7 @@ export function buildExportMatrix(
   columns: ReportColumn[],
   rows: ReportRow[],
   run: { model: string; version: string },
+  modeCatalog: ModeCatalog,
 ): ExportMatrix {
   const detail = false; // reserved for a future ?detail=1; value-only for v1
   const showMode = resolved.modeSlug === undefined;
@@ -89,7 +103,7 @@ export function buildExportMatrix(
 
   const matrixRows: (string | number | null)[][] = used.map((r) => {
     const out: (string | number | null)[] = [r.handle, `${r.year} ${r.title}`];
-    if (showMode) out.push(r.mode ? (MODE_LABELS[r.mode] ?? r.mode) : "All");
+    if (showMode) out.push(modeLabel(modeCatalog, r.mode, "All"));
     for (const c of columns) {
       const cell = r.cells[c.key];
       out.push(cell ? cell.value : null);
@@ -107,6 +121,7 @@ export function buildExportMatrix(
     meta: {
       generatedAt: new Date().toISOString(),
       entity: resolved.entity,
+      attribution: EXPORT_ATTRIBUTION,
       run,
       cohort: {
         seasons: resolved.years.length > 0 ? resolved.years : "all",

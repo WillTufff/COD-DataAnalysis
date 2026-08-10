@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ExportMatrix } from "./export";
+import { EXPORT_ATTRIBUTION, type ExportMatrix } from "./export";
 import { toCsv, toJson, toXml } from "./serialize";
 
 function matrix(overrides: Partial<ExportMatrix> = {}): ExportMatrix {
@@ -22,6 +22,7 @@ function matrix(overrides: Partial<ExportMatrix> = {}): ExportMatrix {
     meta: {
       generatedAt: "2026-07-30T12:00:00.000Z",
       entity: "players",
+      attribution: EXPORT_ATTRIBUTION,
       run: { model: "metric_layer", version: "2.1.0" },
       cohort: { seasons: [2018], mode: "hardpoint", players: "all", teams: "all" },
       sort: "kd",

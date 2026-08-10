@@ -3,7 +3,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ScopePlayer, ScopeSeason, ScopeTeam } from "@/lib/analytics";
 import type { ReportEntity } from "@/lib/reports/resolve";
-import { modeLabel, pickLabel, seasonLabel } from "./cohortLabel";
+import {
+  type ModeCatalog,
+  ALL_MODES_LABEL,
+  modeLabel,
+  pickLabel,
+  seasonLabel,
+} from "./cohortLabel";
 import { useReportUrl } from "./reportUrl";
 
 /**
@@ -234,6 +240,7 @@ export function CohortTokens({
   seasons,
   years,
   modes,
+  modeCatalog,
   allModes,
   modeSlug,
   players,
@@ -245,6 +252,7 @@ export function CohortTokens({
   seasons: ScopeSeason[];
   years: number[];
   modes: string[];
+  modeCatalog: ModeCatalog;
   allModes: boolean;
   modeSlug?: string;
   players: ScopePlayer[];
@@ -389,7 +397,7 @@ export function CohortTokens({
       {(modes.length > 0 || allModes) && (
         <TokenFrame
           label="Mode"
-          value={modeLabel(modeSlug)}
+          value={modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)}
           open={openToken === "mode"}
           setOpen={(o) => setOpenToken(o ? "mode" : null)}
         >
@@ -415,7 +423,7 @@ export function CohortTokens({
                 >
                   ✓
                 </span>
-                All modes combined
+                {ALL_MODES_LABEL}
               </button>
             )}
             {modes.map((m) => (
@@ -438,7 +446,7 @@ export function CohortTokens({
                 >
                   ✓
                 </span>
-                {modeLabel(m)}
+                {modeLabel(modeCatalog, m)}
               </button>
             ))}
           </div>

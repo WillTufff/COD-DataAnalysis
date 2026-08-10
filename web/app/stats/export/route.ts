@@ -8,6 +8,7 @@ import {
   latestRun,
   queryReport,
   queryTeamReport,
+  getModeCatalog,
 } from "@/lib/analytics";
 import { buildExportMatrix, cohortSlug } from "@/lib/reports/export";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
@@ -82,10 +83,13 @@ export async function GET(request: Request) {
     resolved.entity === "teams"
       ? await queryTeamReport(run.id, resolved.query, resolved.selectedEntries)
       : await queryReport(run.id, resolved.query, resolved.selectedEntries);
-  const matrix = buildExportMatrix(resolved, columns, rows, {
-    model: "metric_layer",
-    version: run.version,
-  });
+  const matrix = buildExportMatrix(
+    resolved,
+    columns,
+    rows,
+    { model: "metric_layer", version: run.version },
+    await getModeCatalog(),
+  );
 
   const { body, contentType, ext } = serialize(matrix);
   // Date-stamped so repeated exports of the same cohort don't collide on disk.

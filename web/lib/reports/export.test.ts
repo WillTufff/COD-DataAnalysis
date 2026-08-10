@@ -5,6 +5,17 @@ import type { ResolvedReport } from "./resolve";
 
 const RUN = { model: "metric_layer", version: "2.1.0" };
 
+// The mode catalog the site reads from `game_modes`, as a fixture: the export's
+// Mode column is a lookup against it, and a slug it lacks must survive as itself.
+const MODES = {
+  order: ["hardpoint", "search-and-destroy", "overload"],
+  names: {
+    hardpoint: "Hardpoint",
+    "search-and-destroy": "Search & Destroy",
+    overload: "Overload",
+  },
+};
+
 function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
   return {
     entity: "players",
@@ -52,7 +63,7 @@ function row(overrides: Partial<ReportRow> = {}): ReportRow {
 
 describe("buildExportMatrix", () => {
   it("adds a Mode column only for all-modes cohorts, with display labels", () => {
-    const all = buildExportMatrix(resolved(), [kdColumn], [row()], RUN);
+    const all = buildExportMatrix(resolved(), [kdColumn], [row()], RUN, MODES);
     expect(all.headers).toEqual(["Player", "Season", "Mode", "K/D"]);
     expect(all.rows[0]).toEqual(["Scump", "2018 WWII", "Hardpoint", 1.13]);
 
@@ -61,6 +72,7 @@ describe("buildExportMatrix", () => {
       [kdColumn],
       [row()],
       RUN,
+      MODES,
     );
     expect(one.headers).toEqual(["Player", "Season", "K/D"]);
   });
@@ -71,6 +83,7 @@ describe("buildExportMatrix", () => {
       [kdColumn],
       [row({ mode: null, cells: {} })],
       RUN,
+      MODES,
     );
     expect(m.rows[0]).toEqual(["Scump", "2018 WWII", "All", null]);
   });
@@ -79,14 +92,14 @@ describe("buildExportMatrix", () => {
     const many = Array.from({ length: MAX_EXPORT_ROWS + 1 }, (_, i) =>
       row({ playerId: i }),
     );
-    const m = buildExportMatrix(resolved(), [kdColumn], many, RUN);
+    const m = buildExportMatrix(resolved(), [kdColumn], many, RUN, MODES);
     expect(m.rows).toHaveLength(MAX_EXPORT_ROWS);
     expect(m.meta.truncated).toBe(true);
     expect(m.meta.rowCount).toBe(MAX_EXPORT_ROWS);
   });
 
   it("records empty filters as 'all' in the cohort meta", () => {
-    const m = buildExportMatrix(resolved(), [kdColumn], [row()], RUN);
+    const m = buildExportMatrix(resolved(), [kdColumn], [row()], RUN, MODES);
     expect(m.meta.cohort).toEqual({
       seasons: "all",
       mode: "all",
@@ -98,6 +111,7 @@ describe("buildExportMatrix", () => {
       [kdColumn],
       [row()],
       RUN,
+      MODES,
     );
     expect(picked.meta.cohort.seasons).toEqual([2018]);
     expect(picked.meta.cohort.players).toEqual(["scump"]);
