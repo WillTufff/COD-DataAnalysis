@@ -52,6 +52,8 @@ export const players = pgTable("players", {
   role: text("role"),
   liquipediaPage: text("liquipedia_page").unique(),
   isActive: boolean("is_active").default(true),
+  earnings: numeric("earnings"),
+  earningsByYear: jsonb("earnings_by_year"),
 });
 
 export const playerAliases = pgTable(
@@ -79,6 +81,9 @@ export const teams = pgTable("teams", {
   activeFrom: date("active_from"),
   activeTo: date("active_to"),
   liquipediaPage: text("liquipedia_page"),
+  earnings: numeric("earnings"),
+  createDate: date("create_date"),
+  disbandDate: date("disband_date"),
 });
 
 export const rosterStints = pgTable("roster_stints", {
@@ -120,6 +125,9 @@ export const events = pgTable("events", {
   isLan: boolean("is_lan"),
   prizePool: numeric("prize_pool"),
   liquipediaPage: text("liquipedia_page").unique(),
+  tierType: text("tier_type"),
+  publisherTier: text("publisher_tier"),
+  format: text("format"),
 });
 
 export const stages = pgTable("stages", {
@@ -145,6 +153,8 @@ export const series = pgTable("series", {
   playedAt: timestamp("played_at", { withTimezone: true }),
   roundLabel: text("round_label"),
   liquipediaMatchId: text("liquipedia_match_id").unique(),
+  dataSource: text("data_source", { enum: ["cwl_archive", "cito", "lpdb"] }).notNull(),
+  sourceUid: text("source_uid").unique(),
 });
 
 export const games = pgTable(
@@ -162,6 +172,8 @@ export const games = pgTable(
     winnerTeamId: integer("winner_team_id").references(() => teams.id),
     durationS: integer("duration_s"),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    sourceUid: text("source_uid").unique(),
+    dataSource: text("data_source", { enum: ["cwl_archive", "cito", "lpdb"] }).notNull(),
   },
   (t) => [unique().on(t.seriesId, t.ordinal)],
 );
@@ -189,6 +201,20 @@ export const gamePlayerStats = pgTable(
     defuses: smallint("defuses"),
     ticks: smallint("ticks"),
     extras: jsonb("extras"),
+    dataSource: text("data_source", { enum: ["cwl_archive", "cito", "lpdb"] }).notNull(),
+    contestedHillTime: smallint("contested_hill_time"),
+    firstDeaths: smallint("first_deaths"),
+    captures: smallint("captures"),
+    highestStreak: smallint("highest_streak"),
+    nonTradedKills: smallint("non_traded_kills"),
+    sndRounds: smallint("snd_rounds"),
+    clutch1v1: smallint("clutch_1v1"),
+    clutch1v2: smallint("clutch_1v2"),
+    clutch1v3: smallint("clutch_1v3"),
+    clutch1v4: smallint("clutch_1v4"),
+    ctlAttackRounds: smallint("ctl_attack_rounds"),
+    ctlDefenseRounds: smallint("ctl_defense_rounds"),
+    ctlZoneCaptures: smallint("ctl_zone_captures"),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.playerId] })],
 );
@@ -205,9 +231,25 @@ export const eventPlacements = pgTable(
     placementMin: smallint("placement_min"),
     placementMax: smallint("placement_max"),
     prize: numeric("prize"),
+    individualPrize: numeric("individual_prize"),
+    dataSource: text("data_source", { enum: ["cwl_archive", "cito", "lpdb"] }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.eventId, t.teamId] })],
 );
+
+export const transfers = pgTable("transfers", {
+  id: serial("id").primaryKey(),
+  playerId: integer("player_id")
+    .notNull()
+    .references(() => players.id),
+  transferDate: date("transfer_date").notNull(),
+  fromTeamId: integer("from_team_id").references(() => teams.id),
+  toTeamId: integer("to_team_id").references(() => teams.id),
+  role: text("role"),
+  platform: text("platform"),
+  reference: text("reference"),
+  dataSource: text("data_source", { enum: ["cwl_archive", "cito", "lpdb"] }).notNull(),
+});
 
 export const ingestRuns = pgTable("ingest_runs", {
   id: serial("id").primaryKey(),
