@@ -1,11 +1,13 @@
 {
-  "_comment": "Identity corrections for the CWL 2017-2019 archive (Activision cwl-data). Owner-editable. 'players' maps archive spellings to canonical handles (the archive title-cases stylized gamertags); 'teams' merges names the archive uses inconsistently for the same team. Archive spellings are preserved in player_aliases. 'orgs' is a different thing from 'teams': it groups distinct branded identities under one organisation so a rebrand keeps one rating curve. Membership is only asserted where the two brands' series windows do not overlap — a concurrent second roster is an academy team, not a rebrand.",
+  "_comment": "Identity corrections, owner-editable. 'players' maps source spellings to canonical handles (the CWL archive title-cases stylized gamertags); 'teams' merges names the CWL archive uses inconsistently for the same team. Source spellings are preserved in player_aliases. 'orgs' groups distinct branded identities under one organisation so a rebrand keeps one rating curve; membership is only asserted where the two brands' series windows do not overlap — a concurrent second roster is an academy team, not a rebrand. 'cito_teams' undoes Cito's retroactive branding: Cito stamps each franchise slot's CURRENT name on every historical match, so each slug maps to its dated brand history, keyed by CDL season year (a season starts in Nov/Dec of the prior calendar year). 'status: review' entries are provisional until the owner confirms them.",
   "players": {
     "Abezy": "aBeZy",
     "Formal": "FormaL",
     "Zoomaa": "ZooMaa",
     "Slasher": "SlasheR",
-    "TJHaly": "TJHaLy"
+    "TJHaly": "TJHaLy",
+    "Zooma": "ZooMaa",
+    "Zero": "Zer0"
   },
   "teams": {
     "Team EnVyUs": "Team Envy",
@@ -14,6 +16,533 @@
     "ExcelerateGG": "Excelerate"
   },
   "orgs": {
-    "eRa Eternity": ["eRa", "eRa Eternity"]
+    "eRa Eternity": [
+      "eRa",
+      "eRa Eternity"
+    ],
+    "Atlanta FaZe": [
+      "Atlanta FaZe",
+      "FaZe Vegas"
+    ],
+    "New York Subliners": [
+      "New York Subliners",
+      "Cloud9 New York"
+    ],
+    "Royal Ravens": [
+      "London Royal Ravens",
+      "Carolina Royal Ravens"
+    ],
+    "Minnesota RØKKR": [
+      "Minnesota RØKKR",
+      "G2 Minnesota"
+    ],
+    "Florida Mutineers": [
+      "Florida Mutineers",
+      "Miami Heretics"
+    ],
+    "Seattle Surge": [
+      "Seattle Surge",
+      "Vancouver Surge"
+    ],
+    "Toronto Ultra": [
+      "Toronto Ultra",
+      "Toronto KOI"
+    ],
+    "Los Angeles Guerrillas": [
+      "Los Angeles Guerrillas",
+      "Los Angeles Guerrillas M8",
+      "Paris Gentle Mates"
+    ],
+    "Vegas Legion": [
+      "Las Vegas Legion",
+      "Vegas Falcons",
+      "Riyadh Falcons"
+    ],
+    "OpTic Texas": [
+      "Chicago Huntsmen",
+      "OpTic Chicago",
+      "OpTic Texas"
+    ],
+    "Los Angeles Thieves": [
+      "OpTic Gaming LA",
+      "Los Angeles Thieves"
+    ]
+  },
+  "cito_slug_rosters": {
+    "g2-minnesota": {
+      "seasons": [
+        2020,
+        2020
+      ],
+      "_comment": "Cito files both Minnesota ROKKR and OpTic Gaming LA under this one slug in 2020 (OGLA has no slug of its own). A match side is assigned to whichever team's 2020 roster its stamped lineup matches; head-to-head fixtures between the two appear as g2-vs-g2 self-matches and stay quarantined.",
+      "teams": {
+        "OpTic Gaming LA": [
+          "Kenny",
+          "TJHaLy",
+          "SlasheR",
+          "Dashy",
+          "Drazah",
+          "JKap",
+          "Chino",
+          "Hollow",
+          "Goonjar"
+        ],
+        "Minnesota RØKKR": [
+          "SiLLY",
+          "Assault",
+          "Alexx",
+          "GodRx",
+          "Asim",
+          "Exceed",
+          "MayheM",
+          "Atura"
+        ]
+      }
+    }
+  },
+  "cito_teams": {
+    "faze-vegas": [
+      {
+        "name": "Atlanta FaZe",
+        "seasons": [
+          2020,
+          2025
+        ]
+      },
+      {
+        "name": "FaZe Vegas",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "cloud9-new-york": [
+      {
+        "name": "New York Subliners",
+        "seasons": [
+          2020,
+          2024
+        ]
+      },
+      {
+        "name": "Cloud9 New York",
+        "seasons": [
+          2025,
+          2026
+        ]
+      }
+    ],
+    "carolina-royal-ravens": [
+      {
+        "name": "London Royal Ravens",
+        "seasons": [
+          2020,
+          2023
+        ]
+      },
+      {
+        "name": "Carolina Royal Ravens",
+        "seasons": [
+          2024,
+          2026
+        ]
+      }
+    ],
+    "london-royal-ravens": [
+      {
+        "name": "London Royal Ravens",
+        "seasons": [
+          2020,
+          2023
+        ]
+      }
+    ],
+    "g2-minnesota": [
+      {
+        "name": "Minnesota RØKKR",
+        "seasons": [
+          2020,
+          2024
+        ]
+      },
+      {
+        "name": "G2 Minnesota",
+        "seasons": [
+          2025,
+          2026
+        ]
+      }
+    ],
+    "miami-heretics": [
+      {
+        "name": "Florida Mutineers",
+        "seasons": [
+          2020,
+          2023
+        ]
+      },
+      {
+        "name": "Miami Heretics",
+        "seasons": [
+          2024,
+          2026
+        ]
+      }
+    ],
+    "vancouver-surge": [
+      {
+        "name": "Seattle Surge",
+        "seasons": [
+          2020,
+          2024
+        ]
+      },
+      {
+        "name": "Vancouver Surge",
+        "seasons": [
+          2025,
+          2026
+        ]
+      }
+    ],
+    "toronto-koi": [
+      {
+        "name": "Toronto Ultra",
+        "seasons": [
+          2020,
+          2025
+        ]
+      },
+      {
+        "name": "Toronto KOI",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "paris-gentle-mates": [
+      {
+        "name": "Los Angeles Guerrillas",
+        "seasons": [
+          2020,
+          2024
+        ]
+      },
+      {
+        "name": "Los Angeles Guerrillas M8",
+        "seasons": [
+          2025,
+          2025
+        ]
+      },
+      {
+        "name": "Paris Gentle Mates",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "los-angeles-guerrillas-m8": [
+      {
+        "name": "Los Angeles Guerrillas M8",
+        "seasons": [
+          2025,
+          2025
+        ]
+      }
+    ],
+    "paris-legion": [
+      {
+        "name": "Paris Legion",
+        "seasons": [
+          2020,
+          2022
+        ]
+      }
+    ],
+    "riyadh-falcons": [
+      {
+        "name": "Las Vegas Legion",
+        "seasons": [
+          2023,
+          2024
+        ]
+      },
+      {
+        "name": "Vegas Falcons",
+        "seasons": [
+          2025,
+          2025
+        ]
+      },
+      {
+        "name": "Riyadh Falcons",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "las-vegas-falcons": [
+      {
+        "name": "Vegas Falcons",
+        "seasons": [
+          2025,
+          2025
+        ]
+      }
+    ],
+    "dallas-empire": [
+      {
+        "name": "Dallas Empire",
+        "seasons": [
+          2020,
+          2021
+        ]
+      }
+    ],
+    "optic-texas": [
+      {
+        "name": "OpTic Texas",
+        "seasons": [
+          2022,
+          2026
+        ]
+      }
+    ],
+    "chicago-huntsmen": [
+      {
+        "name": "Chicago Huntsmen",
+        "seasons": [
+          2020,
+          2020
+        ]
+      }
+    ],
+    "optic-chicago": [
+      {
+        "name": "OpTic Chicago",
+        "seasons": [
+          2021,
+          2021
+        ]
+      }
+    ],
+    "los-angeles-thieves": [
+      {
+        "name": "Los Angeles Thieves",
+        "seasons": [
+          2021,
+          2026
+        ]
+      }
+    ],
+    "boston-breach": [
+      {
+        "name": "Boston Breach",
+        "seasons": [
+          2022,
+          2026
+        ]
+      }
+    ],
+    "elevate": [
+      {
+        "name": "Elevate",
+        "seasons": [
+          2023,
+          2023
+        ]
+      }
+    ],
+    "team-war": [
+      {
+        "name": "Team WaR",
+        "seasons": [
+          2022,
+          2022
+        ]
+      }
+    ],
+    "toronto-ultra-academy-eu": [
+      {
+        "name": "Toronto Ultra Academy EU",
+        "seasons": [
+          2022,
+          2022
+        ]
+      }
+    ],
+    "toronto-ultra-academy-na": [
+      {
+        "name": "Toronto Ultra Academy NA",
+        "seasons": [
+          2022,
+          2022
+        ]
+      }
+    ],
+    "omit": [
+      {
+        "name": "OMiT",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "roc-esports": [
+      {
+        "name": "ROC Esports",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "huntsmen": [
+      {
+        "name": "Huntsmen",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ],
+    "still-orgless": [
+      {
+        "name": "Still Orgless",
+        "seasons": [
+          2026,
+          2026
+        ]
+      }
+    ]
+  },
+  "_comment_lpdb": "'lpdb_teams' maps LPDB opponent/team spellings to canonical team names. 'lpdb_events' maps LPDB tournament pagenames to local event names (season is derived from the LPDB game code); null marks a page reviewed and deliberately skipped — no local event models it. Challengers/King/EWC pages are skipped wholesale in code, not listed here.",
+  "lpdb_teams": {
+    "OpTic Gaming Los Angeles": "OpTic Gaming LA",
+    "ENVY": "Team Envy",
+    "Enigma6 Group": "Enigma6",
+    "Epsilon Esports": "Epsilon",
+    "Team Heretics": "Heretics",
+    "Team Reciprocity": "Reciprocity",
+    "UNILAD Esports": "Unilad",
+    "Gen.G Esports": "Gen.G",
+    "Midnight Esports": "Midnight",
+    "Ultra Academy EU": "Toronto Ultra Academy EU",
+    "Ultra Academy NA": "Toronto Ultra Academy NA",
+    "ERa Eternity EU": "eRa Eternity",
+    "Mindfreak.Black": "Mindfreak Black",
+    "Brash eSports": "Brash",
+    "EZG eSports": "EZG",
+    "HavoK eSports": "Havok",
+    "Mentality Esports": "Mentality",
+    "Zone": "ZoneGG",
+    "Nordic Esport": "Nordic",
+    "Animosity eSports": "Animosity",
+    "Celtic FC Esports": "Celtic FC",
+    "LGND Status": "LGND Status GG",
+    "Team Singularity": "Singularity",
+    "TrainHard eSport": "TrainHard",
+    "Vanity Alliance": "Vanity",
+    "Excelerate Gaming": "Excelerate",
+    "Giants Gaming": "Giants",
+    "Movistar Riders": "Riders",
+    "Overtime eSport": "Overtime",
+    "The Imperial": "Imperial"
+  },
+  "lpdb_events": {
+    "Call_of_Duty_League/Season_1/Regular_Season/Launch_Weekend": "CDL Launch Weekend",
+    "Call_of_Duty_League/Season_1/Regular_Season/Week_4": "CDL Week 4: LA",
+    "Call_of_Duty_League/Season_1/Regular_Season": null,
+    "Call_of_Duty_League/Season_1/All-Star_Weekend": null,
+    "Call_of_Duty_League/Season_2/All-Star_Weekend": null,
+    "Call_of_Duty_League/Season_1/Playoffs": "CDL Championship",
+    "Call_of_Duty_League/Season_2/Stage_1": "CDL Major 1 Qualifiers",
+    "Call_of_Duty_League/Season_2/Stage_1/Major": "CDL Major 1",
+    "Call_of_Duty_League/Season_2/Stage_2": "CDL Major 2 Qualifiers",
+    "Call_of_Duty_League/Season_2/Stage_2/Major": "CDL Major 2",
+    "Call_of_Duty_League/Season_2/Stage_3": "CDL Major 3 Qualifiers",
+    "Call_of_Duty_League/Season_2/Stage_3/Major": "CDL Major 3",
+    "Call_of_Duty_League/Season_2/Stage_4": "CDL Major 4 Qualifiers",
+    "Call_of_Duty_League/Season_2/Stage_4/Major": "CDL Major 4",
+    "Call_of_Duty_League/Season_2/Stage_5": "CDL Major 5 Qualifiers",
+    "Call_of_Duty_League/Season_2/Stage_5/Major": "CDL Major 5",
+    "Call_of_Duty_League/Season_2/Playoffs": "CDL Championship",
+    "Call_of_Duty_League/Season_2/Regular_Season": null,
+    "Call_of_Duty_League/Season_3/Stage_1": "CDL Major 1 Qualifiers",
+    "Call_of_Duty_League/Season_3/Stage_1/Major": "CDL Major 1",
+    "Call_of_Duty_League/Season_3/Stage_2": "CDL Major 2 Qualifiers",
+    "Call_of_Duty_League/Season_3/Stage_2/Major": "CDL Major 2",
+    "Call_of_Duty_League/Season_3/Stage_3": "CDL Major 3 Qualifiers",
+    "Call_of_Duty_League/Season_3/Stage_3/Major": "CDL Major 3",
+    "Call_of_Duty_League/Season_3/Stage_4": "CDL Major 4 Qualifiers",
+    "Call_of_Duty_League/Season_3/Stage_4/Major": "CDL Major 4",
+    "Call_of_Duty_League/Season_3/Playoffs": "CDL Championship",
+    "Call_of_Duty_League/Season_3/Regular_Season": null,
+    "Call_of_Duty_League/Season_4/Stage_1": "CDL Major 1 Qualifiers",
+    "Call_of_Duty_League/Season_4/Stage_1/Major": "CDL Major 1",
+    "Call_of_Duty_League/Season_4/Stage_2": "CDL Major 2 Qualifiers",
+    "Call_of_Duty_League/Season_4/Stage_2/Major": "CDL Major 2",
+    "Call_of_Duty_League/Season_4/Stage_3": "CDL Major 3 Qualifiers",
+    "Call_of_Duty_League/Season_4/Stage_3/Major": "CDL Major 3",
+    "Call_of_Duty_League/Season_4/Stage_4": "CDL Major 4 Qualifiers",
+    "Call_of_Duty_League/Season_4/Stage_4/Major": "CDL Major 4",
+    "Call_of_Duty_League/Season_4/Stage_5": "CDL Major 5 Qualifiers",
+    "Call_of_Duty_League/Season_4/Stage_5/Major": "CDL Major 5",
+    "Call_of_Duty_League/Season_4/Playoffs": "CDL Championship",
+    "Call_of_Duty_League/Season_4/Regular_Season": null,
+    "Call_of_Duty_League/Season_5/Stage_1": "CDL Major 1 Qualifiers",
+    "Call_of_Duty_League/Season_5/Stage_1/Major": "CDL Major 1",
+    "Call_of_Duty_League/Season_5/Stage_2": "CDL Major 2 Qualifiers",
+    "Call_of_Duty_League/Season_5/Stage_2/Major": "CDL Major 2",
+    "Call_of_Duty_League/Season_5/Stage_3": "CDL Major 3 Qualifiers",
+    "Call_of_Duty_League/Season_5/Stage_3/Major": "CDL Major 3",
+    "Call_of_Duty_League/Season_5/Stage_4": "CDL Major 4 Qualifiers",
+    "Call_of_Duty_League/Season_5/Stage_4/Major": "CDL Major 4",
+    "Call_of_Duty_League/Season_5/Playoffs": "CDL Championship",
+    "Call_of_Duty_League/Season_5/Regular_Season": null,
+    "Call_of_Duty_League/Season_6/Stage_1": "CDL Major 1 Qualifiers",
+    "Call_of_Duty_League/Season_6/Stage_1/Major": "CDL Major 1",
+    "Call_of_Duty_League/Season_6/Stage_2": "CDL Major 2 Qualifiers",
+    "Call_of_Duty_League/Season_6/Stage_2/Major": "CDL Major 2",
+    "Call_of_Duty_League/Season_6/Stage_3": "CDL Major 3 Qualifiers",
+    "Call_of_Duty_League/Season_6/Stage_3/Major": "CDL Major 3",
+    "Call_of_Duty_League/Season_6/Stage_4": "CDL Major 4 Qualifiers",
+    "Call_of_Duty_League/Season_6/Stage_4/Major": "CDL Major 4",
+    "Call_of_Duty_League/Season_6/Playoffs": "CDL Championship",
+    "Call_of_Duty_League/Season_6/Regular_Season": null,
+    "Call_of_Duty_League/Season_4/Stage_1/Major/Challengers_Qualifiers": null,
+    "Call_of_Duty_League/Season_6/Stage_1/Minor": "CDL Minor 1",
+    "Call_of_Duty_League/Season_6/Stage_2/Minor": "CDL Minor 2",
+    "Call_of_Duty_League/Season_7/Stage_1": "CDL Major 1 Qualifiers",
+    "Call_of_Duty_League/Season_7/Stage_1/Major": "CDL Major 1",
+    "Call_of_Duty_League/Season_7/Stage_2": "CDL Major 2 Qualifiers",
+    "Call_of_Duty_League/Season_7/Stage_2/Major": "CDL Major 2",
+    "Call_of_Duty_League/Season_7/Stage_3": "CDL Major 3 Qualifiers",
+    "Call_of_Duty_League/Season_7/Stage_3/Major": "CDL Major 3",
+    "Call_of_Duty_League/Season_7/Stage_4": "CDL Major 4 Qualifiers",
+    "Call_of_Duty_League/Season_7/Stage_4/Major": "CDL Major 4",
+    "Call_of_Duty_League/Season_7/Stage_3/Minor": "CDL Minor 1",
+    "Call_of_Duty_League/Season_7/Stage_4/Minor": "CDL Minor 2",
+    "Call_of_Duty_League/Season_7/Playoffs": null,
+    "Call_of_Duty_World_League/2017/Championship/Last_Chance/Asia-Pacific": null,
+    "Call_of_Duty_World_League/2017/Championship/Last_Chance/Europe": null,
+    "Call_of_Duty_World_League/2017/Championship/Last_Chance/North_America": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Relegation": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Relegation/Qualifier/Asia-Pacific": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Relegation/Qualifier/EU": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Relegation/Qualifier/NA": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Stage_1": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Stage_2": null,
+    "Call_of_Duty_World_League/2018/Championship/Last_Chance_Qualifier": null,
+    "Call_of_Duty_World_League/2018/Pro_League/Relegation/Asia_Pacific": null,
+    "Call_of_Duty_World_League/2018/Pro_League/Relegation/Europe": null,
+    "Call_of_Duty_World_League/2018/Pro_League/Relegation/North_America": null,
+    "Call_of_Duty_World_League/2019/Pro_League/Play-In": null
   }
 }

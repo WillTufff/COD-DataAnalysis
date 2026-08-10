@@ -1,8 +1,12 @@
-"""Player and team identity normalization for the CWL archive.
+"""Player and team identity normalization across data sources.
 
-Both archive tiers name players by gamertag, and the spellings drift between
-events (Formal/FormaL, Abezy/aBeZy). The CSVs and the event JSONs have to land
-on the same handle or they will not join, so both importers use this.
+Both CWL archive tiers name players by gamertag, and the spellings drift
+between events (Formal/FormaL, Abezy/aBeZy). The CSVs and the event JSONs have
+to land on the same handle or they will not join, so both importers use this.
+
+Cito names teams by franchise-slot slug stamped with the slot's CURRENT brand
+on every historical match ("FaZe Vegas" winning the 2020 Championship), so its
+importer resolves (slug, season year) through the dated cito_teams map instead.
 """
 
 from __future__ import annotations
@@ -10,8 +14,9 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
+from typing import Any
 
 
 @dataclass
@@ -19,6 +24,15 @@ class Aliases:
     players: dict[str, str]  # archive spelling -> canonical handle
     teams: dict[str, str]  # archive name -> canonical team name
     orgs: dict[str, list[str]]  # org name -> its team names, earliest brand first
+    # Cito slug -> dated brand history: [{name, seasons: [first, last], status?}]
+    cito_teams: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Cito slug -> roster-split spec for seasons where one slug hides two teams
+    cito_slug_rosters: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # LPDB opponentname -> canonical team name where spellings differ
+    lpdb_teams: dict[str, str] = field(default_factory=dict)
+    # LPDB tournament pagename -> local event name (season comes from the game
+    # code); null marks a page deliberately out of scope
+    lpdb_events: dict[str, str | None] = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> Aliases:
@@ -27,7 +41,43 @@ class Aliases:
             players=dict(raw["players"]),
             teams=dict(raw["teams"]),
             orgs={k: list(v) for k, v in raw.get("orgs", {}).items()},
+            cito_teams={k: list(v) for k, v in raw.get("cito_teams", {}).items()},
+            cito_slug_rosters=dict(raw.get("cito_slug_rosters", {})),
+            lpdb_teams=dict(raw.get("lpdb_teams", {})),
+            lpdb_events=dict(raw.get("lpdb_events", {})),
         )
+
+    def cito_split(self, slug: str, season_year: int) -> dict[str, set[str]] | None:
+        """Roster lists (lowercased handles) when a slug hides two teams that season."""
+        spec = self.cito_slug_rosters.get(slug)
+        if not spec:
+            return None
+        first, last = spec["seasons"]
+        if not first <= season_year <= last:
+            return None
+        return {team: {h.lower() for h in handles} for team, handles in spec["teams"].items()}
+
+    def cito_team(self, slug: str, season_year: int) -> str | None:
+        """The brand a Cito slug wore in a given season, or None if unmapped.
+
+        A slug whose brand history doesn't cover the season falls back to its
+        nearest dated entry — a mapped slug never silently becomes a new team
+        because one match strays a season outside its window.
+        """
+        history = (self.cito_teams or {}).get(slug)
+        if not history:
+            return None
+        for entry in history:
+            first, last = entry["seasons"]
+            if first <= season_year <= last:
+                return str(entry["name"])
+
+        def distance(entry: dict[str, Any]) -> int:
+            first, last = entry["seasons"]
+            return int(min(abs(season_year - first), abs(season_year - last)))
+
+        nearest = min(history, key=distance)
+        return str(nearest["name"])
 
     def team(self, name: str) -> str:
         return self.teams.get(name, name)

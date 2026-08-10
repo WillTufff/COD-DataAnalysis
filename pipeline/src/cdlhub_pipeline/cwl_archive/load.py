@@ -215,18 +215,18 @@ class Loader:
                 )
 
             played_at = min(gk.ended_at for gk, _ in game_rows)
-            lp_key = f"{SOURCE}:{ev.slug}:{series_key}"
+            uid = f"{SOURCE}:{ev.slug}:{series_key}"
             row = self.conn.execute(
                 """
                 INSERT INTO series (event_id, team1_id, team2_id, team1_score, team2_score,
-                                    played_at, round_label, liquipedia_match_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (liquipedia_match_id) DO UPDATE SET
+                                    played_at, round_label, source_uid, data_source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'cwl_archive')
+                ON CONFLICT (source_uid) DO UPDATE SET
                   team1_score = EXCLUDED.team1_score, team2_score = EXCLUDED.team2_score,
                   played_at = EXCLUDED.played_at
                 RETURNING id
                 """,
-                (event_id, t1_id, t2_id, wins[t1], wins[t2], played_at, series_key, lp_key),
+                (event_id, t1_id, t2_id, wins[t1], wins[t2], played_at, series_key, uid),
             ).fetchone()
             assert row is not None
             series_id = cast(int, row[0])
@@ -240,8 +240,8 @@ class Loader:
                     """
                     INSERT INTO games (series_id, ordinal, map_id, mode_id, team1_score,
                                        team2_score, winner_team_id, duration_s, ended_at,
-                                       source_uid)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                       source_uid, data_source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cwl_archive')
                     ON CONFLICT (series_id, ordinal) DO UPDATE SET
                       map_id = EXCLUDED.map_id, mode_id = EXCLUDED.mode_id,
                       team1_score = EXCLUDED.team1_score, team2_score = EXCLUDED.team2_score,
@@ -274,8 +274,8 @@ class Loader:
                             """
                             INSERT INTO game_player_stats
                               (game_id, player_id, team_id, kills, deaths, assists, damage,
-                               hill_time, first_bloods, plants, defuses, extras)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                               hill_time, first_bloods, plants, defuses, extras, data_source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cwl_archive')
                             ON CONFLICT (game_id, player_id) DO UPDATE SET
                               team_id = EXCLUDED.team_id, kills = EXCLUDED.kills,
                               deaths = EXCLUDED.deaths, assists = EXCLUDED.assists,

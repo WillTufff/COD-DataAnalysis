@@ -4,7 +4,11 @@ Hard checks fail the run (exit 1). The coverage report is informational and
 feeds /methodology — honesty about what each season's data does and doesn't
 cover is part of the product.
 
-    uv run python -m cdlhub_pipeline.quality [--dsn DSN]
+    uv run python -m cdlhub_pipeline.quality [--dsn DSN] [--reports DIR]
+
+Alongside the printed output, each run writes `report.json` (the whole result)
+and appends one line to `history.ndjson` (per-check row counts) under the
+reports directory, so a run's verdict outlives its stdout.
 """
 
 from __future__ import annotations
@@ -15,11 +19,21 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
 
 _DEFAULT_DSN = "postgres://cdlhub:cdlhub@localhost:54329/cdlhub"
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REPORTS_DIR = REPO_ROOT / "pipeline" / "snapshots" / "quality"
+REPORT_FILENAME = "report.json"
+HISTORY_FILENAME = "history.ndjson"
+# Enough runs to see a check start failing and when; the file is one short line
+# per run, so this is a display bound rather than a storage one.
+HISTORY_LIMIT = 200
 
 # The kill feed reconciles a player-map when its box-score deaths equal its
 # NORMAL feed deaths. WWII lands at exactly 100% under this rule (see
@@ -56,15 +70,22 @@ HARD_CHECKS: tuple[Check, ...] = (
         """,
     ),
     Check(
+        # Enforced only where the map record is complete (decided-game count
+        # equals the declared series score total). Score-only series, partial
+        # map coverage, and winner-nulled inconsistent map sets are a designed
+        # state — counted by the series_with_partial_game_coverage soft check,
+        # not an error here.
         "series_score_matches_game_wins",
         """
         SELECT s.id FROM series s
         JOIN LATERAL (
-          SELECT count(*) FILTER (WHERE g.winner_team_id = s.team1_id) AS w1,
+          SELECT count(*) FILTER (WHERE g.winner_team_id IS NOT NULL) AS n,
+                 count(*) FILTER (WHERE g.winner_team_id = s.team1_id) AS w1,
                  count(*) FILTER (WHERE g.winner_team_id = s.team2_id) AS w2
           FROM games g WHERE g.series_id = s.id
         ) gw ON true
         WHERE s.team1_score IS NOT NULL
+          AND gw.n = s.team1_score + s.team2_score
           AND (s.team1_score <> gw.w1 OR s.team2_score <> gw.w2)
         """,
     ),
@@ -78,8 +99,8 @@ HARD_CHECKS: tuple[Check, ...] = (
     Check(
         "duplicate_series_key",
         """
-        SELECT liquipedia_match_id FROM series WHERE liquipedia_match_id IS NOT NULL
-        GROUP BY liquipedia_match_id HAVING count(*) > 1
+        SELECT source_uid FROM series WHERE source_uid IS NOT NULL
+        GROUP BY source_uid HAVING count(*) > 1
         """,
     ),
     Check(
@@ -119,10 +140,24 @@ SOFT_CHECKS: tuple[Check, ...] = (
         "undecided_series",
         "SELECT id FROM series WHERE team1_score IS NOT NULL AND team1_score = team2_score",
     ),
+    # Series whose game rows don't cover every declared map: score-only records
+    # (surviving codwiki entries have no stats snapshot) and matches whose
+    # provider payload misses maps. Visible here, excluded from the hard
+    # score-vs-wins gate above.
+    Check(
+        "series_with_partial_game_coverage",
+        """
+        SELECT s.id FROM series s
+        LEFT JOIN games g ON g.series_id = s.id AND g.winner_team_id IS NOT NULL
+        WHERE s.team1_score IS NOT NULL
+        GROUP BY s.id
+        HAVING count(g.id) <> s.team1_score + s.team2_score
+        """,
+    ),
 )
 
 COVERAGE_SQL = """
-SELECT se.year, t.short_name,
+SELECT se.year, t.short_name, s.data_source,
        count(DISTINCT e.id)  AS events,
        count(DISTINCT s.id)  AS series,
        count(DISTINCT g.id)  AS games,
@@ -138,8 +173,8 @@ JOIN events e   ON e.season_id = se.id
 JOIN series s   ON s.event_id = e.id
 JOIN games g    ON g.series_id = s.id
 LEFT JOIN game_player_stats gps ON gps.game_id = g.id
-GROUP BY se.year, t.short_name
-ORDER BY se.year
+GROUP BY se.year, t.short_name, s.data_source
+ORDER BY se.year, s.data_source
 """
 
 
@@ -240,8 +275,45 @@ def store_reconciliation(
     )
 
 
-def run(dsn: str) -> int:
+def write_report(reports: Path, result: dict[str, Any]) -> None:
+    """Save the run's result and append its per-check counts to the history.
+
+    Best effort: a gate that passed must not turn into a failure because its
+    report could not be written.
+    """
+    try:
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / REPORT_FILENAME).write_text(
+            json.dumps(result, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"could not write {REPORT_FILENAME}: {exc}", file=sys.stderr)
+        return
+
+    entry = {
+        "at": result["generated_at"],
+        "passed": result["passed"],
+        "hard": {check["name"]: check["rows"] for check in result["hard_checks"]},
+        "soft": {check["name"]: check["rows"] for check in result["soft_checks"]},
+    }
+    path = reports / HISTORY_FILENAME
+    try:
+        kept = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        kept = [line for line in kept if line.strip()][-(HISTORY_LIMIT - 1) :]
+        kept.append(json.dumps(entry, default=str))
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"could not write {HISTORY_FILENAME}: {exc}", file=sys.stderr)
+
+
+def run(dsn: str, reports: Path = REPORTS_DIR) -> int:
+    started = datetime.now(UTC)
     failures = 0
+    result: dict[str, Any] = {
+        "generated_at": started.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "hard_checks": [],
+        "soft_checks": [],
+    }
     with psycopg.connect(dsn) as conn:
         print("== hard checks ==")
         for check in HARD_CHECKS:
@@ -249,12 +321,21 @@ def run(dsn: str) -> int:
             status = "PASS" if not rows else f"FAIL ({len(rows)} rows, e.g. {rows[:3]})"
             if rows:
                 failures += 1
+            result["hard_checks"].append(
+                {
+                    "name": check.name,
+                    "passed": not rows,
+                    "rows": len(rows),
+                    "examples": [str(row) for row in rows[:3]],
+                }
+            )
             print(f"  {check.name:<35} {status}")
 
         print("== soft checks (warnings) ==")
         for check in SOFT_CHECKS:
             rows = conn.execute(check.sql).fetchall()
             status = "ok" if not rows else f"WARN ({len(rows)} rows)"
+            result["soft_checks"].append({"name": check.name, "rows": len(rows)})
             print(f"  {check.name:<35} {status}")
 
         print("== coverage by season ==")
@@ -263,13 +344,24 @@ def run(dsn: str) -> int:
         report = [dict(zip(cols, r, strict=True)) for r in cov.fetchall()]
         for row in report:
             print("  " + json.dumps(row, default=str))
+        result["coverage"] = report
 
         print("== kill-feed reconciliation ==")
         payload = reconciliation_payload(conn)
         for title_row in payload["by_title"]:
             print("  " + json.dumps(title_row, default=str))
+        result["reconciliation"] = {
+            "overall": payload["overall"],
+            "by_title": payload["by_title"],
+        }
         store_reconciliation(conn, payload)
         conn.commit()
+
+    result["passed"] = failures == 0
+    result["failures"] = failures
+    result["duration_s"] = round((datetime.now(UTC) - started).total_seconds(), 1)
+    write_report(reports, result)
+
     if failures:
         print(f"{failures} hard check(s) failed")
         return 1
@@ -280,8 +372,9 @@ def run(dsn: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dsn", default=os.environ.get("DATABASE_URL", _DEFAULT_DSN))
+    ap.add_argument("--reports", type=Path, default=REPORTS_DIR)
     args = ap.parse_args(argv)
-    return run(args.dsn)
+    return run(args.dsn, args.reports)
 
 
 if __name__ == "__main__":
