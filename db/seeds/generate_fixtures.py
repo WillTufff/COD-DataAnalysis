@@ -149,10 +149,10 @@ def main() -> None:
                 f"WITH stg AS (SELECT s.id, s.event_id FROM stages s"
                 f" JOIN events e ON e.id = s.event_id"
                 f" WHERE e.name = {sql_str(ev_name)} AND s.name = {sql_str(stage)})",
-                f"INSERT INTO series (stage_id, event_id, team1_id, team2_id, team1_score, team2_score, best_of, played_at, round_label, liquipedia_match_id)",
+                f"INSERT INTO series (stage_id, event_id, team1_id, team2_id, team1_score, team2_score, best_of, played_at, round_label, liquipedia_match_id, data_source)",
                 f"SELECT stg.id, stg.event_id, t1.id, t2.id, {s1}, {s2}, 5, "
                 f"{sql_str(start)}::date + {s_i // 3} + time '12:00' + interval '{(s_i % 3) * 2} hours', "
-                f"{sql_str(round_label)}, {sql_str('dev-' + sid)}",
+                f"{sql_str(round_label)}, {sql_str('dev-' + sid)}, 'cwl_archive'",
                 f"FROM stg, teams t1, teams t2 WHERE t1.name = {sql_str(t1)} AND t2.name = {sql_str(t2)};",
                 "",
             ]
@@ -164,8 +164,8 @@ def main() -> None:
                 g1, g2 = game_score(mode, t1_wins_game)
                 game_winner = t1 if t1_wins_game else t2
                 out += [
-                    f"INSERT INTO games (series_id, ordinal, map_id, mode_id, team1_score, team2_score, winner_team_id)",
-                    f"SELECT s.id, {g_i + 1}, m.id, gm.id, {g1}, {g2}, w.id",
+                    f"INSERT INTO games (series_id, ordinal, map_id, mode_id, team1_score, team2_score, winner_team_id, data_source)",
+                    f"SELECT s.id, {g_i + 1}, m.id, gm.id, {g1}, {g2}, w.id, 'cwl_archive'",
                     f"FROM series s, maps m JOIN titles ti ON ti.id = m.title_id, game_modes gm, teams w",
                     f"WHERE s.liquipedia_match_id = {sql_str('dev-' + sid)}",
                     f"  AND m.name = {sql_str(map_name)} AND ti.short_name = 'BO6'",
@@ -178,8 +178,8 @@ def main() -> None:
                         cols = ", ".join(k for k in st)
                         vals = ", ".join("NULL" if v is None else str(v) for v in st.values())
                         out += [
-                            f"INSERT INTO game_player_stats (game_id, player_id, team_id, {cols})",
-                            f"SELECT g.id, p.id, t.id, {vals}",
+                            f"INSERT INTO game_player_stats (game_id, player_id, team_id, data_source, {cols})",
+                            f"SELECT g.id, p.id, t.id, 'cwl_archive', {vals}",
                             f"FROM games g JOIN series s ON s.id = g.series_id, players p, teams t",
                             f"WHERE s.liquipedia_match_id = {sql_str('dev-' + sid)} AND g.ordinal = {g_i + 1}",
                             f"  AND p.handle = {sql_str(handle)} AND t.name = {sql_str(team)};",
@@ -189,8 +189,8 @@ def main() -> None:
         for team, (pmin, pmax) in placements.items():
             prize = {1: 200000, 2: 120000, 3: 100000, 4: 80000}[pmin]
             out += [
-                f"INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize)",
-                f"SELECT e.id, t.id, {pmin}, {pmax}, {prize} FROM events e, teams t",
+                f"INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)",
+                f"SELECT e.id, t.id, {pmin}, {pmax}, {prize}, 'cwl_archive' FROM events e, teams t",
                 f"WHERE e.name = {sql_str(ev_name)} AND t.name = {sql_str(team)};",
             ]
         out.append("")
