@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SERIES_STEPS } from "@/lib/eras";
 
 export type StyleAxisMeta = {
   index: number;
@@ -25,8 +26,13 @@ export type StyleSeasonPoint = {
 // The season marks are joined so the eye reads movement, which is the part a
 // label could never have shown.
 // The validated dark categorical palette, in its fixed order — one step per
-// season, never cycled beyond what this archive holds.
-const SEASON_INK = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
+// season the player played. A career longer than the palette wraps, and the
+// legend below names the wrap rather than leaving two marks the same colour
+// with nothing said about it.
+const SEASON_INK = Array.from(
+  { length: SERIES_STEPS },
+  (_, i) => `var(--series-${i + 1})`,
+);
 
 export function StyleAxes({
   axes,
@@ -189,6 +195,13 @@ export function StyleAxes({
           </span>
         ))}
       </div>
+      {seasons.length > SEASON_INK.length && (
+        <p className="mt-1 font-mono text-[10px] text-ink-muted">
+          {seasons.length} seasons over {SEASON_INK.length} palette steps — the
+          last {seasons.length - SEASON_INK.length} repeat a colour; read the
+          marks left to right in time.
+        </p>
+      )}
     </figure>
   );
 }

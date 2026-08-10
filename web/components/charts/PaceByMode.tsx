@@ -2,30 +2,30 @@
 
 import { useState } from "react";
 import type { PaceCell } from "@/lib/analytics";
+import { type SeasonEra, seasonInk, seasonTag } from "@/lib/eras";
+import { EraLegend } from "./EraLegend";
 
 // League engagement pace, kills per player-seat per 10 minutes, split by
 // mode and title. This is the era-adjustment argument drawn as a chart: the
-// same mode runs at visibly different speeds in different games, and half
-// the modes only exist in one game at all.
+// same mode runs at visibly different speeds in different games.
+//
+// A cell needs map time, which only the seasons whose source records a duration
+// have. The chart therefore covers fewer seasons than the archive, and says
+// which in its caption rather than presenting its span as the whole of it.
 //
 // Era colors are fixed by season (validated categorical palette, dark steps)
 // and never reassigned — color follows the era, not the row.
-const ERA_COLOR: Record<number, string> = {
-  2017: "var(--series-1)",
-  2018: "var(--series-2)",
-  2019: "var(--series-3)",
-};
-const ERA_LABEL: Record<number, string> = {
-  2017: "IW ’17",
-  2018: "WWII ’18",
-  2019: "BO4 ’19",
-};
-
 const BAR = 14;
 const BAR_GAP = 2; // 2px surface gap between adjacent bars
 const ROW_GAP = 18;
 
-export function PaceByMode({ cells }: { cells: PaceCell[] }) {
+export function PaceByMode({
+  cells,
+  seasons,
+}: {
+  cells: PaceCell[];
+  seasons: SeasonEra[];
+}) {
   const [hover, setHover] = useState<PaceCell | null>(null);
 
   const modes = [...new Set(cells.map((c) => c.mode))];
@@ -37,6 +37,11 @@ export function PaceByMode({ cells }: { cells: PaceCell[] }) {
   });
   const years = [...new Set(cells.map((c) => c.year))].sort();
   const vMax = Math.ceil(Math.max(...cells.map((c) => c.killsPer10)) / 5) * 5;
+  // Modes with a single bar carry no cross-era comparison of their own, which
+  // is the caption's point. Counted here rather than named in the prose.
+  const oneTitleModes = modes.filter(
+    (m) => cells.filter((c) => c.mode === m).length === 1,
+  );
 
   const M = { top: 6, right: 40, bottom: 20, left: 118 };
   const W = 560;
@@ -56,17 +61,7 @@ export function PaceByMode({ cells }: { cells: PaceCell[] }) {
 
   return (
     <figure>
-      <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-secondary">
-        {years.map((y) => (
-          <span key={y} className="flex items-center gap-1.5">
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ background: ERA_COLOR[y] }}
-            />
-            {ERA_LABEL[y]}
-          </span>
-        ))}
-      </div>
+      <EraLegend seasons={seasons} shownYears={years} />
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
@@ -146,7 +141,7 @@ export function PaceByMode({ cells }: { cells: PaceCell[] }) {
                     {/* rounded data-end only — flat edge stays on the baseline */}
                     <path
                       d={`M${x(0)},${yBar} h${w - 4} a4,4 0 0 1 4,4 v${BAR - 8} a4,4 0 0 1 -4,4 h${4 - w} Z`}
-                      fill={ERA_COLOR[c.year]}
+                      fill={seasonInk(seasons, c.year)}
                       opacity={hover && hover !== c ? 0.45 : 1}
                     />
                     <text
@@ -168,14 +163,29 @@ export function PaceByMode({ cells }: { cells: PaceCell[] }) {
       <figcaption className="mt-1 text-xs text-ink-muted">
         {hover ? (
           <span className="text-ink-secondary">
-            {hover.mode}, {ERA_LABEL[hover.year]}: {hover.killsPer10.toFixed(2)}{" "}
-            kills per seat-10min over {hover.maps.toLocaleString()} maps.
+            {hover.mode}, {seasonTag(seasons, hover.year)}:{" "}
+            {hover.killsPer10.toFixed(2)} kills per seat-10min over{" "}
+            {hover.maps.toLocaleString()} maps.
           </span>
         ) : (
           <>
-            Kills per player per 10 minutes of map time. Uplink, CTF, and
-            Control each existed in only one title, which is why cross-era
-            comparison uses cohort scoring.
+            Kills per player per 10 minutes of map time.{" "}
+            {oneTitleModes.length > 0 && (
+              <>
+                {oneTitleModes.join(", ")}{" "}
+                {oneTitleModes.length === 1 ? "appears" : "each appear"} in one
+                season only, which is why cross-era comparison uses cohort
+                scoring.{" "}
+              </>
+            )}
+            {years.length < seasons.length && (
+              <>
+                Map duration is recorded for {years.length} of the archive&rsquo;s{" "}
+                {seasons.length} seasons — {seasonTag(seasons, years[0])} to{" "}
+                {seasonTag(seasons, years[years.length - 1])} — so the rest have no
+                bar here rather than a bar of zero.
+              </>
+            )}
           </>
         )}
       </figcaption>

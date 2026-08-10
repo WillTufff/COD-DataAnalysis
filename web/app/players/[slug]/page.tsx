@@ -21,6 +21,7 @@ import { RatingIntervals, overlaps } from "@/components/charts/RatingInterval";
 import { PctlBar } from "@/components/PctlBar";
 import { Tabs } from "@/components/Tabs";
 import {
+  formatLeagueSpans,
   getAllPlayerSlugs,
   getMetricCatalog,
   getPlayerAdjusted,
@@ -29,6 +30,7 @@ import {
   getPlayerMetrics,
   getPlayerRapm,
   getPlayerRatingSeasons,
+  getPlayerSpans,
   getPlayerStints,
   getPlayerStyle,
   getPlayerStyleArtifact,
@@ -42,8 +44,10 @@ import {
   type PlayerStyle,
   type PlayerStylePoint,
   type SeasonAdjusted,
+  getModeCatalog,
 } from "@/lib/analytics";
 import { kindLabel } from "@/lib/insightKinds";
+import { type ModeCatalog, modeLabel, modeRank } from "@/lib/modes";
 
 // The archive is frozen and the models only change on a rerun, so this page is
 // prerendered and revalidated on a timer rather than queried per request.
@@ -76,17 +80,8 @@ function zToPctl(z: number): number {
   return Math.max(0, Math.min(1, p));
 }
 
-const MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
-};
-
-// Card order within a season: overall first, then respawn modes; S&D is pulled
-// out of this grid into its own combined panel.
-const MODE_ORDER = ["all", "hardpoint", "control", "capture-the-flag", "uplink"];
+// Card order within a season is `game_modes` order, overall first; S&D is
+// pulled out of this grid into its own combined panel.
 
 // Stats sort by position here (then label); the first HEADLINE_STATS present on
 // a card stay visible, the tail collapses behind the "all n metrics" toggle.
@@ -123,6 +118,33 @@ function metricRank(key: string): number {
   return i === -1 ? METRIC_PRIORITY.length : i;
 }
 
+// `kills_p10` and `kills_pm` are one quantity normalized two ways. Per map is
+// published everywhere and per 10 minutes only where map time is recorded, so a
+// slice inside the archive carries both and would otherwise spend two of its six
+// slots saying the same thing. Keys with no twin — `ctf_caps_pm`, `suicides_pm`
+// — never match a stem here and are left alone.
+const NORMALIZED = /^(.+)_(p10|pm)$/;
+
+function normalizedPair(key: string): { stem: string; form: "p10" | "pm" } | null {
+  const m = NORMALIZED.exec(key);
+  return m ? { stem: m[1], form: m[2] as "p10" | "pm" } : null;
+}
+
+/** The per-map keys to drop because their per-10-minute twin is also present. */
+function redundantPerMap(keys: Iterable<string>): Set<string> {
+  const timed = new Set<string>();
+  const perMap = new Map<string, string>();
+  for (const key of keys) {
+    const pair = normalizedPair(key);
+    if (!pair) continue;
+    if (pair.form === "p10") timed.add(pair.stem);
+    else perMap.set(pair.stem, key);
+  }
+  const drop = new Set<string>();
+  for (const [stem, key] of perMap) if (timed.has(stem)) drop.add(key);
+  return drop;
+}
+
 const HEADLINE_STATS = 6;
 
 type CardStat = ProfileStat & { key: string };
@@ -150,6 +172,7 @@ function formatMetric(value: number, unit: string): string {
 function buildMetricCards(
   values: PlayerMetricValue[],
   catalog: MetricCatalog | null,
+  modes: ModeCatalog,
 ): MetricCard[] {
   if (!catalog) return [];
   // Phase B (kill-feed) metrics get their own dedicated cards below, so keep
@@ -176,7 +199,7 @@ function buildMetricCards(
         key,
         year: v.year,
         mode,
-        heading: v.mode ? (MODE_LABELS[v.mode] ?? v.mode) : "All modes",
+        heading: modeLabel(modes, v.mode),
         sample: "",
         qualified: v.qualified,
         stats: [],
@@ -199,6 +222,10 @@ function buildMetricCards(
     });
   }
   return [...cards.values()]
+    .map((c) => {
+      const drop = redundantPerMap(c.stats.map((s) => s.key));
+      return { ...c, stats: c.stats.filter((s) => !drop.has(s.key)) };
+    })
     .filter((c) => c.stats.length >= 2)
     .map((c) => ({
       ...c,
@@ -484,14 +511,6 @@ function seasonProfile(a: SeasonAdjusted): ProfileStat[] {
 
 // ---------- Career fingerprint ----------
 
-const FINGERPRINT_MODES = [
-  "all",
-  "hardpoint",
-  "search-and-destroy",
-  "control",
-  "capture-the-flag",
-  "uplink",
-];
 const FINGERPRINT_ROWS = 6;
 // A mode the player only touched in one season has no drift to show, so it
 // earns fewer rows — enough to characterise it, not a column of dashes.
@@ -514,6 +533,7 @@ const MODE_SIGNATURE: Record<string, string[]> = {
 
 type StyleView = {
   axes: StyleAxisMeta[];
+  era: string;
   points: StyleSeasonPoint[];
   cohortN: number;
   bestSilhouette: number;
@@ -530,8 +550,17 @@ function buildStyleView(
   points: PlayerStylePoint[],
 ): StyleView | null {
   if (!artifact || points.length === 0) return null;
-  const published = artifact.bases.find((b) => b.basis === artifact.published_basis);
-  if (!published || published.taxonomy) return null;
+  // Style is fitted per era and the axes are not comparable across the seam, so
+  // a career that spans it is drawn on the axes of its most recent era.
+  const eras = artifact.bases
+    .filter((b) => artifact.published_bases.includes(b.basis))
+    .map((b) => ({ basis: b, points: points.filter((p) => b.years.includes(p.year)) }))
+    .filter((e) => e.points.length > 0)
+    .sort((a, b) => Math.max(...b.basis.years) - Math.max(...a.basis.years));
+  const latest = eras[0];
+  if (!latest) return null;
+  const published = latest.basis;
+  if (published.taxonomy) return null;
   const scored = published.clustering.filter(
     (c) => c.silhouette !== null && c.silhouette_null !== null,
   );
@@ -541,7 +570,8 @@ function buildStyleView(
   );
   return {
     axes: published.axes,
-    points: points.map((p) => ({
+    era: published.era,
+    points: latest.points.map((p) => ({
       year: p.year,
       title: p.title,
       axis: p.axis,
@@ -564,13 +594,14 @@ type FingerprintData = {
 function buildFingerprint(
   values: PlayerMetricValue[],
   catalog: MetricCatalog | null,
+  modes: ModeCatalog,
 ): FingerprintData | null {
   if (!catalog) return null;
   const entries = new Map(catalog.metrics.map((m) => [m.key, m]));
   const { years, titleOf, bySlice } = sliceMetrics(values);
   if (years.length === 0) return null;
   const groups: FingerprintGroup[] = [];
-  for (const mode of FINGERPRINT_MODES) {
+  for (const mode of ["all", ...modes.order]) {
     // How many seasons each candidate metric covers, so a row that would be
     // mostly dashes doesn't take a slot from one that shows the whole career.
     const coverage = new Map<string, number>();
@@ -581,6 +612,18 @@ function buildFingerprint(
         if (FEED_CATEGORIES.has(entry.category) || ROUND_CARD_KEYS.has(k)) continue;
         coverage.set(k, (coverage.get(k) ?? 0) + 1);
       }
+    }
+    // Across a career the twin to keep is the one that reaches more seasons: a
+    // career inside the archive keeps per 10 minutes, one that crosses into the
+    // CDL years keeps per map, and a tie keeps per 10 minutes as the finer read.
+    for (const [stem, perMapKey] of [...coverage.keys()]
+      .map((k) => [normalizedPair(k), k] as const)
+      .filter(([p]) => p?.form === "pm")
+      .map(([p, k]) => [p!.stem, k] as const)) {
+      const timedKey = `${stem}_p10`;
+      const timed = coverage.get(timedKey);
+      if (timed === undefined) continue;
+      coverage.delete(timed >= (coverage.get(perMapKey) ?? 0) ? perMapKey : timedKey);
     }
     const span = Math.max(0, ...coverage.values());
     const signature = MODE_SIGNATURE[mode] ?? [];
@@ -600,7 +643,7 @@ function buildFingerprint(
       .slice(0, span > 1 ? FINGERPRINT_ROWS : FINGERPRINT_ROWS_SINGLE);
     if (keys.length === 0) continue;
     groups.push({
-      label: mode === "all" ? "All modes" : (MODE_LABELS[mode] ?? mode),
+      label: modeLabel(modes, mode),
       rows: keys.map((k) => {
         const entry = entries.get(k)!;
         return {
@@ -647,6 +690,7 @@ function buildSeasonViews(
   roundProfiles: RoundProfile[],
   streakRows: StreakRow[],
   feedSeasons: FeedSeason[],
+  modes: ModeCatalog,
 ): SeasonView[] {
   const titleOf = new Map<number, string>();
   for (const a of allModes) titleOf.set(a.year, a.title);
@@ -661,7 +705,7 @@ function buildSeasonViews(
       byMode: byMode.filter((a) => a.year === year),
       modeCards: cards
         .filter((c) => c.mode !== "search-and-destroy")
-        .sort((a, b) => MODE_ORDER.indexOf(a.mode) - MODE_ORDER.indexOf(b.mode)),
+        .sort((a, b) => modeRank(modes, a.mode) - modeRank(modes, b.mode)),
       sndCard: cards.find((c) => c.mode === "search-and-destroy"),
       round: roundProfiles.find((r) => r.year === year),
       streaks: streakRows.find((s) => s.year === year),
@@ -1010,7 +1054,7 @@ function CareerTab({
         <section className="mt-10">
           <h2 className="lower-third">
             Style
-            <span className="lt-note">position, not label</span>
+            <span className="lt-note">position, not label &middot; {style.era}</span>
           </h2>
           <div className="mt-4 border border-hairline bg-surface p-4">
             <StyleAxes
@@ -1027,8 +1071,8 @@ function CareerTab({
             cloud of the same size and shape scores{" "}
             {style.nullLo.toFixed(3)}&ndash;{style.nullHi.toFixed(3)}. So a
             player is drawn as a position on the {style.axes.length}{" "}
-            axes that survive Horn&rsquo;s parallel analysis, over{" "}
-            {style.cohortN.toLocaleString()}{" "}
+            axes that survive Horn&rsquo;s parallel analysis, over the{" "}
+            {style.cohortN.toLocaleString()} {style.era}{" "}
             player-seasons, with the composite
             rating already projected out &mdash; this is how someone played at
             their level, not what level that was. See{" "}
@@ -1129,9 +1173,10 @@ function CareerTab({
 
 function SeasonTab({ view }: { view: SeasonView }) {
   const profile = view.overall ? seasonProfile(view.overall) : [];
-  // BO4 (2019) has box scores but no event feed, so trade, clutch and
-  // man-advantage cards can never populate for it. Say so, not silence.
-  const isBo4 = view.title === "BO4";
+  // A season with box scores and no event feed can never fill the trade,
+  // clutch and man-advantage cards. Read off the season rather than named, so
+  // every such season says so instead of only the one that was named here.
+  const noFeed = Boolean(view.overall || view.modeCards.length > 0) && !view.feed;
   const hasSnd = Boolean(
     view.sndCard ||
       view.round ||
@@ -1273,9 +1318,9 @@ function SeasonTab({ view }: { view: SeasonView }) {
         </section>
       )}
 
-      {isBo4 && !view.feed && (
+      {noFeed && (
         <p className="mt-6 text-xs text-ink-muted">
-          Black Ops 4 has box scores but no event feed, so trade, clutch and
+          {view.title} has box scores but no event feed, so trade, clutch and
           man-advantage detail does not apply to this season.
         </p>
       )}
@@ -1389,6 +1434,7 @@ export default async function PlayerPage({
   ]);
   const [
     adjusted,
+    spans,
     stints,
     playerInsights,
     metricValues,
@@ -1397,9 +1443,11 @@ export default async function PlayerPage({
     styleArtifact,
     ratings,
     rapm,
+    modeCatalog,
   ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
+      getPlayerSpans(player.id),
       getPlayerStints(player.id),
       insightsRun ? getPlayerInsights(player.id, insightsRun.id) : Promise.resolve([]),
       metricRun ? getPlayerMetrics(metricRun.id, player.id) : Promise.resolve([]),
@@ -1412,12 +1460,13 @@ export default async function PlayerPage({
       ratingRun
         ? getPlayerRapm(ratingRun.id, player.id)
         : Promise.resolve(null),
+      getModeCatalog(),
     ]);
-  const metricCards = buildMetricCards(metricValues, metricCatalog);
+  const metricCards = buildMetricCards(metricValues, metricCatalog, modeCatalog);
   const feedSeasons = buildFeedSeasons(metricValues, metricCatalog);
   const roundProfiles = buildRoundProfiles(metricValues, metricCatalog);
   const streakRows = buildStreakRows(metricValues);
-  const fingerprint = buildFingerprint(metricValues, metricCatalog);
+  const fingerprint = buildFingerprint(metricValues, metricCatalog, modeCatalog);
   const style = buildStyleView(styleArtifact?.style ?? null, stylePoints);
 
   const allModes = adjusted.filter((a) => a.modeId === null);
@@ -1431,6 +1480,7 @@ export default async function PlayerPage({
     roundProfiles,
     streakRows,
     feedSeasons,
+    modeCatalog,
   );
 
   const arcPoints: ArcPoint[] = allModes
@@ -1448,7 +1498,7 @@ export default async function PlayerPage({
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <p className="eyebrow text-accent">Player · CWL 2017–2019 archive</p>
+      <p className="eyebrow text-accent">Player · {formatLeagueSpans(spans)}</p>
       <h1 className="mt-1 font-display text-5xl font-bold uppercase tracking-tight">
         {player.handle}
       </h1>

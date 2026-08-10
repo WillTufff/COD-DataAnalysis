@@ -13,6 +13,7 @@ import {
   getBacktestCards,
   getPaceByMode,
   getPlayerLeaderboard,
+  getSeasonEras,
   getSeasonKdSpread,
   getSeriesRecords,
   getTeamStandings,
@@ -46,7 +47,7 @@ export default async function Home() {
     return (
       <main className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
-          Competitive Call of Duty, 2017–2019
+          Competitive Call of Duty
         </h1>
         <p className="mt-4 text-sm text-ink-secondary">
           No model runs found. Run the analytics pipeline (
@@ -70,6 +71,7 @@ export default async function Home() {
     findings,
     records,
     kdSpread,
+    seasonEras,
   ] = await Promise.all([
       getArchiveStats(),
       getEraSpans(),
@@ -83,6 +85,7 @@ export default async function Home() {
       insightsRun ? getFeedHighlights(insightsRun.id, 8) : Promise.resolve([]),
       getSeriesRecords(),
       getSeasonKdSpread(eraRun.id),
+      getSeasonEras(),
     ]);
   const topTeams = standings.slice(0, 10);
   const topTeamIds = topTeams.map((t) => t.teamId);
@@ -106,7 +109,7 @@ export default async function Home() {
     <main className="mx-auto max-w-6xl px-6 py-12">
       <header>
         <p className="font-mono text-xs text-ink-muted">
-          CWL archive 2017–2019 · {fmt(stats.seriesCount)} series ·{" "}
+          CWL + CDL {stats.span} · {fmt(stats.seriesCount)} series ·{" "}
           {fmt(stats.maps)} maps · {fmt(stats.statRows)} stat lines ·{" "}
           {fmt(stats.players)} players
           {eloRun.dataThrough && <> · data through {eloRun.dataThrough}</>}
@@ -114,20 +117,22 @@ export default async function Home() {
         <h1 className="mt-3 font-display text-4xl font-bold uppercase leading-[0.95] tracking-tight sm:text-6xl">
           Competitive Call of Duty
           <br />
-          2017–2019
+          {stats.span}
         </h1>
         <p className="mt-4 max-w-2xl text-sm leading-relaxed text-ink-secondary">
-          Competitive Call of Duty ran on a different game each season, so raw
-          stats from 2017, 2018 and 2019 don&rsquo;t compare directly. This site
-          scores every player-season against its own year and mode, and rates
-          teams from their series results. The ratings, the model specifications,
-          and the box scores behind them are published here.
+          Competitive Call of Duty ran on a different game almost every season,
+          so raw stats from {stats.firstYear} and {stats.lastYear}{" "}
+          don&rsquo;t compare directly. This site scores every player-season
+          against its own year and mode, and rates teams from their series
+          results across both the World League and the Call of Duty League. The
+          ratings, the model specifications, and the sources behind them are
+          published here.
         </p>
       </header>
 
       <section className="mt-14">
         <SectionHeader
-          title="Team Elo, 2017–2019"
+          title={`Team Elo, ${stats.span}`}
           note={`after every rated series · top ${topTeams.length} teams by final rating`}
         />
         <div className="mt-4">
@@ -265,7 +270,7 @@ export default async function Home() {
             <p className="text-sm leading-relaxed text-ink-secondary">
               Each strip below is every player-season of at least 30 maps in one
               title, plotted by raw K/D on a shared axis. The league average
-              shifts from year to year, so a 1.10 K/D in 2017 and a 1.10 in 2019
+              shifts from year to year, so a 1.10 K/D in one season and a 1.10 in another
               are not the same performance. The cohort the z-scores are measured
               against is wider than this — qualification there is 8 maps.
             </p>
@@ -292,7 +297,7 @@ export default async function Home() {
               against its own season and mode, and percentiles line up across
               years.
             </p>
-            <PaceByMode cells={pace} />
+            <PaceByMode cells={pace} seasons={seasonEras} />
           </div>
         </div>
       </section>

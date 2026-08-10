@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Calibration } from "@/components/charts/Calibration";
 import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
 import {
+  formatYearSpan,
   getBacktestCards,
   getCoverage,
   getFeedKinds,
@@ -20,6 +21,7 @@ import {
   RAPM_CONCENTRATION_LIMIT,
   getRosterForecast,
   getRoundWinProb,
+  getSeasonEras,
   getSeasonKdSpread,
   getPlayerStyleArtifact,
   getSeriesDynamics,
@@ -28,8 +30,10 @@ import {
   latestRatingRun,
   latestRun,
   type PaceCell,
+  getModeCatalog,
 } from "@/lib/analytics";
 import { kindLabel } from "@/lib/insightKinds";
+import { modeLabel } from "@/lib/modes";
 
 // The archive is frozen and the models only change on a rerun, so this page is
 // prerendered and revalidated on a timer rather than queried per request.
@@ -91,14 +95,6 @@ const ARM_LABEL: Record<string, string> = {
   global: "One rating per team",
   mode: "One rating per team and mode",
   blend: "Blend of the two",
-};
-
-const MODE_LABEL: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
 };
 
 // Brier gaps are small and signed, and the sign is the whole claim.
@@ -266,8 +262,16 @@ export default async function MethodologyPage() {
     ),
   );
   const mapElo = await getMapElo();
-  const [ratingCards, modeWeights, winprobArt, modelGaps, coverage, pace] =
-    await Promise.all([
+  const [
+    ratingCards,
+    modeWeights,
+    winprobArt,
+    modelGaps,
+    coverage,
+    pace,
+    seasonEras,
+    modeCatalog,
+  ] = await Promise.all([
       getBacktestCards(
         [ratingRun?.id].filter((x): x is number => x !== undefined && x !== null),
       ),
@@ -276,6 +280,8 @@ export default async function MethodologyPage() {
       winprobRun ? getModelGaps(winprobRun.id) : Promise.resolve(null),
       getCoverage(),
       getPaceByMode(),
+      getSeasonEras(),
+      getModeCatalog(),
     ]);
   const [
     comparison,
@@ -413,6 +419,20 @@ export default async function MethodologyPage() {
       : raw.a === "glicko2"
         ? { delta: raw.delta, lo: raw.lo, hi: raw.hi, p: raw.dmP }
         : { delta: -raw.delta, lo: -raw.hi, hi: -raw.lo, p: raw.dmP };
+
+  // The window the winprob backtest actually ran over, and its accuracy gap in
+  // points, so the null result below quotes the run rather than a past one.
+  const winprobCard = cards.find((c) => c.model === "winprob") ?? null;
+  const winprobWindow = winprobCard
+    ? formatYearSpan(
+        new Date(winprobCard.windowFrom).getUTCFullYear(),
+        new Date(winprobCard.windowTo).getUTCFullYear(),
+      )
+    : null;
+  const accuracyGapPp =
+    modelGaps?.models.winprob_v1 && modelGaps.models.glicko2
+      ? (modelGaps.models.winprob_v1.accuracy - modelGaps.models.glicko2.accuracy) * 100
+      : null;
 
   return (
     // Site grid (6xl) for left-edge alignment with the header; prose keeps
@@ -662,7 +682,7 @@ export default async function MethodologyPage() {
                     return (
                       <tr key={row.mode} className="border-b border-hairline/60">
                         <td className="py-2 pr-4">
-                          {MODE_LABEL[row.mode] ?? row.mode}
+                          {modeLabel(modeCatalog, row.mode)}
                         </td>
                         <td className="py-2 pr-4 text-right font-mono tabular-nums">
                           {row.n_maps.toLocaleString()}
@@ -790,7 +810,7 @@ export default async function MethodologyPage() {
                       >
                         <td className="py-2 pr-4">{r.team}</td>
                         <td className="py-2 pr-4">
-                          {MODE_LABEL[r.mode] ?? r.mode}
+                          {modeLabel(modeCatalog, r.mode)}
                         </td>
                         <td className="py-2 pr-4 text-right font-mono tabular-nums">
                           {r.n_maps}
@@ -1059,17 +1079,24 @@ export default async function MethodologyPage() {
 
       {(() => {
         if (!styleArt) return null;
-        const published = styleArt.style.bases.find(
-          (b) => b.basis === styleArt.style.published_basis,
+        // One fit per era: the metric layer's columns change wholesale at the
+        // archive seam, so the numbers below are quoted for the earliest
+        // published era and the others are tabulated beneath it.
+        const publishedAll = styleArt.style.bases.filter((b) =>
+          styleArt.style.published_bases.includes(b.basis),
         );
+        const published = publishedAll[0];
         if (!published) return null;
         const extended = styleArt.style.bases.find(
-          (b) => b.basis !== styleArt.style.published_basis,
+          (b) =>
+            b.league === published.league &&
+            !styleArt.style.published_bases.includes(b.basis),
         );
+        const era = styleArt.style.eras.find((e) => e.league === published.league);
         const scored = published.clustering.filter(
           (c) => c.silhouette !== null && c.silhouette_null !== null,
         );
-        if (scored.length === 0) return null;
+        if (scored.length === 0 || !era) return null;
         const best = scored.reduce((a, b) =>
           (b.silhouette ?? 0) > (a.silhouette ?? 0) ? b : a,
         );
@@ -1105,17 +1132,63 @@ export default async function MethodologyPage() {
               </p>
               <p>
                 The era goes next, and costs more than it sounds. Coverage is not
-                flat: demand a complete row across every metric present in all
-                three seasons and no player-season in the archive qualifies. A
-                column is admitted only if it is attainable in every season, and
-                the published fit runs on the basis that keeps the league —{" "}
+                flat: demand a complete row across every metric present in every
+                season and no player-season qualifies. A column is admitted only
+                if it is attainable in every season of its era, and the published
+                fit runs on the basis that keeps the league — for {published.era},{" "}
                 {published.n_columns} box-score metrics over{" "}
                 {published.n.toLocaleString()} of{" "}
-                {styleArt.style.n_subjects_total.toLocaleString()} qualified
-                player-seasons — rather than the one with the most columns.
+                {era.n_subjects_total.toLocaleString()} qualified player-seasons —
+                rather than the one with the most columns.
               </p>
               <p>
-                <strong className="text-ink">There is no taxonomy.</strong> The
+                The two archives do not share a column set: the{" "}
+                {styleArt.style.eras[0]?.era} box scores carry the kill feed and
+                the streak and accuracy extras, and the{" "}
+                {styleArt.style.eras[1]?.era}{" "}
+                box scores carry damage, contested
+                hill time and non-traded kills but no map clock. So the fit is
+                run once per era and the axes are never compared across the seam
+                — a player who spans it is drawn on their most recent era&rsquo;s
+                axes.
+              </p>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[28rem] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-hairline text-xs text-ink-muted">
+                      <th className="py-2 pr-4 font-normal">Era</th>
+                      <th className="py-2 pr-4 text-right font-normal">Columns</th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        Player-seasons
+                      </th>
+                      <th className="py-2 pr-4 text-right font-normal">Axes</th>
+                      <th className="py-2 text-right font-normal">Archetypes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {publishedAll.map((b) => (
+                      <tr key={b.basis} className="border-b border-hairline/60">
+                        <td className="py-2 pr-4 font-mono text-xs">{b.era}</td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {b.n_columns}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {b.n.toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {b.n_components}
+                        </td>
+                        <td className="py-2 text-right font-mono text-xs">
+                          {b.taxonomy ? b.surviving_k : "none"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                <strong className="text-ink">There is no taxonomy</strong>, in
+                either era. Taking {published.era} as the worked example: the
                 gap statistic prefers k={published.gap_k} to every partition up to{" "}
                 {published.clustering.length}. The best silhouette any k reaches
                 is {best.silhouette?.toFixed(3)}, at k={best.k}, and a single
@@ -1132,21 +1205,27 @@ export default async function MethodologyPage() {
               </p>
               {extended && (
                 <p>
-                  The extended basis — {extended.n_columns} columns including
-                  Hardpoint and Search and Destroy objective metrics, at the cost
-                  of falling to {extended.n.toLocaleString()} player-seasons —
-                  agrees, and nothing is published from it either.
+                  The extended {published.era} basis — {extended.n_columns}{" "}
+                  columns including Hardpoint and Search and Destroy objective
+                  metrics, at the cost of falling to{" "}
+                  {extended.n.toLocaleString()} player-seasons — agrees, and
+                  nothing is published from it either.
                 </p>
               )}
               <p>
                 What is real is the axes. Horn&rsquo;s parallel analysis — each
                 eigenvalue against the 95th percentile of the same matrix with
                 every column independently permuted — retains{" "}
-                {published.n_components} components, together{" "}
+                {published.n_components} components for {published.era},
+                together{" "}
                 {(
                   published.component_share.reduce((a, b) => a + b, 0) * 100
                 ).toFixed(1)}
-                % of the residual variance. A player is drawn on{" "}
+                % of the residual variance. Only the {published.era}{" "}
+                axes are
+                named: names were read off that fit&rsquo;s loadings, and an
+                index carries no reading to a fit nobody has read. A player is
+                drawn on{" "}
                 <Link className="underline" href="/players">
                   their page
                 </Link>{" "}
@@ -1157,26 +1236,35 @@ export default async function MethodologyPage() {
               <table className="w-full min-w-[28rem] text-left text-sm">
                 <thead>
                   <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Era</th>
                     <th className="py-2 pr-4 font-normal">Axis</th>
                     <th className="py-2 pr-4 text-right font-normal">Share</th>
                     <th className="py-2 font-normal">Heaviest loadings</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {published.axes.map((axis) => (
-                    <tr key={axis.index} className="border-b border-hairline/60">
-                      <td className="py-2 pr-4 font-mono text-xs">{axis.name}</td>
-                      <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
-                        {(axis.share * 100).toFixed(1)}%
-                      </td>
-                      <td className="py-2 text-xs text-ink-secondary">
-                        {axis.loadings
-                          .slice(0, 4)
-                          .map((l) => l.column.split(":")[1])
-                          .join(", ")}
-                      </td>
-                    </tr>
-                  ))}
+                  {publishedAll.flatMap((b) =>
+                    b.axes.map((axis) => (
+                      <tr
+                        key={`${b.basis}:${axis.index}`}
+                        className="border-b border-hairline/60"
+                      >
+                        <td className="py-2 pr-4 font-mono text-xs text-ink-muted">
+                          {axis.index === 1 ? b.era : ""}
+                        </td>
+                        <td className="py-2 pr-4 font-mono text-xs">{axis.name}</td>
+                        <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
+                          {(axis.share * 100).toFixed(1)}%
+                        </td>
+                        <td className="py-2 text-xs text-ink-secondary">
+                          {axis.loadings
+                            .slice(0, 4)
+                            .map((l) => l.column.split(":")[1])
+                            .join(", ")}
+                        </td>
+                      </tr>
+                    )),
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1253,7 +1341,7 @@ export default async function MethodologyPage() {
               Learned map-win weights by mode
             </h3>
             <div className="mt-3">
-              <WhatWinsMaps cohorts={modeWeights} />
+              <WhatWinsMaps cohorts={modeWeights} seasons={seasonEras} />
             </div>
             {weightCiCohorts.length > 0 && (
               <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-secondary">
@@ -1984,7 +2072,8 @@ export default async function MethodologyPage() {
 
             <p className="mt-4 text-sm leading-relaxed text-ink-secondary">
               The table below is the top and bottom {rapm.leaders.length}. The
-              whole fit &mdash; all {rapm.n_players} players &mdash; is stored
+              whole fit &mdash; all {rapm.n_players}{" "}
+              players &mdash; is stored
               per player and drawn on each player&rsquo;s page with the interval
               attached, because a coefficient whose interval covers zero is not
               a ranking and {rapm.n_players - rapm.n_resolved} of these do.
@@ -2100,12 +2189,29 @@ export default async function MethodologyPage() {
             Glicko-2 prediction by prediction.
           </p>
           <p>
-            Measured against that baseline, the added features contribute
-            nothing over 2017–2019: Brier improves by 0.0014 while accuracy
-            drops 1.6 points, so the model does not separate from the ratings it
-            is built on in either direction. On this record, recent form and
-            head-to-head history carry no measurable information beyond team
-            strength.
+            Measured against that baseline, the added features move the
+            forecast barely at all
+            {winprobWindow && <> over {winprobWindow}</>}
+            {momentum && <>: Brier improves by {momentum.delta.toFixed(4)}</>}
+            {accuracyGapPp !== null && (
+              <>
+                {" "}
+                while accuracy{" "}
+                {Math.abs(accuracyGapPp) < 0.05 ? (
+                  <>is unchanged</>
+                ) : (
+                  <>
+                    {accuracyGapPp >= 0 ? "gains" : "drops"}{" "}
+                    {Math.abs(accuracyGapPp).toFixed(2)} points
+                  </>
+                )}
+              </>
+            )}
+            . The Brier gain is small but not noise — its interval below
+            excludes zero — so the reading is a marginal edge over the ratings
+            rather than a second rating system: recent form and head-to-head
+            history add little beyond team strength, and nothing at all to how
+            often the favourite is called correctly.
             {momentum && (
               <>
                 {" "}
@@ -2132,7 +2238,8 @@ export default async function MethodologyPage() {
                   "≈0"}
                 . So this null is narrower than “form does not
                 matter”: an effect that large is ruled out, a realistic one is
-                not, and 1,310 series is not enough to settle it.
+                not, and {modelGaps.nSeries.toLocaleString()} series is not
+                enough to settle it.
               </>
             )}
             {winprobRun && (
@@ -2993,14 +3100,17 @@ export default async function MethodologyPage() {
         </h2>
         <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
           <p>
-            Box scores are Activision Publishing’s official CWL data release
-            (the <code className="font-mono text-xs">cwl-data</code> repository,
-            BSD-3-Clause). The 2017–2018 structured event feeds behind this tier
-            come from the same repository under the same licence. Event metadata
-            comes from that archive too, and roster history is inferred from who
-            appears in the box scores rather than from any external roster source.
-            Handles are normalized across seasons with an alias map maintained in
-            the repository; corrections are welcome.
+            This site draws on three sources, and which one a number came from
+            changes what can be said about it.
+          </p>
+          <p>
+            Box scores for 2017&ndash;2019 are Activision Publishing’s official
+            CWL data release (the{" "}
+            <code className="font-mono text-xs">cwl-data</code> repository,
+            BSD-3-Clause). The 2017–2018 structured event feeds behind the
+            kill-feed tier come from the same repository under the same licence.
+            Handles are normalized across seasons and sources with an alias map
+            maintained in the repository; corrections are welcome.
           </p>
           <p>
             The upstream repository was taken down, so both tiers are recovered
@@ -3012,18 +3122,51 @@ export default async function MethodologyPage() {
             the box scores and the event feeds are provably one version of the source.
           </p>
           <p>
-            CDL-era statistics are not here yet. When they arrive they will come from{" "}
+            CDL-era box scores, 2020&ndash;2026, come from{" "}
+            <a className="underline hover:text-ink" href="https://citoapi.com">
+              Cito
+            </a>
+            , which carries Breaking Point match data, used with attribution
+            under its terms. That licence is not CC-BY-SA and the data is not
+            redistributable, so what is published from it here is{" "}
+            <strong className="text-ink">derived analysis only</strong> —
+            ratings, era-adjusted metrics, model outputs. The raw box scores are
+            not exposed through this site&rsquo;s API and the stored responses
+            are not in the public repository.
+          </p>
+          <p>
+            Tournaments, placements, prize money, rosters, transfers and player
+            bios come from{" "}
             <a
               className="underline hover:text-ink"
               href="https://liquipedia.net/callofduty"
             >
               Liquipedia
             </a>{" "}
-            (CC-BY-SA 3.0) through the LPDB API — within the published rate limits,
-            with an identifying User-Agent, and never by scraping HTML. Pages using
-            their data will carry visible attribution, and derived data will be shared
-            back under the same licence. Nothing on the site draws on that source
-            today.
+            (CC-BY-SA 3.0) through the LPDB API — within the published rate
+            limits, with an identifying User-Agent, and never by scraping HTML.
+            Liquipedia also supplies map-level results where the CDL-era source
+            garbled them: four 2020 series whose two sides were filed under one
+            franchise slot, and 92 map results across 23 series whose per-map
+            record contradicted the series score.
+          </p>
+          <p>
+            Every row carries the source it came from, so these rules are
+            enforced by a column rather than by inference from the season year.
+            Where two sources cover the same match the scores are taken from the
+            box-score source and the structure from Liquipedia, and both
+            identifiers are kept on the row.
+          </p>
+          <p>
+            The two box-score archives are not the same measurement, and the
+            seam is visible in what each can answer. The CWL archive carries a
+            kill feed, per-shot accuracy, streak and multi-kill counts, and map
+            duration. The CDL-era source carries damage, contested hill time,
+            non-traded kills and source-counted clutches, but{" "}
+            <strong className="text-ink">no map clock</strong> — so every
+            per-10-minute metric stops at 2019 and its per-map counterpart takes
+            over from 2020. A cohort is never given both forms of one quantity,
+            and nothing is averaged across the seam.
           </p>
         </div>
       </section>

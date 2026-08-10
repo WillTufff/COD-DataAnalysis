@@ -11,18 +11,13 @@ import {
   getRoundWinProb,
   getRoundsOverview,
   latestRun,
+  getModeCatalog,
 } from "@/lib/analytics";
+import { modeLabel } from "@/lib/modes";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Rounds & kill feed" };
-
-const MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  uplink: "Uplink",
-  "capture-the-flag": "Capture the Flag",
-};
 
 function one(sp: Record<string, string | string[] | undefined>, k: string): string {
   const v = sp[k];
@@ -221,6 +216,7 @@ export default async function RoundsPage({
   // Search & Destroy, not the group the picker selects.
   const rounds = await getRoundWinProb();
   const timeline = rounds?.timeline ?? null;
+  const modeCatalog = await getModeCatalog();
 
   if (!run || !overview || overview.groups.length === 0) {
     return (
@@ -229,12 +225,26 @@ export default async function RoundsPage({
           Rounds &amp; kill feed
         </h1>
         <p className="mt-4 text-sm text-ink-secondary">
-          No kill-feed run has been published yet. This layer covers the 2017 and 2018
-          seasons; Black Ops 4 (2019) shipped box scores but no event feed.
+          No kill-feed run has been published yet. The event feed reaches fewer
+          seasons than the box score does; which ones is read off the run, so
+          there is nothing to state until one exists.
         </p>
       </main>
     );
   }
+
+  // What the feed actually reaches, read off the run's own groups: the seasons
+  // it covers and how they read as a span.
+  const feedYears = [...new Set(overview.groups.map((g) => g.year))].sort();
+  const feedTitles = [
+    ...new Map(overview.groups.map((g) => [g.year, `${g.title} (${g.year})`])),
+  ]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, label]) => label);
+  const feedSpan =
+    feedYears.length === 1
+      ? String(feedYears[0])
+      : `${feedYears[0]}–${feedYears[feedYears.length - 1]}`;
 
   // Group picker: title + mode. Default to the first Search &amp; Destroy group
   // (it carries the advantage and clutch panels).
@@ -254,15 +264,21 @@ export default async function RoundsPage({
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
       <p className="font-mono text-xs text-ink-muted">
-        The 2017–2018 kill feed, reconciled against the box score · metric_layer v{run.version}
+        The {feedSpan} kill feed, reconciled against the box score · metric_layer v
+        {run.version}
       </p>
       <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">
         Rounds &amp; kill feed
       </h1>
       <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
         Trades, clutches, and man-advantage conversion, read from the event feed.
-        Infinite Warfare (2017) and WWII (2018) only: Black Ops 4 has box scores but
-        no feed. A death counts as traded when a teammate answers the killer within{" "}
+        {" "}
+        {feedTitles.length === 1
+          ? `${feedTitles[0]} only: `
+          : `${feedTitles.slice(0, -1).join(", ")} and ${feedTitles[feedTitles.length - 1]} only: `}
+        every other season in the archive has box scores without an event feed,
+        so the panels below stop where the feed does. A death counts as traded
+        when a teammate answers the killer within{" "}
         {(overview.trade_window_ms / 1000).toFixed(0)} seconds.
       </p>
 
@@ -272,7 +288,7 @@ export default async function RoundsPage({
           <select name="g" defaultValue={groupKey(group)} className="border border-hairline bg-surface px-2 py-1.5">
             {overview.groups.map((g) => (
               <option key={groupKey(g)} value={groupKey(g)}>
-                {g.year} {g.title} · {MODE_LABELS[g.mode] ?? g.mode}
+                {g.year} {g.title} · {modeLabel(modeCatalog, g.mode)}
               </option>
             ))}
           </select>
@@ -286,7 +302,7 @@ export default async function RoundsPage({
       </form>
 
       <div className="mt-2 font-mono text-xs text-ink-muted">
-        {group.year} {group.title} · {MODE_LABELS[group.mode] ?? group.mode} ·{" "}
+        {group.year} {group.title} · {modeLabel(modeCatalog, group.mode)} ·{" "}
         {group.deaths.toLocaleString()} reconciled deaths
       </div>
 
@@ -371,7 +387,7 @@ export default async function RoundsPage({
             Inside the round
             <span className="lt-note">
               {timeline.n_rounds_spanned.toLocaleString()} Search & Destroy
-              rounds, 2017–2018
+              rounds, {feedSpan}
             </span>
           </h2>
           <p className="mt-2 max-w-3xl text-sm text-ink-secondary">

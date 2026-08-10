@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import type { ModeWeightCohort } from "@/lib/analytics";
+import { type SeasonEra, seasonInk, seasonTag } from "@/lib/eras";
+import { EraLegend } from "./EraLegend";
 
 // What the map-outcome regression learned, drawn as an argument: for each
 // (season × mode), how much a one-SD team edge in everything the cohort
@@ -25,18 +27,9 @@ import type { ModeWeightCohort } from "@/lib/analytics";
 // visible because "we cannot tell" is itself the reading for that mode.
 //
 // Era colors are fixed by season and never reassigned (same convention as
-// every other chart on the site: color follows the era, not the row).
-const ERA_COLOR: Record<number, string> = {
-  2017: "var(--series-1)",
-  2018: "var(--series-2)",
-  2019: "var(--series-3)",
-};
-const ERA_LABEL: Record<number, string> = {
-  2017: "IW ’17",
-  2018: "WWII ’18",
-  2019: "BO4 ’19",
-};
-
+// every other chart on the site: color follows the era, not the row). The
+// seasons come from the archive, so a title ingested after this chart was
+// written is coloured and named without editing it.
 const BAR = 14;
 const BAR_GAP = 2;
 const ROW_GAP = 18;
@@ -64,7 +57,13 @@ const span = (lo: number, hi: number) => {
   return `${fmt(lo, dp)}–${fmt(hi, dp)}`;
 };
 
-export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
+export function WhatWinsMaps({
+  cohorts,
+  seasons,
+}: {
+  cohorts: ModeWeightCohort[];
+  seasons: SeasonEra[];
+}) {
   const [hover, setHover] = useState<ModeWeightCohort | null>(null);
 
   const shown = cohorts.filter((c) => c.restVsSlay > 0);
@@ -119,16 +118,7 @@ export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
 
   return (
     <figure>
-      <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-secondary">
-        {years.map((y) => (
-          <span key={y} className="flex items-center gap-1.5">
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ background: ERA_COLOR[y] }}
-            />
-            {ERA_LABEL[y]}
-          </span>
-        ))}
+      <EraLegend seasons={seasons} shownYears={years}>
         {shown.some((c) => c.restVsSlayCi !== null) && (
           <span className="flex items-center gap-1.5 text-ink-muted">
             <svg width="14" height="8" aria-hidden="true">
@@ -144,7 +134,7 @@ export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
         <span className="ml-auto text-ink-muted">
           ← the gunfight decided · everything else decided →
         </span>
-      </div>
+      </EraLegend>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
@@ -231,7 +221,7 @@ export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
                     />
                     <path
                       d={d}
-                      fill={ERA_COLOR[c.year]}
+                      fill={seasonInk(seasons, c.year)}
                       opacity={
                         (unresolved(c) ? 0.4 : 1) * (hover && hover !== c ? 0.45 : 1)
                       }
@@ -280,7 +270,7 @@ export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
       <figcaption className="mt-1 text-xs text-ink-muted">
         {hover ? (
           <span className="text-ink-secondary">
-            {ERA_LABEL[hover.year]} {hover.mode}: a one-SD team edge beyond the
+            {seasonTag(seasons, hover.year)} {hover.mode}: a one-SD team edge beyond the
             gunfight was worth {fmt(hover.restVsSlay)}× the equivalent
             edge in kills and deaths (regression over{" "}
             {hover.nMaps.toLocaleString()} maps
@@ -302,7 +292,7 @@ export function WhatWinsMaps({ cohorts }: { cohorts: ModeWeightCohort[] }) {
             Mean win-odds weight of a one-SD team edge in everything the cohort
             measured beyond kills and deaths, relative to a one-SD edge in kills
             and deaths, per (title × mode), log scale. 1× means both mattered
-            equally; {ERA_LABEL[peak.year]} {peak.mode} is the outlier at{" "}
+            equally; {seasonTag(seasons, peak.year)} {peak.mode} is the outlier at{" "}
             {fmt(peak.restVsSlay)}×. Lines are 95% percentile bootstrap
             intervals over each cohort&rsquo;s maps
             {shown.some(unresolved) &&

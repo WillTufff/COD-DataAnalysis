@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { getMetaArtifacts, latestRun } from "@/lib/analytics";
+import {
+  type MetaArtifact,
+  getMetaArtifacts,
+  getModeCatalog,
+  latestRun,
+} from "@/lib/analytics";
+import { modeLabel } from "@/lib/modes";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +29,6 @@ const SECTION_LABELS: Record<string, { title: string; blurb: string }> = {
   meta_rigs: { title: "Rigs", blurb: "Combat rigs." },
   meta_payloads: { title: "Payloads", blurb: "Rig payloads." },
   meta_traits: { title: "Traits", blurb: "Rig traits." },
-};
-
-const MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
 };
 
 /** Usage share bar with the win-rate mark laid over it. */
@@ -70,7 +68,10 @@ export default async function LoadoutsPage({
 }) {
   const sp = await searchParams;
   const run = await latestRun("metric_layer");
-  const all = run ? await getMetaArtifacts(run.id) : [];
+  const [all, modeCatalog] = await Promise.all([
+    run ? getMetaArtifacts(run.id) : Promise.resolve<MetaArtifact[]>([]),
+    getModeCatalog(),
+  ]);
 
   // One title at a time. Most sections are title-exclusive anyway — rigs are
   // Infinite Warfare, divisions are WWII, specialists are Black Ops 4 — so
@@ -109,6 +110,15 @@ export default async function LoadoutsPage({
         usage share; the vertical mark is that choice&rsquo;s map win rate, against a
         centre line at 50%. Choices under 30 player-maps are left out.
       </p>
+      {titles.length > 0 && (
+        <p className="mt-2 max-w-2xl text-sm text-ink-secondary">
+          {titles.length === 1 ? "One title records" : `${titles.length} titles record`}{" "}
+          a loadout on the box score — {titles.join(", ")}. The Title list is
+          those titles and no others: a season whose source ships kills and
+          deaths but no weapon, division or specialist field cannot appear here,
+          so it is left off rather than offered as an empty page.
+        </p>
+      )}
 
       {titles.length > 0 && (
         <form
@@ -139,7 +149,7 @@ export default async function LoadoutsPage({
               <option value="">All modes</option>
               {modes.map((m) => (
                 <option key={m} value={m}>
-                  {MODE_LABELS[m] ?? m}
+                  {modeLabel(modeCatalog, m)}
                 </option>
               ))}
             </select>
@@ -176,7 +186,7 @@ export default async function LoadoutsPage({
               {artifact.groups.map((group) => (
                 <div key={`${group.season_id}-${group.mode}`}>
                   <div className="eyebrow text-[10px] text-ink-secondary">
-                    {MODE_LABELS[group.mode] ?? group.mode}
+                    {modeLabel(modeCatalog, group.mode)}
                   </div>
                   <table className="mt-2 w-full text-left text-sm">
                     <tbody>

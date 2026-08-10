@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     template: "%s · cdlhub",
   },
   description:
-    "Era-adjusted stats, team strength ratings, and evidence-linked analysis for competitive Call of Duty (CWL 2017–2019 archive).",
+    "Era-adjusted stats, team strength ratings, and evidence-linked analysis for competitive Call of Duty, 2017–2026.",
 };
 
 const nav = [
@@ -37,6 +37,7 @@ const nav = [
   { href: "/players", label: "Players" },
   { href: "/stats", label: "Stats" },
   { href: "/rounds", label: "Rounds" },
+  { href: "/maps", label: "Maps" },
   { href: "/meta", label: "Loadouts" },
   { href: "/findings", label: "Findings" },
   { href: "/methodology", label: "Methodology" },
@@ -68,16 +69,38 @@ export default function RootLayout({
         <footer className="mt-16 border-t border-hairline print:hidden">
           <div className="mx-auto max-w-6xl space-y-1 px-6 py-6 text-xs text-ink-muted">
             <p>
-              Box scores, event metadata and kill feeds: Call of Duty World League
-              archive data ©{" "}
+              Box scores and kill feeds, 2017&ndash;2019: Call of Duty World
+              League archive data ©{" "}
               <a
                 className="underline hover:text-ink-secondary"
                 href="https://github.com/Activision/cwl-data"
               >
                 Activision Publishing (cwl-data)
               </a>
-              , BSD-3-Clause. Everything on this site is derived from that one
-              source; rosters are inferred from who appears in the box scores.
+              , BSD-3-Clause.
+            </p>
+            <p>
+              Box scores 2020&ndash;2026: data via{" "}
+              <a
+                className="underline hover:text-ink-secondary"
+                href="https://citoapi.com"
+              >
+                Cito
+              </a>
+              , which carries Breaking Point match data, used with attribution.
+              Published here only as derived analysis, never as a copy of the
+              underlying box scores.
+            </p>
+            <p>
+              Tournaments, placements, prize money, rosters, transfers and player
+              bios:{" "}
+              <a
+                className="underline hover:text-ink-secondary"
+                href="https://liquipedia.net/callofduty"
+              >
+                Liquipedia
+              </a>
+              , CC-BY-SA 3.0, retrieved through their API.
             </p>
             <p>
               All models are educational analysis of historical play; the{" "}

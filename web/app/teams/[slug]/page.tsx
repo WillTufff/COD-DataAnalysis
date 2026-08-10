@@ -10,6 +10,7 @@ import { PlacementTimeline } from "@/components/charts/PlacementTimeline";
 import { StintTimeline } from "@/components/charts/StintTimeline";
 import { PctlBar } from "@/components/PctlBar";
 import {
+  formatLeagueSpans,
   getAllTeamSlugs,
   getEloTimelines,
   getEraSpans,
@@ -20,6 +21,7 @@ import {
   getTeamModeSplits,
   getTeamModeStrength,
   getTeamPlacements,
+  getTeamSpans,
   getTeamStints,
   getTeamStandings,
   getMetricCatalog,
@@ -27,15 +29,10 @@ import {
   latestRun,
   type MetricCatalog,
   type TeamMetricValue,
+  type TeamStint,
+  getModeCatalog,
 } from "@/lib/analytics";
-
-const STYLE_MODE_LABELS: Record<string, string> = {
-  hardpoint: "Hardpoint",
-  "search-and-destroy": "Search & Destroy",
-  control: "Control",
-  "capture-the-flag": "Capture the Flag",
-  uplink: "Uplink",
-};
+import { modeLabel } from "@/lib/modes";
 
 type StyleRow = {
   key: string;
@@ -79,6 +76,17 @@ function buildStyleRows(
       };
     })
     .sort((a, b) => b.year - a.year || a.label.localeCompare(b.label));
+}
+
+// What the timeline below it was actually built from: Liquipedia carries dated
+// roster moves, the CWL archive carries none, so its stints are the span of a
+// player's appearances for the team.
+function stintNote(stints: TeamStint[]): string {
+  const dated = stints.some((s) => s.source === "lpdb");
+  const inferred = stints.some((s) => s.source !== "lpdb");
+  if (dated && inferred) return "dated roster moves, plus stints inferred from play";
+  if (dated) return "dated roster moves";
+  return "inferred from archive appearances";
 }
 
 // The archive is frozen and the models only change on a rerun, so this page is
@@ -125,12 +133,14 @@ export default async function TeamPage({
     eras,
     events,
     placements,
+    spans,
     stints,
     modeSplits,
     modeStrength,
     h2h,
     teamMetrics,
     metricCatalog,
+    modeCatalog,
   ] = await Promise.all([
       getTeamStandings(eloRun.id, glickoRun?.id ?? eloRun.id),
       getSeriesRecords(),
@@ -138,12 +148,14 @@ export default async function TeamPage({
       getEraSpans(),
       getEventMarkers(),
       getTeamPlacements(team.id),
+      getTeamSpans(team.id),
       getTeamStints(team.id),
       getTeamModeSplits(team.id),
       getTeamModeStrength(team.id),
       getTeamH2H(team.id, 12),
       metricRun ? getTeamMetrics(metricRun.id, team.id) : Promise.resolve([]),
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
+      getModeCatalog(),
     ]);
   // The same team under Glicko-2, so the trajectory chart can shade its RD.
   const glickoTimelines = glickoRun
@@ -156,7 +168,7 @@ export default async function TeamPage({
     ...modeStrength,
     rows: modeStrength.rows.map((r) => ({
       ...r,
-      mode: STYLE_MODE_LABELS[r.mode] ?? r.mode,
+      mode: modeLabel(modeCatalog, r.mode),
     })),
   };
 
@@ -170,7 +182,7 @@ export default async function TeamPage({
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <p className="eyebrow text-accent">Team · CWL 2017–2019 archive</p>
+      <p className="eyebrow text-accent">Team · {formatLeagueSpans(spans)}</p>
       <h1 className="mt-1 font-display text-5xl font-bold uppercase tracking-tight">
         {team.name}
       </h1>
@@ -353,7 +365,7 @@ export default async function TeamPage({
                       {r.label}
                     </td>
                     <td className="py-1.5 pr-4 text-ink-secondary">
-                      {r.mode ? (STYLE_MODE_LABELS[r.mode] ?? r.mode) : "All"}
+                      {modeLabel(modeCatalog, r.mode, "All")}
                     </td>
                     <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
                       {r.value}
@@ -381,7 +393,7 @@ export default async function TeamPage({
       <section className="mt-12">
         <h2 className="lower-third">
           Roster history
-          <span className="lt-note">inferred from archive appearances</span>
+          <span className="lt-note">{stintNote(stints)}</span>
         </h2>
         <div className="mt-4 border border-hairline bg-surface p-4">
           <StintTimeline

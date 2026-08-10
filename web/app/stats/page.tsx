@@ -5,7 +5,12 @@ import { AddFirstColumn } from "./AddFirstColumn";
 import { CohortTokens } from "./CohortTokens";
 import { PresetPicker, type PresetTile } from "./PresetPicker";
 import { ReportTable } from "./ReportTable";
-import { modeLabel, pickLabel, seasonLabel } from "./cohortLabel";
+import {
+  ALL_MODES_LABEL,
+  modeLabel,
+  pickLabel,
+  seasonLabel,
+} from "./cohortLabel";
 import {
   type MetricCatalogEntry,
   getMetricCatalog,
@@ -15,6 +20,7 @@ import {
   latestRun,
   queryReport,
   queryTeamReport,
+  getModeCatalog,
 } from "@/lib/analytics";
 import { REPORT_PRESETS } from "@/lib/reports/presets";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
@@ -63,7 +69,10 @@ export default async function StatsPage({
 }) {
   const sp: SearchParams = await searchParams;
   const run = await latestRun("metric_layer");
-  const catalog = run ? await getMetricCatalog(run.id) : null;
+  const [catalog, modeCatalog] = await Promise.all([
+    run ? getMetricCatalog(run.id) : Promise.resolve(null),
+    getModeCatalog(),
+  ]);
 
   if (!run || !catalog || catalog.metrics.length === 0) {
     return (
@@ -104,15 +113,32 @@ export default async function StatsPage({
     gold: m.tier.startsWith("gold"),
   }));
 
+  // Every title the catalog publishes, in the order its metrics list them, so a
+  // preset's span is stamped against the archive rather than against a number
+  // written here.
+  const titleOrder: string[] = [];
+  for (const m of metrics) {
+    // The team catalog publishes no per-title coverage, so this comes out empty
+    // there — which is right: the team builder has no preset tiles to stamp.
+    for (const t of m.titles ?? []) if (!titleOrder.includes(t)) titleOrder.push(t);
+  }
+  const byMetricKey = new Map(metrics.map((m) => [m.key, m]));
+
   // Preset tiles, each stamped with how many of its columns still resolve
-  // against the live catalog (a stale preset shows a smaller count, not a crash).
-  const presetTiles: PresetTile[] = REPORT_PRESETS.map((p) => ({
-    id: p.id,
-    name: p.name,
-    blurb: p.blurb,
-    category: p.category,
-    columns: p.metrics.filter((k) => knownKeys.has(k)).length,
-  }));
+  // against the live catalog (a stale preset shows a smaller count, not a
+  // crash) and which titles those columns are published for.
+  const presetTiles: PresetTile[] = REPORT_PRESETS.map((p) => {
+    const kept = p.metrics.filter((k) => knownKeys.has(k));
+    const covered = new Set(kept.flatMap((k) => byMetricKey.get(k)?.titles ?? []));
+    return {
+      id: p.id,
+      name: p.name,
+      blurb: p.blurb,
+      category: p.category,
+      columns: kept.length,
+      titles: titleOrder.filter((t) => covered.has(t)),
+    };
+  });
 
   const header = (
     <>
@@ -127,7 +153,11 @@ export default async function StatsPage({
   );
 
   const presetSection = (
-    <PresetPicker presets={presetTiles} activeId={activePreset?.id} />
+    <PresetPicker
+      presets={presetTiles}
+      activeId={activePreset?.id}
+      allTitles={titleOrder}
+    />
   );
 
   // No columns yet — lead with the presets rather than an empty table. The
@@ -202,6 +232,7 @@ export default async function StatsPage({
           seasons={scope.seasons}
           years={years}
           modes={scope.modes}
+          modeCatalog={modeCatalog}
           allModes={rankedScope.allModes}
           modeSlug={modeSlug}
           players={scopePlayers}
@@ -216,7 +247,8 @@ export default async function StatsPage({
       <p className="mt-4 hidden font-mono text-xs text-ink-secondary print:block">
         {activePreset ? `${activePreset.name} · ` : ""}
         {entity === "teams" ? "team report · " : ""}
-        {seasonLabel(scope.seasons, years)} · {modeLabel(modeSlug)} ·{" "}
+        {seasonLabel(scope.seasons, years)} ·{" "}
+        {modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)} ·{" "}
         {entity === "players" ? `${playersText.toLowerCase()} · ` : ""}
         {teamsText.toLowerCase()} ·{" "}
         {qualifiedOnly ? "qualified only" : "including small samples"} ·
@@ -236,7 +268,7 @@ export default async function StatsPage({
                 .join(
                   " on ",
                 )} in this cohort. Try a different season or mode, or clear the player and team filters.`
-            : `No ${entity} match this cohort. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeSlug)}` : ""}. Try a different season or mode, or widen the sample.`}
+            : `No ${entity} match this cohort. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or widen the sample.`}
         </p>
       ) : (
         <ReportTable
@@ -245,6 +277,7 @@ export default async function StatsPage({
           rows={rows}
           catalog={metricOptions}
           categoryLabels={CATEGORY_LABELS}
+          modeCatalog={modeCatalog}
           showMode={modeSlug === undefined}
           qualifiedOnly={qualifiedOnly}
           initialPer={parsePer(sp)}

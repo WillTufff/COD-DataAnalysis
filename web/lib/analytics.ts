@@ -1,8 +1,10 @@
 // Read-side queries for model outputs. Everything resolves through the
 // latest model_runs row per model, so pages always render one coherent,
 // versioned snapshot and never mix runs.
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import type { SeasonEra } from "@/lib/eras";
+import type { ModeCatalog } from "@/lib/modes";
 import { playerSlug, teamSlug } from "@/lib/slug";
 import {
   backtests,
@@ -183,6 +185,10 @@ export type ArchiveStats = {
   players: number;
   statRows: number;
   events: number;
+  firstYear: number;
+  lastYear: number;
+  /** e.g. "2017–2026" — read off the data so a new season never leaves stale copy. */
+  span: string;
 };
 
 export async function getArchiveStats(): Promise<ArchiveStats> {
@@ -191,16 +197,125 @@ export async function getArchiveStats(): Promise<ArchiveStats> {
            (SELECT count(*) FROM games) AS maps,
            (SELECT count(DISTINCT player_id) FROM game_player_stats) AS players,
            (SELECT count(*) FROM game_player_stats) AS stat_rows,
-           (SELECT count(*) FROM events) AS events
+           (SELECT count(*) FROM events) AS events,
+           (SELECT min(year) FROM seasons) AS first_year,
+           (SELECT max(year) FROM seasons) AS last_year
   `);
   const r = (rows as unknown as Record<string, unknown>[])[0];
+  const firstYear = Number(r.first_year);
+  const lastYear = Number(r.last_year);
   return {
     seriesCount: Number(r.series_count),
     maps: Number(r.maps),
     players: Number(r.players),
     statRows: Number(r.stat_rows),
     events: Number(r.events),
+    firstYear,
+    lastYear,
+    span: firstYear === lastYear ? `${firstYear}` : `${firstYear}–${lastYear}`,
   };
+}
+
+// ---------- Coverage labels ----------
+
+/** e.g. "2017–2026", or a single year when a span covers one season. */
+export function formatYearSpan(firstYear: number, lastYear: number): string {
+  return firstYear === lastYear ? `${firstYear}` : `${firstYear}–${lastYear}`;
+}
+
+export type LeagueSpan = { league: string; firstYear: number; lastYear: number };
+
+function leagueSpanRows(rows: unknown): LeagueSpan[] {
+  return (rows as Record<string, unknown>[]).map((r) => ({
+    league: String(r.league),
+    firstYear: Number(r.first_year),
+    lastYear: Number(r.last_year),
+  }));
+}
+
+/** The years each league ran, oldest first. */
+export async function getLeagueSpans(): Promise<LeagueSpan[]> {
+  const rows = await db.execute(sql`
+    SELECT se.league, min(se.year) AS first_year, max(se.year) AS last_year
+    FROM seasons se
+    WHERE EXISTS (
+      SELECT 1 FROM events e JOIN series s ON s.event_id = e.id
+      WHERE e.season_id = se.id
+    )
+    GROUP BY se.league
+    ORDER BY min(se.year)
+  `);
+  return leagueSpanRows(rows);
+}
+
+/** e.g. "CWL 2017–2019 · CDL 2020–2026", or "archive" for an entity with none. */
+export function formatLeagueSpans(spans: LeagueSpan[]): string {
+  if (spans.length === 0) return "archive";
+  return spans
+    .map((s) => `${s.league} ${formatYearSpan(s.firstYear, s.lastYear)}`)
+    .join(" · ");
+}
+
+/** The years one player appears in, from the maps they have a box score on. */
+export async function getPlayerSpans(playerId: number): Promise<LeagueSpan[]> {
+  const rows = await db.execute(sql`
+    SELECT se.league, min(se.year) AS first_year, max(se.year) AS last_year
+    FROM game_player_stats gps
+    JOIN games g ON g.id = gps.game_id
+    JOIN series s ON s.id = g.series_id
+    JOIN events e ON e.id = s.event_id
+    JOIN seasons se ON se.id = e.season_id
+    WHERE gps.player_id = ${playerId}
+    GROUP BY se.league
+    ORDER BY min(se.year)
+  `);
+  return leagueSpanRows(rows);
+}
+
+/** The years one team appears in, from the series it played. */
+export async function getTeamSpans(teamId: number): Promise<LeagueSpan[]> {
+  const rows = await db.execute(sql`
+    SELECT se.league, min(se.year) AS first_year, max(se.year) AS last_year
+    FROM series s
+    JOIN events e ON e.id = s.event_id
+    JOIN seasons se ON se.id = e.season_id
+    WHERE s.team1_id = ${teamId} OR s.team2_id = ${teamId}
+    GROUP BY se.league
+    ORDER BY min(se.year)
+  `);
+  return leagueSpanRows(rows);
+}
+
+// The site's mode vocabulary: every mode `game_modes` names, in the order they
+// entered the archive. Read once per request by anything that labels or orders
+// by mode, so a new mode is named the moment it is ingested.
+export async function getModeCatalog(): Promise<ModeCatalog> {
+  const rows = await db
+    .select({ slug: gameModes.slug, name: gameModes.name })
+    .from(gameModes)
+    .orderBy(asc(gameModes.id));
+  return {
+    order: rows.map((r) => r.slug),
+    names: Object.fromEntries(rows.map((r) => [r.slug, r.name])),
+  };
+}
+
+// Every archived season in year order, with the league that ran it. The
+// era-coloured charts read their legend from this rather than from a list of
+// the seasons that existed when they were written.
+export async function getSeasonEras(): Promise<SeasonEra[]> {
+  const rows = await db.execute(sql`
+    SELECT se.year, t.short_name AS title, se.league
+    FROM seasons se
+    JOIN titles t ON t.id = se.title_id
+    WHERE EXISTS (SELECT 1 FROM events e WHERE e.season_id = se.id)
+    ORDER BY se.year
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    year: Number(r.year),
+    title: String(r.title),
+    league: String(r.league),
+  }));
 }
 
 // One span per season×title: the shaded era bands on the rating race chart.
@@ -1149,6 +1264,8 @@ export type TeamStint = {
   role: string | null;
   startDate: string;
   endDate: string | null;
+  /** "lpdb" for a dated roster move, "cwl-archive" for one inferred from play. */
+  source: string | null;
 };
 
 export async function getTeamStints(teamId: number): Promise<TeamStint[]> {
@@ -1159,6 +1276,7 @@ export async function getTeamStints(teamId: number): Promise<TeamStint[]> {
       role: rosterStints.role,
       startDate: rosterStints.startDate,
       endDate: rosterStints.endDate,
+      source: rosterStints.source,
     })
     .from(rosterStints)
     .innerJoin(players, eq(players.id, rosterStints.playerId))
@@ -3261,6 +3379,9 @@ export type StyleKResult = {
 
 export type StyleBasis = {
   basis: string;
+  league: string;
+  era: string;
+  years: number[];
   n: number;
   n_columns: number;
   columns: string[];
@@ -3277,11 +3398,21 @@ export type StyleBasis = {
   taxonomy: boolean;
 };
 
-export type PlayerStyle = {
+// The metric layer's columns change wholesale where the two archives meet, so
+// style is fitted once per era and the axes never travel across the seam.
+export type StyleEra = {
+  league: string;
+  era: string;
+  years: number[];
   published_basis: string;
-  min_season_coverage: number;
   n_subjects_total: number;
   ineligible_columns: { column: string; coverage: Record<string, number> }[];
+};
+
+export type PlayerStyle = {
+  min_season_coverage: number;
+  published_bases: string[];
+  eras: StyleEra[];
   bases: StyleBasis[];
 };
 
@@ -3331,4 +3462,117 @@ export async function getPlayerStyle(
       ),
     )
     .orderBy(seasons.year, playerStyleSeason.axis);
+}
+
+// ---------- Map meta: what the map pool was, season by season ----------
+
+export type MapRow = {
+  map: string;
+  games: number;
+  share: number;
+  // Hardpoint/Control carry a running score, so the average winning and losing
+  // score describe how close the map plays. Search & Destroy is a race to 6,
+  // where the losing score alone carries that.
+  avgWinScore: number | null;
+  avgLoseScore: number | null;
+  sweepShare: number | null;
+  decidersShare: number;
+};
+
+export type MapModeGroup = {
+  mode: string;
+  games: number;
+  maps: MapRow[];
+};
+
+export type MapSeason = {
+  year: number;
+  title: string;
+  league: string;
+  games: number;
+  modes: MapModeGroup[];
+};
+
+/**
+ * The map pool per season and mode, counted off decided games.
+ *
+ * Maps are named by the source that recorded the game, so a map renamed
+ * between titles appears under each name it was played as — the season is the
+ * unit here, not the map's identity across a decade.
+ */
+export async function getMapMeta(): Promise<MapSeason[]> {
+  const rows = (await db.execute(sql`
+    WITH decided AS (
+      SELECT se.year, t.short_name AS title, se.league,
+             gm.slug AS mode, m.name AS map,
+             greatest(g.team1_score, g.team2_score) AS win_score,
+             least(g.team1_score, g.team2_score) AS lose_score,
+             (s.team1_score + s.team2_score) AS series_maps,
+             g.ordinal
+      FROM games g
+      JOIN maps m       ON m.id = g.map_id
+      JOIN game_modes gm ON gm.id = g.mode_id
+      JOIN series s     ON s.id = g.series_id
+      JOIN events e     ON e.id = s.event_id
+      JOIN seasons se   ON se.id = e.season_id
+      JOIN titles t     ON t.id = se.title_id
+      WHERE g.winner_team_id IS NOT NULL
+    )
+    SELECT year, title, league, mode, map,
+           count(*)::int AS games,
+           avg(win_score) FILTER (WHERE win_score IS NOT NULL) AS avg_win,
+           avg(lose_score) FILTER (WHERE lose_score IS NOT NULL) AS avg_lose,
+           -- A decider is the last map of a series that went the distance.
+           (count(*) FILTER (WHERE ordinal = series_maps AND series_maps >= 5))::float
+             / count(*) AS deciders_share
+    FROM decided
+    GROUP BY year, title, league, mode, map
+    ORDER BY year, mode, games DESC
+  `)) as unknown as {
+    year: number;
+    title: string;
+    league: string;
+    mode: string;
+    map: string;
+    games: number;
+    avg_win: string | number | null;
+    avg_lose: string | number | null;
+    deciders_share: string | number;
+  }[];
+
+  const num = (v: string | number | null): number | null =>
+    v === null ? null : typeof v === "number" ? v : Number(v);
+
+  const seasonsOut = new Map<number, MapSeason>();
+  for (const r of rows) {
+    let season = seasonsOut.get(r.year);
+    if (!season) {
+      season = { year: r.year, title: r.title, league: r.league, games: 0, modes: [] };
+      seasonsOut.set(r.year, season);
+    }
+    let mode = season.modes.find((m) => m.mode === r.mode);
+    if (!mode) {
+      mode = { mode: r.mode, games: 0, maps: [] };
+      season.modes.push(mode);
+    }
+    mode.maps.push({
+      map: r.map,
+      games: r.games,
+      share: 0,
+      avgWinScore: num(r.avg_win),
+      avgLoseScore: num(r.avg_lose),
+      sweepShare: null,
+      decidersShare: num(r.deciders_share) ?? 0,
+    });
+    mode.games += r.games;
+    season.games += r.games;
+  }
+  const out = [...seasonsOut.values()].sort((a, b) => b.year - a.year);
+  for (const season of out) {
+    for (const mode of season.modes) {
+      for (const m of mode.maps) m.share = mode.games > 0 ? m.games / mode.games : 0;
+    }
+    season.modes.sort((a, b) => b.games - a.games);
+  }
+  return out;
 }

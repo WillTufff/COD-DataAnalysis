@@ -6,6 +6,8 @@ import { PlayersIndexTable } from "./PlayersIndexTable";
 import { IntervalBar, halfWidth, overlaps } from "@/components/charts/RatingInterval";
 import {
   type PlayerIndexSort,
+  formatLeagueSpans,
+  getLeagueSpans,
   getRatingComparison,
   getRatingLeaderboard,
   latestRatingRun,
@@ -83,9 +85,10 @@ export default async function PlayersPage({
   const initialSort: SortState = { id: sort, dir };
 
   // The composite rating board, ranking whole seasons rather than careers.
-  const [ratingBoard, comparison] = await Promise.all([
+  const [ratingBoard, comparison, leagueSpans] = await Promise.all([
     getRatingLeaderboard(ratingRun.id, eraRun.id),
     getRatingComparison(ratingRun.id),
+    getLeagueSpans(),
   ]);
   const brierGain = comparison
     ? 1 -
@@ -120,7 +123,7 @@ export default async function PlayersPage({
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
       <p className="font-mono text-xs text-ink-muted">
-        {total.toLocaleString()} players · CWL 2017–2019
+        {total.toLocaleString()} players · {formatLeagueSpans(leagueSpans)}
         {eraRun.dataThrough && <> · data through {eraRun.dataThrough}</>}
       </p>
       <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">

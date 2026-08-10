@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { H2HMatrix } from "@/components/charts/H2HMatrix";
 import { StandingsTable } from "./StandingsTable";
 import {
+  formatLeagueSpans,
   getEloTimelines,
   getH2HMatrix,
+  getLeagueSpans,
   getSeriesRecords,
   getTeamStandings,
   latestRun,
@@ -43,13 +45,14 @@ export default async function TeamsPage({
   }
 
   const standings = await getTeamStandings(eloRun.id, glickoRun?.id ?? eloRun.id);
-  const [records, timelines, h2hCells] = await Promise.all([
+  const [records, timelines, h2hCells, leagueSpans] = await Promise.all([
     getSeriesRecords(),
     getEloTimelines(
       eloRun.id,
       standings.map((t) => t.teamId),
     ),
     getH2HMatrix(standings.slice(0, 8).map((t) => t.teamId)),
+    getLeagueSpans(),
   ]);
   const sparkByTeam = new Map(timelines.map((tl) => [tl.teamId, tl.points]));
   // The domain spans every team, not just the visible page, so the trajectory
@@ -82,7 +85,7 @@ export default async function TeamsPage({
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
       <p className="font-mono text-xs text-ink-muted">
-        {standings.length} rated teams · CWL 2017–2019
+        {standings.length} rated teams · {formatLeagueSpans(leagueSpans)}
         {eloRun.dataThrough && <> · data through {eloRun.dataThrough}</>}
       </p>
       <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">
