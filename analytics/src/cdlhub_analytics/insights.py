@@ -268,7 +268,7 @@ def milestones(conn: psycopg.Connection[tuple[object, ...]], elo_run: int) -> li
                 tid,
                 "milestone",
                 f"{name}'s peak Elo of {peak:.0f} is the #{rank} team strength "
-                f"recorded across the 2017–2019 archive.",
+                f"recorded in league history.",
                 {"peak_elo": round(peak, 1), "rank": rank, "elo_run_id": elo_run},
                 0.8 - 0.08 * (rank - 1),
             )
@@ -287,7 +287,9 @@ def era_context(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
     JOIN seasons se ON se.id = e.season_id
     JOIN titles t ON t.id = se.title_id
     JOIN game_modes gm ON gm.id = g.mode_id
+    WHERE g.duration_s IS NOT NULL AND gps.kills IS NOT NULL AND gps.deaths IS NOT NULL
     GROUP BY se.id, se.year, t.short_name, gm.name
+    HAVING sum(g.duration_s) > 0
     ORDER BY gm.name, se.year
     """
     by_mode: dict[str, list[tuple[int, int, str, float]]] = {}
@@ -351,7 +353,7 @@ def h2h_edges(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
                     winner,
                     "h2h_edge",
                     f"{names[winner]} won {wins} of {n} decided series against "
-                    f"{names[loser]} across 2017–2019 ({rate * 100:.0f}%).",
+                    f"{names[loser]} all-time ({rate * 100:.0f}%).",
                     {
                         "opponent_id": loser,
                         "opponent": names[loser],

@@ -98,6 +98,7 @@ too subtle for 21 box-score columns to see, and no such claim is made.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
@@ -110,7 +111,17 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int_]
 
 MODEL = "player_style"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+# The metric layer's column set changes wholesale at the archive seam — the CWL
+# years carry the extras/kill-feed catalog, the CDL years the Cito box columns —
+# so one league-wide basis would be reduced to the few columns both eras share.
+# Each era is fitted on its own complete rectangle instead; a player-season
+# belongs to exactly one era, so the published axis rows never collide.
+# Bases are named for the league they were fitted on.
+
+# A basis below this many complete-case player-seasons is not fitted at all.
+MIN_BASIS_N = 50
 
 # A column joins a basis only if it is attainable this often in *every* season.
 # Below it, a metric that exists in one title and is structurally unreachable in
@@ -148,10 +159,32 @@ HORN_PCTL = 95.0
 # Named for what they load on, not for a role, and named in the direction the
 # score runs: a positive `survival` score is a player who dies less, not more.
 # Metrics whose catalog entry says lower is better are flipped on the way in, so
-# a loading has to be read back through that flip before it is named — the
-# fourth axis loads +0.45 on the flipped team-kill column, which is *more* team
-# kills, not fewer. See the module docstring.
-AXIS_NAMES = ("volume", "survival", "streak depth", "risk")
+# a loading has to be read back through that flip before it is named — the risk
+# axis loads +0.45 on the flipped team-kill column, which is *more* team kills,
+# not fewer. See the module docstring.
+#
+# Each name declares the column its axis loads hardest on, with aliases where
+# the catalog carries one quantity under two keys, and is given to the component
+# whose top loading is one of them. Naming by position instead is what broke:
+# the core basis grew from 21 columns to 26, Horn's test began retaining five
+# components rather than four, an assists axis moved into third place, and three
+# published names slid one seat down a career's axes without a number changing.
+#
+# The sign is deliberately not part of the match. `horn_components` pins each
+# component's largest loading positive, so a top loading is positive by
+# construction and an expected sign would assert something already guaranteed.
+AXIS_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("volume", ("kills",)),
+    ("survival", ("deaths",)),
+    ("streak depth", ("deep_streak_rate", "streak6", "streak7")),
+    ("risk", ("eight_plus_streaks", "streak8plus")),
+)
+
+# Dropped from a column key before it is matched: the mode prefix, so an
+# extended basis's per-mode duplicates read as the quantity they measure, and
+# the denominator, so a name survives the per-10-minute/per-map fork the CDL
+# box scores introduced.
+DENOMINATOR_SUFFIXES = ("_p10", "_pm", "_pr", "_total")
 
 
 def params() -> dict[str, Any]:
@@ -202,6 +235,17 @@ class Grid:
     values: FloatArray
     season_of: IntArray
     rating: FloatArray  # NaN where the player-season has no published rating
+    league: str
+    year_of: dict[int, int]  # season id -> calendar year
+
+    @property
+    def years(self) -> list[int]:
+        return sorted({self.year_of[int(s)] for s in self.season_of.tolist()})
+
+    @property
+    def era(self) -> str:
+        years = self.years
+        return f"{years[0]}–{years[-1]}" if years else ""
 
     @property
     def present(self) -> NDArray[np.bool_]:
@@ -236,15 +280,32 @@ FROM player_season_adjusted
 WHERE run_id = %(run)s AND mode_id IS NULL AND rating IS NOT NULL
 """
 
-STABLE_SQL = """
-SELECT COALESCE(mode_id, 0), metric
-FROM player_metric_season
-WHERE run_id = %(run)s
-GROUP BY 1, 2
-HAVING count(DISTINCT season_id) = (
-  SELECT count(DISTINCT season_id) FROM player_metric_season WHERE run_id = %(run)s
-)
-"""
+SEASONS_SQL = "SELECT id, year, league FROM seasons ORDER BY year"
+
+
+@dataclass(frozen=True)
+class Era:
+    """One league's seasons. Style is fitted per era and never across the seam.
+
+    The metric layer's columns change wholesale where the archives meet — the
+    CWL years carry the kill-feed and extras catalog, the CDL years the Cito box
+    columns — so a single league-wide basis would be cut down to the handful of
+    columns both sides happen to share.
+    """
+
+    league: str
+    season_ids: frozenset[int]
+    year_of: dict[int, int]
+
+
+def load_eras(conn: psycopg.Connection[tuple[object, ...]]) -> list[Era]:
+    by_league: dict[str, dict[int, int]] = {}
+    for sid, year, league in conn.execute(SEASONS_SQL):
+        by_league.setdefault(cast(str, league), {})[cast(int, sid)] = cast(int, year)
+    return [
+        Era(league, frozenset(years), dict(years))
+        for league, years in sorted(by_league.items(), key=lambda kv: min(kv[1].values()))
+    ]
 
 
 def load_grid(
@@ -252,21 +313,26 @@ def load_grid(
     metric_run: int,
     rating_run: int,
     orientation: dict[str, bool],
+    era: Era,
 ) -> Grid:
     """Build the feature grid from the metric layer.
 
-    Only metrics present in every season are considered at all; `orientation`
-    flips the ones whose catalog entry says lower is better, so that a positive
-    z always reads as more of the thing the metric names.
+    The grid covers one era's seasons, and only metrics present in every one of
+    them are eligible at all. `orientation` flips the metrics whose catalog
+    entry says lower is better, so that a positive z always reads as more of
+    the thing the metric names.
     """
-    stable = {
-        (cast(int, m), cast(str, k)) for m, k in conn.execute(STABLE_SQL, {"run": metric_run})
-    }
-    rows = [
+    raw = [
         (cast(int, pid), cast(int, sid), cast(int, m), cast(str, k), cast(float, z))
         for pid, sid, m, k, z in conn.execute(FEATURE_SQL, {"run": metric_run})
-        if (m, k) in stable
+        if cast(int, sid) in era.season_ids
     ]
+    seasons_present = {sid for _, sid, _, _, _ in raw}
+    seasons_of_metric: dict[tuple[int, str], set[int]] = {}
+    for _, sid, m, k, _ in raw:
+        seasons_of_metric.setdefault((m, k), set()).add(sid)
+    stable = {mk for mk, seen in seasons_of_metric.items() if seen == seasons_present}
+    rows = [r for r in raw if (r[2], r[3]) in stable]
     columns = sorted({Column(m, k) for _, _, m, k, _ in rows}, key=lambda c: (c.mode_id, c.metric))
     subjects = sorted(
         {Subject(p, s) for p, s, _, _, _ in rows}, key=lambda s: (s.season_id, s.player_id)
@@ -284,7 +350,7 @@ def load_grid(
     }
     rating = np.array([ratings.get((s.player_id, s.season_id), np.nan) for s in subjects])
     season_of = np.array([s.season_id for s in subjects])
-    return Grid(subjects, columns, values, season_of, rating)
+    return Grid(subjects, columns, values, season_of, rating, era.league, era.year_of)
 
 
 @dataclass
@@ -557,7 +623,7 @@ def gaussian_null(
     finds in a cloud built to have no splits, at the same n, the same
     dimension and the same elongation.
     """
-    cov = np.cov(x, rowvar=False)
+    cov = np.atleast_2d(np.cov(x, rowvar=False))
     mean = np.zeros(x.shape[1])
     sils, stabs = [], []
     for _ in range(replicates):
@@ -650,17 +716,39 @@ def assess(x: FloatArray, seed: int = SEED, k_max: int = K_MAX) -> tuple[list[KR
 # ------------------------------------------------------------------ artifacts
 
 
-def axis_label(i: int, basis: str) -> str:
-    """Names belong to the published basis's components, not to a position.
+def marker_column(key: str) -> str:
+    """A loading's column reduced to the quantity it measures."""
+    rest = key.rpartition(":")[2]
+    for suffix in DENOMINATOR_SUFFIXES:
+        if rest.endswith(suffix):
+            return rest[: -len(suffix)]
+    return rest
 
-    The extended basis retains eleven components and they are not the core's
-    four with seven more behind them — its third is the core's fourth, and its
-    fifth is objective play, which the core cannot see at all. Naming those by
-    index would attach a reading to the wrong axis, so they stay numbered.
+
+def axis_names(loadings: FloatArray, columns: Sequence[Column]) -> list[str]:
+    """Name each retained component by the column it loads hardest on.
+
+    Names belong to a basis's components, not to a position: the extended basis
+    retains ten and they are not the core's five with five more behind them —
+    its fourth is objective play, which the core cannot see at all. Assignment
+    is one-to-one and greedy down the components, so the strongest component
+    with a claim on a name gets it; a component whose top loading matches no
+    marker, or whose marker is already taken, stays numbered. That is the honest
+    outcome and it is why the CDL bases, which no one has read loadings off,
+    can be run through the same function rather than left nameless.
     """
-    if basis == "core" and i < len(AXIS_NAMES):
-        return AXIS_NAMES[i]
-    return f"axis {i + 1}"
+    taken: set[str] = set()
+    names: list[str] = []
+    for i in range(loadings.shape[0]):
+        top = marker_column(columns[int(np.argmax(np.abs(loadings[i])))].key)
+        name = next(
+            (n for n, markers in AXIS_MARKERS if n not in taken and top in markers),
+            None,
+        )
+        if name is not None:
+            taken.add(name)
+        names.append(name or f"axis {i + 1}")
+    return names
 
 
 def _percentiles(v: FloatArray) -> FloatArray:
@@ -678,8 +766,12 @@ class BasisFit:
     surviving_k: int
 
     def payload(self) -> dict[str, Any]:
+        names = axis_names(self.components.loadings, self.basis.columns)
         return {
             "basis": self.basis.name,
+            "league": self.basis.grid.league,
+            "era": self.basis.grid.era,
+            "years": self.basis.grid.years,
             "n": self.basis.n,
             "n_columns": len(self.basis.column_idx),
             "columns": [c.key for c in self.basis.columns],
@@ -692,7 +784,7 @@ class BasisFit:
             "axes": [
                 {
                     "index": i + 1,
-                    "name": axis_label(i, self.basis.name),
+                    "name": names[i],
                     "share": self.components.share[i],
                     "loadings": sorted(
                         (
@@ -737,49 +829,65 @@ def build_artifacts(
     rating_run: int,
     orientation: dict[str, bool],
     seed: int = SEED,
-) -> tuple[dict[str, Any], BasisFit | None]:
-    """Fit both bases and return (artifacts, the published fit).
+) -> tuple[dict[str, Any], list[BasisFit]]:
+    """Fit every era's bases and return (artifacts, the published fits).
 
-    The core basis is published because it keeps the league; the extended basis
-    is fitted and reported as the robustness arm, since it is the one carrying
-    objective play and it is also the one whose coverage is era-skewed.
+    Within an era the core basis is published because it keeps the league; the
+    extended basis is fitted and reported as the robustness arm, since it is the
+    one carrying objective play and also the one whose coverage is season-skewed.
     """
-    grid = load_grid(conn, metric_run, rating_run, orientation)
-    core = build_basis(grid, "core", (0,))
-    extended = build_basis(grid, "extended", (0, 1, 2))
-    if core.n < 50:
-        return {}, None
-    core_fit = fit_basis(core, seed)
-    fits = [core_fit]
-    if extended.n >= 50:
-        fits.append(fit_basis(extended, seed))
-    dropped = [
-        {"column": c.key, "coverage": grid.season_coverage(j)}
-        for j, c in enumerate(grid.columns)
-        if not grid.eligible()[j]
-    ]
+    published: list[BasisFit] = []
+    all_fits: list[BasisFit] = []
+    eras: list[dict[str, Any]] = []
+    for era in load_eras(conn):
+        grid = load_grid(conn, metric_run, rating_run, orientation, era)
+        core = build_basis(grid, f"core {era.league}", (0,))
+        if core.n < MIN_BASIS_N:
+            continue
+        core_fit = fit_basis(core, seed)
+        published.append(core_fit)
+        all_fits.append(core_fit)
+        extended = build_basis(grid, f"extended {era.league}", (0, 1, 2))
+        if extended.n >= MIN_BASIS_N:
+            all_fits.append(fit_basis(extended, seed))
+        eras.append(
+            {
+                "league": era.league,
+                "era": grid.era,
+                "years": grid.years,
+                "published_basis": core.name,
+                "n_subjects_total": len(grid.subjects),
+                "ineligible_columns": [
+                    {"column": c.key, "coverage": grid.season_coverage(j)}
+                    for j, c in enumerate(grid.columns)
+                    if not grid.eligible()[j]
+                ],
+            }
+        )
+    if not published:
+        return {}, []
     artifacts = {
         "player_style": {
-            "published_basis": "core",
             "min_season_coverage": MIN_SEASON_COVERAGE,
-            "n_subjects_total": len(grid.subjects),
-            "ineligible_columns": dropped,
-            "bases": [f.payload() for f in fits],
+            "published_bases": [f.basis.name for f in published],
+            "eras": eras,
+            "bases": [f.payload() for f in all_fits],
         }
     }
-    return artifacts, core_fit
+    return artifacts, published
 
 
 def headline(fit: BasisFit) -> str:
+    era = fit.basis.grid.era
     if fit.surviving_k >= 2:
         return (
-            f"{fit.surviving_k} archetypes survive the no-cluster null "
+            f"{era}: {fit.surviving_k} archetypes survive the no-cluster null "
             f"on {fit.basis.n} player-seasons"
         )
     best = max((r for r in fit.results if r.k >= 2), key=lambda r: r.silhouette)
     assert best.silhouette_null is not None
     return (
-        f"no archetypes: the gap statistic prefers k={fit.gap_k}, and the best "
+        f"{era}: no archetypes — the gap statistic prefers k={fit.gap_k}, and the best "
         f"partition (k={best.k}, silhouette {best.silhouette:.3f}) sits inside what an "
         f"unclustered cloud scores ({best.silhouette_null.lo:.3f}-{best.silhouette_null.hi:.3f}). "
         f"{fit.components.n_retained} continuous style axes instead, on "

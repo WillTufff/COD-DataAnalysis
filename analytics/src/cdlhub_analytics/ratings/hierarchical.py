@@ -50,10 +50,16 @@ player in the cohort is fitted, not only the qualified ones, for the same reason
 the shrinkage always used all of them: the prior is applied to short seasons, so
 estimating it from long ones alone would describe a different population.
 
-A cohort with no replication at all, or one whose between-player variance
-collapses to zero, cannot support the fit. It falls back to the constant the old
-pipeline asserted (k = 15) and says so in the artifact rather than silently
-flattening.
+A cohort with no replication at all cannot support the fit. It falls back to the
+constant the old pipeline asserted (k = 15) and says so in the artifact rather
+than silently flattening.
+
+A cohort whose between-player variance collapses to zero is a different case and
+publishes nothing. τ² = 0 says the players in it are not distinguishable by these
+features, and the rating that follows — everybody at exactly 1.00 — is a claim
+that they tied rather than an abstention from the claim. So the rating is stored
+NULL and the cohort is flagged, which is the rule the metric layer already
+applies below MIN_Z_COHORT.
 
 Where 1.00 sits is a presentation choice and stays the one the site already
 publishes: the origin is the qualified cohort's mean posterior score, so the
@@ -83,6 +89,23 @@ EM_TOL = 1e-12  # relative change in τ² that ends the iteration
 # high enough that those finish too, since "did not converge" and "converged at
 # almost no signal" would otherwise be reported as the same thing.
 EM_MAX_ITERS = 100_000
+
+# τ² = 0 is a fixed point of the EM map: b = τ²/(τ²+v) is zero, so θ̂ = μ, so the
+# M-step returns zero again and the loop exits "converged" on its first step
+# having looked at nothing. The moment estimate Var(x) − mean(v) lands exactly
+# there whenever it goes negative, which is a property of σ² being large rather
+# than of the players being alike. So the start is floored at a strictly positive
+# share of the observed spread. EM is monotone in the marginal likelihood, so a
+# cohort whose optimum really is on the boundary still descends to it — it just
+# has to get there by iterating rather than by starting on it.
+TAU2_START_FLOOR = 0.01
+
+# What counts as collapsed: τ² this small a share of the mean observation
+# variance is no signal at all. Tested on the fit rather than on the optimizer,
+# because a run that never iterated is not a run that failed to converge. The
+# cohorts that fit report 0.15 and up on this ratio, so the floor sits an order
+# of magnitude below anything the archive has produced.
+TAU2_COLLAPSE_FLOOR = 0.01
 
 # The audit of v_i = σ²/m: maps resampled within a player-season, same scheme and
 # seed as every other bootstrap here.
@@ -130,15 +153,27 @@ class CohortModel:
         return self.sigma2 / self.tau2 if self.tau2 > 0.0 else float("inf")
 
     @property
-    def collapsed(self) -> bool:
-        """τ² is heading for zero: the cohort's players are not distinguishable.
+    def mean_obs_var(self) -> float:
+        """mean(v_i) at the cohort's average map count: what one season measures."""
+        return self.sigma2 / max(self.n_maps / self.n_players, 1.0)
 
-        EM converges in tens of steps whenever there is real spread to find, and
-        crawls only when the maximum sits on the boundary at τ² = 0. So running
-        out of iterations is not a numerical failure to be retried with a looser
-        tolerance — it is the answer, and the ratings that follow from it are the
-        right ones: everybody at 1.00, with an interval a full population SD wide.
+    @property
+    def collapsed(self) -> bool:
+        """τ² is at zero: the cohort's players are not distinguishable.
+
+        A property of the fit, not of the optimizer. The condition being tested
+        is that between-player variance is negligible beside what a single
+        season's worth of maps measures, which is true whether EM crawled to the
+        boundary over a hundred thousand steps or started on it. Testing the
+        symptom instead — "did not converge" — misses the second case entirely,
+        which is how two seasons came to publish 1.00 for every player.
         """
+        return self.estimated and self.tau2 <= TAU2_COLLAPSE_FLOOR * self.mean_obs_var
+
+    @property
+    def stalled(self) -> bool:
+        """EM ran out of iterations. A separate condition from collapsing: it
+        says the fit is untrustworthy, not that the answer is zero."""
         return self.estimated and not self.converged
 
 
@@ -355,7 +390,8 @@ def fit_cohort(
         factor, calibration = calibrate(usable, scale, fit, raw_sigma2, b)
         sigma2 = raw_sigma2 * factor
         v = sigma2 / maps
-        start = max(float(x.var(ddof=1)) - float(v.mean()), 0.0)
+        spread = float(x.var(ddof=1))
+        start = max(spread - float(v.mean()), TAU2_START_FLOOR * spread)
         mu, tau2, iterations, converged = _em(x, v, start)
         model = CohortModel(
             mu=mu,
@@ -432,6 +468,11 @@ def compute_ratings(
     deliberately unchanged, so that comparing the two estimators isolates the
     estimator — and its variance is Σ w_m² V_m, the modes' posteriors being
     independent given the cohort fits, since no map enters two of them.
+
+    A collapsed cohort contributes a row with a NULL rating and no weight in the
+    blend. Its maps are still counted in the blended row's map total, because the
+    player did play them and the row says how much of the season the rating
+    covers; a season all of whose cohorts collapsed publishes a NULL blend.
     """
     by_player_season: dict[tuple[int, int], list[pr.PlayerModeAgg]] = defaultdict(list)
     for a in aggs:
@@ -443,23 +484,39 @@ def compute_ratings(
     for (pid, season_id), modes in sorted(by_player_season.items()):
         posts: list[Posterior] = []
         weights_m: list[int] = []
+        all_maps = 0
         for a in modes:
             key = (a.season_id, a.mode_id)
             scale, fit, model = scales[key], fits[key], models[key]
             x = float(((a.feats - scale.feat_mu) / scale.feat_sd) @ fit.weights)
             post = posterior(x, a.maps, model)
-            posts.append(post)
-            weights_m.append(a.maps)
+            all_maps += a.maps
+            withheld = model.collapsed
+            if not withheld:
+                posts.append(post)
+                weights_m.append(a.maps)
             out.append(
                 pr.SeasonRating(
                     player_id=pid,
                     season_id=season_id,
                     mode_id=a.mode_id,
                     maps=a.maps,
-                    rating=1.0 + pr.RATING_SCALE * post.z,
-                    rating_sd=pr.RATING_SCALE * post.sd,
+                    rating=None if withheld else 1.0 + pr.RATING_SCALE * post.z,
+                    rating_sd=None if withheld else pr.RATING_SCALE * post.sd,
                 )
             )
+        if not posts:
+            out.append(
+                pr.SeasonRating(
+                    player_id=pid,
+                    season_id=season_id,
+                    mode_id=None,
+                    maps=all_maps,
+                    rating=None,
+                    rating_sd=None,
+                )
+            )
+            continue
         total = float(sum(weights_m))
         share = [m / total for m in weights_m]
         blend = sum(w * p.z for w, p in zip(share, posts, strict=True))
@@ -469,7 +526,7 @@ def compute_ratings(
                 player_id=pid,
                 season_id=season_id,
                 mode_id=None,
-                maps=int(total),
+                maps=all_maps,
                 rating=1.0 + pr.RATING_SCALE * blend,
                 rating_sd=pr.RATING_SCALE * math.sqrt(var),
             )
@@ -491,7 +548,9 @@ def rate(
         return {}
     models = build_models(fitted.aggs, fitted.fits, fitted.scales)
     ratings = compute_ratings(fitted.aggs, fitted.fits, fitted.scales, models)
-    return {(r.player_id, r.season_id, r.mode_id): r.rating for r in ratings}
+    return {
+        (r.player_id, r.season_id, r.mode_id): r.rating for r in ratings if r.rating is not None
+    }
 
 
 # ---------------------------------------------------------------- artifacts
@@ -547,28 +606,37 @@ def compare_estimators(
         for r in legacy
         if (r.player_id, r.season_id, r.mode_id) in keyed
     ]
-    blended = [(new, old) for new, old in pairs if new.mode_id is None]
+    # Player-seasons the posterior withholds have no number to difference, so
+    # they are counted rather than compared: "the old estimator published a
+    # rating here and this one declines to" is itself part of what changed.
+    withheld = sum(1 for new, _ in pairs if new.mode_id is None and new.rating is None)
+    blended = [
+        (new, old, float(new.rating), float(old.rating))
+        for new, old in pairs
+        if new.mode_id is None and new.rating is not None and old.rating is not None
+    ]
     if not blended:
         return {"available": False, "reason": "no blended row in both arms"}
 
-    delta = np.array([new.rating - old.rating for new, old in blended])
+    delta = np.array([n - o for _, _, n, o in blended])
     sd_ratio = [
         new.rating_sd / old.rating_sd
-        for new, old in blended
+        for new, old, _, _ in blended
         if new.rating_sd is not None and old.rating_sd
     ]
-    qualified = [(new, old) for new, old in blended if new.maps >= MIN_MAPS]
-    top_new = {r.player_id for r, _ in sorted(qualified, key=lambda p: -p[0].rating)[:10]}
-    top_old = {r.player_id for _, r in sorted(qualified, key=lambda p: -p[1].rating)[:10]}
+    qualified = [(new, old, n, o) for new, old, n, o in blended if new.maps >= MIN_MAPS]
+    top_new = {r[0].player_id for r in sorted(qualified, key=lambda p: -p[2])[:10]}
+    top_old = {r[1].player_id for r in sorted(qualified, key=lambda p: -p[3])[:10]}
     return {
         "available": True,
         "n_player_seasons": len(blended),
         "n_qualified": len(qualified),
+        "n_withheld": withheld,
         "mean_abs_delta": round(float(np.abs(delta).mean()), 5),
         "max_abs_delta": round(float(np.abs(delta).max()), 5),
         "spearman": (
             None
-            if (s := _spearman([n.rating for n, _ in blended], [o.rating for _, o in blended]))
+            if (s := _spearman([n for _, _, n, _ in blended], [o for _, _, _, o in blended]))
             is None
             else round(s, 5)
         ),
@@ -603,7 +671,7 @@ def artifact(
     for key, model in sorted(models.items()):
         season_id, mode_id = key
         scale = scales[key]
-        observed = math.sqrt(model.tau2 + model.sigma2 / max(model.n_maps / model.n_players, 1.0))
+        observed = math.sqrt(model.tau2 + model.mean_obs_var)
         entries.append(
             {
                 "season_id": season_id,
@@ -623,6 +691,7 @@ def artifact(
                 "iterations": model.iterations,
                 "converged": model.converged,
                 "collapsed": model.collapsed,
+                "stalled": model.stalled,
                 "estimated": model.estimated,
                 "fallback": model.fallback,
                 "loglik": model.loglik,
@@ -637,10 +706,17 @@ def artifact(
         " calibrated per cohort by resampling",
         "em_tol": EM_TOL,
         "em_max_iters": EM_MAX_ITERS,
+        "tau2_start_floor": TAU2_START_FLOOR,
+        "tau2_collapse_floor": TAU2_COLLAPSE_FLOOR,
         "fallback_k": FALLBACK_K,
         "n_cohorts": len(entries),
         "n_fell_back": sum(1 for e in entries if not e["estimated"]),
         "n_collapsed": sum(1 for e in entries if e["collapsed"]),
+        "n_stalled": sum(1 for e in entries if e["stalled"]),
+        "withheld": (
+            "a collapsed cohort publishes no rating: the row carries its map count"
+            " and a NULL rating rather than 1.00 for every player"
+        ),
         "median_k": round(float(np.median(ks)), 2) if ks else None,
         "cohorts": entries,
         "vs_z_shrink": comparison,

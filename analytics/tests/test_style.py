@@ -31,12 +31,14 @@ from cdlhub_analytics.style import (
     Subject,
     _percentiles,
     assess,
+    axis_names,
     build_basis,
     gap_choice,
     gaussian_null,
     horn_components,
     jaccard_stability,
     kmeans,
+    marker_column,
     residualize_quality,
     silhouette,
     standardize,
@@ -208,6 +210,8 @@ def _grid(values: np.ndarray, seasons: list[int], columns: list[Column]) -> Grid
         values=values,
         season_of=np.array(seasons),
         rating=np.zeros(len(seasons)),
+        league="CWL",
+        year_of={s: 2016 + s for s in set(seasons)},
     )
 
 
@@ -243,3 +247,77 @@ def test_coverage_reports_retention_per_season_so_era_skew_is_visible() -> None:
     cov = {c["season_id"]: c for c in basis.coverage()}
     assert cov[1]["kept"] == 20 and cov[1]["share"] == 0.5
     assert cov[2]["kept"] == 40 and cov[2]["share"] == 1.0
+
+
+# ------------------------------------------------------------------ axis names
+
+
+def test_marker_column_drops_the_mode_prefix_and_the_denominator() -> None:
+    """One quantity reaches the loadings under several keys — per mode in an
+    extended basis, per 10 minutes or per map depending on the era. A name has
+    to survive all of them or it moves when the archive gains a column."""
+    assert marker_column("0:kills_p10") == "kills"
+    assert marker_column("1:kills_pm") == "kills"
+    assert marker_column("2:snd_plants_pr") == "snd_plants"
+    assert marker_column("0:eight_plus_streaks_total") == "eight_plus_streaks"
+    assert marker_column("deep_streak_rate") == "deep_streak_rate"
+
+
+def _loadings(rows: list[list[float]]) -> np.ndarray:
+    return np.array(rows, dtype=float)
+
+
+AXIS_COLUMNS = [
+    Column(0, "kills_p10"),
+    Column(0, "deaths_p10"),
+    Column(0, "deep_streak_rate"),
+    Column(0, "assists_pm"),
+]
+
+
+def test_axes_are_named_by_what_they_load_on_not_by_their_position() -> None:
+    """The defect this replaces: names were applied by index, so a basis that
+    gained columns and retained one more component slid three published names
+    one seat down. Here the loadings are deliberately out of the declared order
+    and each name has to follow its own column."""
+    names = axis_names(
+        _loadings(
+            [
+                [0.10, 0.20, 0.90, 0.05],  # deep streaks
+                [0.80, 0.10, 0.05, 0.10],  # kills
+                [0.05, 0.70, 0.10, 0.10],  # deaths
+            ]
+        ),
+        AXIS_COLUMNS,
+    )
+    assert names == ["streak depth", "volume", "survival"]
+
+
+def test_a_component_matching_no_marker_stays_numbered() -> None:
+    """Assists are a real axis of this basis and nobody has named them. Saying
+    so is the honest outcome; the alternative is what shipped, where the assists
+    component wore the name of the streak axis behind it."""
+    names = axis_names(
+        _loadings([[0.80, 0.10, 0.05, 0.10], [0.05, 0.10, 0.10, 0.85]]),
+        AXIS_COLUMNS,
+    )
+    assert names == ["volume", "axis 2"]
+
+
+def test_a_name_is_given_once_and_to_the_stronger_component() -> None:
+    """Two components can top out on the same column. The first — components
+    arrive in eigenvalue order, so the first is the larger — takes the name and
+    the second is numbered rather than sharing it."""
+    names = axis_names(
+        _loadings([[0.80, 0.10, 0.05, 0.10], [0.60, 0.20, 0.10, 0.10]]),
+        AXIS_COLUMNS,
+    )
+    assert names == ["volume", "axis 2"]
+
+
+def test_a_sign_flip_does_not_move_a_name() -> None:
+    """`horn_components` pins the largest loading positive, but the matcher is
+    asked for the largest *magnitude* so that a component reaching it by any
+    other route is still named for the column it describes."""
+    flipped = axis_names(_loadings([[-0.80, 0.10, 0.05, 0.10]]), AXIS_COLUMNS)
+    assert flipped == ["volume"]

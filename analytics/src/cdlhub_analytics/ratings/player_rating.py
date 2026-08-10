@@ -54,11 +54,19 @@ ships with the model, per the publishing rule.
   2.1.0  adds the kill-feed tier (trades, man-advantage) to hardpoint and
          search-and-destroy, for the cohorts that have a feed.
 
-Every feature declares the source columns it reads, and a cohort keeps only
-the features its title actually tracks (measured in maprows, never declared).
-So WWII hardpoint drops hill captures, IW search-and-destroy drops first
-deaths and survival, and BO4 cohorts fall back to the box-score set — each
-without a hand-maintained per-title matrix.
+Every feature declares the source columns it reads — including its denominator,
+which is a measured column like any other — and a cohort keeps only the features
+its title actually tracks (measured in maprows, never declared). So WWII
+hardpoint drops hill captures, IW search-and-destroy drops first deaths and
+survival, and BO4 cohorts fall back to the box-score set — each without a
+hand-maintained per-title matrix.
+
+Map time is the one denominator the archive does not carry everywhere: the CWL
+years record it and the CDL box scores do not. A rate denominated in time is
+therefore declared as a `Paced` pair and resolved per title — per 10 minutes
+where the clock exists, per map where it does not — so the CDL era keeps its
+Hardpoint and Control cohorts instead of losing them one zero denominator at a
+time.
 """
 
 from __future__ import annotations
@@ -76,6 +84,7 @@ import psycopg
 from ..backtest import Prediction
 from ..era import MIN_MAPS
 from ..maprows import (
+    DURATION_KEY,
     MODE_CONTROL,
     MODE_CTF,
     MODE_HARDPOINT,
@@ -134,6 +143,41 @@ class Feature:
     def available(self, coverage: Coverage, title: str) -> bool:
         return all(tracked(coverage, title, src) for src in self.sources)
 
+    def resolve(self, coverage: Coverage, title: str) -> Feature | None:
+        return self if self.available(coverage, title) else None
+
+
+@dataclass(frozen=True)
+class Paced:
+    """One quantity under two denominators, resolved per title.
+
+    Map time is measured across the CWL archive and absent from the CDL box
+    scores, so a per-10-minute rate is unavailable for half of this archive
+    while a per-map one is available for all of it. Declaring both and resolving
+    per title keeps the richer denominator where it exists instead of dropping
+    to the poorer one everywhere — or, as this used to do, dropping the mode.
+
+    Safe because a cohort is one (season × mode) and therefore resolves to
+    exactly one of the two. Team differentials are standardized within a cohort
+    and player aggregates z-scored within the same one, so the seam between the
+    denominators never falls inside a standardization; the choice reaches the
+    fitted weights only through how map length covaries with the profile, which
+    is the honest difference between the eras rather than an artefact.
+    """
+
+    timed: Feature
+    per_map: Feature
+
+    def resolve(self, coverage: Coverage, title: str) -> Feature | None:
+        for feature in (self.timed, self.per_map):
+            if feature.available(coverage, title):
+                return feature
+        return None
+
+
+# What a version's mode entry may hold: a feature, or a pair to choose between.
+FeatureSpec = Feature | Paced
+
 
 def _col(*keys: str) -> Callable[[MapRow], float]:
     return lambda row: sum(row.get(k) for k in keys)
@@ -152,7 +196,13 @@ def _per_map(_row: MapRow) -> float:
 
 
 def _time(key: str, label: str, *sources: str, slaying: bool = False) -> Feature:
-    """A per-10-minute rate."""
+    """A per-10-minute rate.
+
+    The denominator is a source like any other: map time is recorded for some
+    titles and not others, so a feature that reads it is available only where it
+    is tracked. Leaving DURATION_KEY undeclared let a cohort form on numerators
+    alone and then empty itself one zero denominator at a time.
+    """
     cols = sources or (key,)
     return Feature(
         key=f"{key}_p10",
@@ -160,7 +210,7 @@ def _time(key: str, label: str, *sources: str, slaying: bool = False) -> Feature
         numerator=_col(*cols),
         denominator=_per10,
         denom_kind="minutes",
-        sources=cols,
+        sources=(*cols, DURATION_KEY),
         slaying=slaying,
     )
 
@@ -196,7 +246,7 @@ def _per_ctrl_round(
     )
 
 
-def _per_map_feature(key: str, label: str, *sources: str) -> Feature:
+def _per_map_feature(key: str, label: str, *sources: str, slaying: bool = False) -> Feature:
     cols = sources or (key,)
     return Feature(
         key=f"{key}_pm",
@@ -205,25 +255,45 @@ def _per_map_feature(key: str, label: str, *sources: str) -> Feature:
         denominator=_per_map,
         denom_kind="maps",
         sources=cols,
+        slaying=slaying,
     )
 
 
-KILLS_P10 = _time("kills", "Kills per 10 min", slaying=True)
-DEATHS_P10 = _time("deaths", "Deaths per 10 min", slaying=True)
-ASSISTS_P10 = _time("assists", "Assists per 10 min")
+def _paced(key: str, timed: str, per_map: str, *sources: str, slaying: bool = False) -> Paced:
+    """Per 10 minutes where the title records map time, per map where it does not."""
+    return Paced(
+        timed=_time(key, timed, *sources, slaying=slaying),
+        per_map=_per_map_feature(key, per_map, *sources, slaying=slaying),
+    )
 
-# --- 1.0.0: one objective column per mode, everything per 10 minutes ---
+
+KILLS = _paced("kills", "Kills per 10 min", "Kills per map", slaying=True)
+DEATHS = _paced("deaths", "Deaths per 10 min", "Deaths per map", slaying=True)
+ASSISTS = _paced("assists", "Assists per 10 min", "Assists per map")
+
+# --- 1.0.0: one objective column per mode, everything per unit of pace ---
 
 _OBJ_V1 = {
-    MODE_HARDPOINT: _time("obj", "Hill time per 10 min", "hill_time"),
-    MODE_SND: _time("obj", "SnD objective per 10 min", "first_bloods", "plants", "defuses"),
-    MODE_CONTROL: _time("obj", "Captures per 10 min", "ctrl_captures"),
-    MODE_CTF: _time("obj", "Flag plays per 10 min", "ctf_captures", "ctf_returns"),
-    MODE_UPLINK: _time("obj", "Uplink points per 10 min", "uplink_points"),
+    MODE_HARDPOINT: _paced("obj", "Hill time per 10 min", "Hill time per map", "hill_time"),
+    MODE_SND: _paced(
+        "obj",
+        "SnD objective per 10 min",
+        "SnD objective per map",
+        "first_bloods",
+        "plants",
+        "defuses",
+    ),
+    MODE_CONTROL: _paced("obj", "Captures per 10 min", "Captures per map", "ctrl_captures"),
+    MODE_CTF: _paced(
+        "obj", "Flag plays per 10 min", "Flag plays per map", "ctf_captures", "ctf_returns"
+    ),
+    MODE_UPLINK: _paced(
+        "obj", "Uplink points per 10 min", "Uplink points per map", "uplink_points"
+    ),
 }
 
-FEATURES_V1: dict[str, tuple[Feature, ...]] = {
-    mode: (KILLS_P10, DEATHS_P10, ASSISTS_P10, obj) for mode, obj in _OBJ_V1.items()
+FEATURES_V1: dict[str, tuple[FeatureSpec, ...]] = {
+    mode: (KILLS, DEATHS, ASSISTS, obj) for mode, obj in _OBJ_V1.items()
 }
 
 # --- 2.0.0: per-mode intangibles, per-mode denominators ---
@@ -237,12 +307,12 @@ TIME_PER_LIFE = Feature(
     sources=("time_alive_s", "num_lives"),
 )
 
-FEATURES_V2: dict[str, tuple[Feature, ...]] = {
+FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
     MODE_HARDPOINT: (
-        KILLS_P10,
-        DEATHS_P10,
-        _time("hill_time", "Hill time per 10 min"),
-        _time("hill_captures", "Hill captures per 10 min"),
+        KILLS,
+        DEATHS,
+        _paced("hill_time", "Hill time per 10 min", "Hill seconds per map"),
+        _paced("hill_captures", "Hill captures per 10 min", "Hill captures per map"),
         TIME_PER_LIFE,
     ),
     MODE_SND: (
@@ -264,8 +334,8 @@ FEATURES_V2: dict[str, tuple[Feature, ...]] = {
         ),
     ),
     MODE_CONTROL: (
-        KILLS_P10,
-        DEATHS_P10,
+        KILLS,
+        DEATHS,
         _per_map_feature("ctrl_caps", "Captures per map", "ctrl_captures"),
         _per_ctrl_round(
             "ctrl_fb_net_pr",
@@ -276,15 +346,15 @@ FEATURES_V2: dict[str, tuple[Feature, ...]] = {
         ),
     ),
     MODE_CTF: (
-        KILLS_P10,
-        DEATHS_P10,
+        KILLS,
+        DEATHS,
         _per_map_feature("ctf_caps", "Captures per map", "ctf_captures"),
         _per_map_feature("ctf_returns", "Returns per map", "ctf_returns"),
         _per_map_feature("ctf_carry_time_s", "Flag carry seconds per map", "ctf_flag_carry_time_s"),
     ),
     MODE_UPLINK: (
-        KILLS_P10,
-        DEATHS_P10,
+        KILLS,
+        DEATHS,
         _per_map_feature("uplink_points", "Uplink points per map"),
     ),
 }
@@ -335,6 +405,7 @@ TRADE_KILLS_P10 = _feed(
     _per10,
     "minutes",
     KF_TRADE_KILLS,
+    DURATION_KEY,
 )
 TRADE_KILLS_PR = _feed(
     "trade_kills_pr",
@@ -355,13 +426,13 @@ THROWN_DEATHS_PR = _feed(
     "snd_rounds",
 )
 
-FEATURES_V21: dict[str, tuple[Feature, ...]] = {
+FEATURES_V21: dict[str, tuple[FeatureSpec, ...]] = {
     **FEATURES_V2,
     MODE_HARDPOINT: (*FEATURES_V2[MODE_HARDPOINT], UNTRADED_DEATH_RATE, TRADE_KILLS_P10),
     MODE_SND: (*FEATURES_V2[MODE_SND], UNTRADED_DEATH_RATE, TRADE_KILLS_PR, THROWN_DEATHS_PR),
 }
 
-VERSIONS: dict[str, dict[str, tuple[Feature, ...]]] = {
+VERSIONS: dict[str, dict[str, tuple[FeatureSpec, ...]]] = {
     "1.0.0": FEATURES_V1,
     "2.0.0": FEATURES_V2,
     "2.1.0": FEATURES_V21,
@@ -388,9 +459,14 @@ def resolve_features(
     version: str, mode_slug: str, coverage: Coverage, title: str
 ) -> tuple[Feature, ...]:
     """The feature set for one cohort: those whose every source column this
-    title actually tracks. Availability is measured, never declared."""
+    title actually tracks. Availability is measured, never declared.
+
+    A `Paced` entry contributes whichever of its two denominators the title
+    supports, so a title with no map time keeps the quantity rather than losing
+    the feature and, with enough of them, the cohort."""
     spec = VERSIONS[version].get(mode_slug, ())
-    return tuple(f for f in spec if f.available(coverage, title))
+    resolved = (f.resolve(coverage, title) for f in spec)
+    return tuple(f for f in resolved if f is not None)
 
 
 # ------------------------------------------------------------- kill feed
@@ -951,7 +1027,7 @@ class SeasonRating:
     season_id: int
     mode_id: int | None  # None = all-mode blend
     maps: int
-    rating: float
+    rating: float | None  # None = the cohort could not support a rating
     rating_sd: float | None
 
 
@@ -1083,6 +1159,10 @@ def weights_artifact(
             "features": list(cohort.feature_keys),
             "slaying_features": slaying,
             "labels": {f.key: f.label for f in cohort.features},
+            # Which denominator each feature resolved to for this title, so the
+            # doc's feature table is generated rather than transcribed and the
+            # per-10-minute/per-map seam is visible where it actually falls.
+            "denominators": {f.key: f.denom_kind for f in cohort.features},
             "weights": {f: round(float(w), 4) for f, w in named},
             "odds_per_sd": {f: round(float(np.exp(w)), 3) for f, w in named},
         }

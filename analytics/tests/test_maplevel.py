@@ -9,7 +9,11 @@ away from shuffling nothing.
 from __future__ import annotations
 
 import math
+import os
+from collections import defaultdict
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -48,7 +52,11 @@ def _map(
 def _series(
     series_id: int, team1: int, team2: int, results: list[bool], **kw: object
 ) -> list[ml.MapResult]:
-    """One series as a run of maps, modes taken from the WWII rotation."""
+    """One series as a run of maps, modes taken from the WWII rotation.
+
+    Past the fifth map the rotation repeats, which is close enough to how the
+    long formats extend and keeps a seven-map fixture from needing its own
+    declaration — the rollup skips those series either way."""
     rotation = ml.ROTATION["WWII"]
     return [
         _map(
@@ -57,7 +65,7 @@ def _series(
             team1=team1,
             team2=team2,
             team1_won=won,
-            mode=rotation[i],
+            mode=rotation[i % len(rotation)],
             ordinal=i + 1,
             **kw,  # type: ignore[arg-type]
         )
@@ -156,6 +164,19 @@ def test_undecided_series_are_not_rolled_up_but_their_maps_still_rate() -> None:
     assert walk.series_preds["global"] == {}
     assert len(walk.map_preds["global"]) == 2
     assert walk.n_series_rolled == 0
+    assert walk.n_series_other_format == 1
+
+
+def test_a_race_to_four_is_counted_not_rolled_up_as_a_best_of_five() -> None:
+    """A handful of series are best-of-seven or longer, and their recorded
+    `best_of` cannot be used to find them — the column says seven on five-map
+    scorelines. The winner's map count can, and a race _bo5 did not model is
+    skipped and counted rather than scored against the wrong question."""
+    maps = _series(1, 1, 2, [True, False, True, False, True, False, True], day=0)  # 4-3
+    walk = ml.walk_forward(maps, k=16.0)
+    assert walk.n_series_rolled == 0
+    assert walk.n_series_other_format == 1
+    assert len(walk.map_preds["global"]) == 7, "every map still rates"
 
 
 def test_a_title_with_no_declared_rotation_is_counted_not_guessed() -> None:
@@ -163,6 +184,17 @@ def test_a_title_with_no_declared_rotation_is_counted_not_guessed() -> None:
     walk = ml.walk_forward(maps, k=16.0)
     assert walk.n_series_no_rotation == 1
     assert walk.series_preds["global"] == {}
+
+
+def test_every_title_the_rollup_can_meet_declares_a_rotation() -> None:
+    """The counter above exists for a title nobody has declared yet, not as a
+    standing state for half the archive: every title in ROTATION is one the
+    walk-forward pass will actually encounter, and the data-backed check below
+    holds each declaration to what the league played."""
+    assert set(ml.ROTATION) == set(ml.THIRD_MAP)
+    for title, rotation in ml.ROTATION.items():
+        assert len(rotation) == 2 * ml.SERIES_WINS_NEEDED - 1, title
+        assert rotation[3:] == rotation[:2], f"{title}: maps 4 and 5 repeat maps 1 and 2"
 
 
 def test_rollup_predictions_carry_their_series_id() -> None:
@@ -326,3 +358,64 @@ def test_by_mode_partitions_the_maps() -> None:
     assert all(math.isfinite(r["arms"]["global"]["brier"]) for r in rows)
     # "mode" is both a mode slug and an arm name; the slug must survive.
     assert all(isinstance(r["mode"], str) for r in rows)
+
+
+# ------------------------------------------- the declaration against the data
+
+
+ROTATION_MIN_SHARE = 0.95
+ROTATION_MIN_MAPS = 25
+
+
+@pytest.fixture
+def db_conn() -> Iterator[Any]:
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("DATABASE_URL", "postgres://cdlhub:cdlhub@localhost:54329/cdlhub")
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=2)
+    except Exception:  # noqa: BLE001 - any connection failure means no DB here
+        pytest.skip("no database reachable")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def test_every_declared_rotation_is_what_the_league_played(db_conn: Any) -> None:
+    """A declared constant is only trustworthy if something holds it to the
+    archive. The rotation still may not be *derived* from the series being
+    predicted — that would leak the result — so it is declared above and checked
+    here, which is the same split the metric layer draws between an availability
+    it measures and a rotation both teams knew before the series started."""
+    rows = db_conn.execute(
+        "SELECT t.short_name, g.ordinal, gm.slug, count(*)"
+        " FROM games g"
+        " JOIN series s ON s.id = g.series_id"
+        " JOIN events ev ON ev.id = s.event_id"
+        " JOIN seasons se ON se.id = ev.season_id"
+        " JOIN titles t ON t.id = se.title_id"
+        " JOIN game_modes gm ON gm.id = g.mode_id"
+        " WHERE g.ordinal <= %s GROUP BY 1, 2, 3",
+        (2 * ml.SERIES_WINS_NEEDED - 1,),
+    ).fetchall()
+    if not rows:
+        pytest.skip("no games loaded")
+
+    played: dict[tuple[str, int], dict[str, int]] = defaultdict(dict)
+    for title, ordinal, slug, n in rows:
+        played[(title, ordinal)][slug] = n
+
+    # Every title with maps in the archive has to be declared, or the rollup
+    # silently skips its whole era — which is the defect this test exists for.
+    assert {t for t, _ in played} <= set(ml.ROTATION)
+
+    for (title, ordinal), modes in sorted(played.items()):
+        total = sum(modes.values())
+        if total < ROTATION_MIN_MAPS:  # a handful of maps decides nothing
+            continue
+        declared = ml.ROTATION[title][ordinal - 1]
+        share = modes.get(declared, 0) / total
+        assert share >= ROTATION_MIN_SHARE, (
+            f"{title} map {ordinal}: declared {declared} at {share:.3f} of {total} maps,"
+            f" played {sorted(modes.items(), key=lambda kv: -kv[1])}"
+        )

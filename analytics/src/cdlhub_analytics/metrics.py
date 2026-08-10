@@ -26,6 +26,7 @@ import psycopg
 from .cohort import z_and_pctl
 from .era import MIN_MAPS
 from .maprows import (
+    DURATION_KEY,
     KILL_DIST,
     MIN_NONZERO_ROWS,
     MODE_CONTROL,
@@ -48,7 +49,13 @@ MODEL = "metric_layer"
 # 2.1.0 adds the series-shaped team metrics (series win rate, deciding-map win
 # rate, kill differential), giving the all-modes team cohort more than two
 # populated columns.
-VERSION = "2.1.0"
+# 2.2.0 publishes the per-map metrics for every title rather than only where map
+# time is missing, so a slaying column spans both archives. The per-10-minute
+# forms are unchanged and still stop where map time does.
+# 2.3.0 drops the map-duration filter from the team-metric query, so team metrics
+# cover every season rather than only the timed ones, and pairs the objective-vs-
+# slaying split with whichever slaying column its title publishes.
+VERSION = "2.3.0"
 
 ALL_MODES = "__all__"
 
@@ -275,6 +282,19 @@ def _pm(*keys: str) -> Callable[[Aggregate], Computed]:
     return compute
 
 
+def _weighted_pm(terms: Terms) -> Callable[[Aggregate], Computed]:
+    def compute(agg: Aggregate) -> Computed:
+        return _ratio(_weighted(agg, terms), float(agg.maps))
+
+    return compute
+
+
+def _damage_pm(agg: Aggregate) -> Computed:
+    """Per map over only the maps that reported damage."""
+    maps_with_damage = float(agg.present_maps.get("damage", 0))
+    return _ratio(agg.total("damage"), maps_with_damage)
+
+
 def _total(*keys: str) -> Callable[[Aggregate], Computed]:
     """Raw count over the slice, qualified by maps played."""
     terms = _terms(*keys)
@@ -447,7 +467,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="sum(kills) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("kills",),
+        sources=("kills", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("kills"),
     ),
@@ -461,7 +481,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="sum(deaths) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("deaths",),
+        sources=("deaths", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("deaths"),
     ),
@@ -475,7 +495,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="(sum(kills) - sum(deaths)) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("kills", "deaths"),
+        sources=("kills", "deaths", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_weighted_p10((("kills", 1.0), ("deaths", -1.0))),
     ),
@@ -489,7 +509,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="(sum(kills) + sum(deaths)) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("kills", "deaths"),
+        sources=("kills", "deaths", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("kills", "deaths"),
         note="A pace and aggression axis rather than a quality one.",
@@ -504,7 +524,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="sum(assists) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("assists",),
+        sources=("assists", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("assists"),
     ),
@@ -518,7 +538,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="sum(ekia) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("ekia",),
+        sources=("ekia", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("ekia"),
         note="Kills plus assists that counted as eliminations.",
@@ -533,7 +553,7 @@ _SLAYING: tuple[Metric, ...] = (
         formula="sum(damage) / sum(duration_s of maps reporting damage) * 600",
         denom_kind="maps with damage",
         min_denom=float(MIN_MAPS),
-        sources=("damage",),
+        sources=("damage", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_damage_p10,
         note="Damage is missing on a share of maps; the rate uses only maps that reported it.",
@@ -622,7 +642,7 @@ _DISCIPLINE: tuple[Metric, ...] = (
         formula="sum(num_lives) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("num_lives",),
+        sources=("num_lives", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("num_lives"),
     ),
@@ -701,7 +721,7 @@ _BURST: tuple[Metric, ...] = (
         formula="sum(2_piece) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("2_piece",),
+        sources=("2_piece", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("2_piece"),
     ),
@@ -715,7 +735,7 @@ _BURST: tuple[Metric, ...] = (
         formula="sum(3_piece) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("3_piece",),
+        sources=("3_piece", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("3_piece"),
     ),
@@ -729,7 +749,7 @@ _BURST: tuple[Metric, ...] = (
         formula="sum(4_piece) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("4_piece",),
+        sources=("4_piece", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("4_piece"),
     ),
@@ -743,7 +763,7 @@ _BURST: tuple[Metric, ...] = (
         formula="(sum(2_piece) + 2*sum(3_piece) + 4*sum(4_piece)) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("2_piece", "3_piece", "4_piece"),
+        sources=("2_piece", "3_piece", "4_piece", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_weighted_p10((("2_piece", 1.0), ("3_piece", 2.0), ("4_piece", 4.0))),
         note="Burst slaying weighted so each multikill tier counts double the last.",
@@ -859,7 +879,7 @@ _HARDPOINT: tuple[Metric, ...] = (
         formula="sum(hill_time) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("hill_time",),
+        sources=("hill_time", DURATION_KEY),
         modes=(MODE_HARDPOINT,),
         compute=_p10("hill_time"),
     ),
@@ -888,7 +908,7 @@ _HARDPOINT: tuple[Metric, ...] = (
         formula="sum(hill_captures) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("hill_captures",),
+        sources=("hill_captures", DURATION_KEY),
         modes=(MODE_HARDPOINT,),
         compute=_p10("hill_captures"),
     ),
@@ -902,7 +922,7 @@ _HARDPOINT: tuple[Metric, ...] = (
         formula="sum(hill_defends) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("hill_defends",),
+        sources=("hill_defends", DURATION_KEY),
         modes=(MODE_HARDPOINT,),
         compute=_p10("hill_defends"),
     ),
@@ -1328,7 +1348,7 @@ _UPLINK: tuple[Metric, ...] = (
         formula="sum(uplink_points) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("uplink_points",),
+        sources=("uplink_points", DURATION_KEY),
         modes=(MODE_UPLINK,),
         compute=_p10("uplink_points"),
     ),
@@ -1463,7 +1483,7 @@ _SCORESTREAKS: tuple[Metric, ...] = (
         formula="sum(scorestreaks_earned) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("scorestreaks_earned",),
+        sources=("scorestreaks_earned", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("scorestreaks_earned"),
     ),
@@ -1491,7 +1511,7 @@ _SCORESTREAKS: tuple[Metric, ...] = (
         formula="sum(scorestreaks_kills) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("scorestreaks_kills",),
+        sources=("scorestreaks_kills", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("scorestreaks_kills"),
     ),
@@ -1505,7 +1525,7 @@ _SCORESTREAKS: tuple[Metric, ...] = (
         formula="sum(scorestreaks_assists) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("scorestreaks_assists",),
+        sources=("scorestreaks_assists", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("scorestreaks_assists"),
     ),
@@ -1519,7 +1539,7 @@ _SCORESTREAKS: tuple[Metric, ...] = (
         formula="sum(payloads_earned) / sum(duration_s) * 600",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("payloads_earned",),
+        sources=("payloads_earned", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("payloads_earned"),
     ),
@@ -1533,7 +1553,7 @@ _SCORESTREAKS: tuple[Metric, ...] = (
         formula="sum(player_score) / (sum(duration_s) / 60)",
         denom_kind="maps",
         min_denom=float(MIN_MAPS),
-        sources=("player_score",),
+        sources=("player_score", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=lambda agg: (
             None if agg.minutes <= 0 else (agg.total("player_score") / agg.minutes, float(agg.maps))
@@ -1724,8 +1744,174 @@ _ADVANTAGE: tuple[Metric, ...] = (
     ),
 )
 
+# Map time is measured in the CWL archive and absent from the CDL box scores, so
+# every per-10-minute metric above stops at the archive seam. These are the same
+# quantities normalized by maps instead, which every title supports, so a column
+# from this group spans both archives — together with the columns the CDL source
+# adds that the archive never had.
+_UNTIMED: tuple[Metric, ...] = (
+    Metric(
+        key="kills_pm",
+        label="Kills per map",
+        category="slaying",
+        tier="gold",
+        unit="per map",
+        higher_is_better=True,
+        formula="sum(kills) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("kills",),
+        modes=(ALL_MODES,),
+        compute=_pm("kills"),
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="deaths_pm",
+        label="Deaths per map",
+        category="slaying",
+        tier="gold",
+        unit="per map",
+        higher_is_better=False,
+        formula="sum(deaths) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("deaths",),
+        modes=(ALL_MODES,),
+        compute=_pm("deaths"),
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="plus_minus_pm",
+        label="Plus/minus per map",
+        category="slaying",
+        tier="gold",
+        unit="per map",
+        higher_is_better=True,
+        formula="(sum(kills) - sum(deaths)) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("kills", "deaths"),
+        modes=(ALL_MODES,),
+        compute=_weighted_pm((("kills", 1.0), ("deaths", -1.0))),
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="engagement_pm",
+        label="Engagements per map",
+        category="slaying",
+        tier="standard",
+        unit="per map",
+        higher_is_better=True,
+        formula="(sum(kills) + sum(deaths)) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("kills", "deaths"),
+        modes=(ALL_MODES,),
+        compute=_pm("kills", "deaths"),
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="assists_pm",
+        label="Assists per map",
+        category="slaying",
+        tier="standard",
+        unit="per map",
+        higher_is_better=True,
+        formula="sum(assists) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("assists",),
+        modes=(ALL_MODES,),
+        compute=_pm("assists"),
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="damage_pm",
+        label="Damage per map",
+        category="slaying",
+        tier="gold",
+        unit="per map",
+        higher_is_better=True,
+        formula="sum(damage) / maps reporting damage",
+        denom_kind="maps with damage",
+        min_denom=float(MIN_MAPS),
+        sources=("damage",),
+        modes=(ALL_MODES,),
+        compute=_damage_pm,
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="non_traded_kill_rate",
+        label="Non-traded kill rate",
+        category="slaying",
+        tier="gold",
+        unit="share of kills",
+        higher_is_better=True,
+        formula="sum(non_traded_kills) / sum(kills)",
+        denom_kind="kills",
+        min_denom=float(MIN_KILLS),
+        sources=("non_traded_kills", "kills"),
+        modes=(ALL_MODES,),
+        compute=_rate(_terms("non_traded_kills"), "kills"),
+        note=(
+            "A kill the opposing team did not answer. Counted by the data "
+            "source rather than reconstructed from a kill feed, so it is not "
+            "the same measurement as the archive's trade columns."
+        ),
+    ),
+    Metric(
+        key="hill_time_pm",
+        label="Hill seconds per map",
+        category="objective",
+        tier="gold",
+        unit="seconds per map",
+        higher_is_better=True,
+        formula="sum(hill_time) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("hill_time",),
+        modes=(MODE_HARDPOINT,),
+        compute=_pm("hill_time"),
+        note="Per map rather than per unit of time, which every title records.",
+    ),
+    Metric(
+        key="contested_hill_share",
+        label="Contested hill share",
+        category="objective",
+        tier="gold",
+        unit="share of hill time",
+        higher_is_better=True,
+        formula="sum(contested_hill_time) / sum(hill_time)",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("contested_hill_time", "hill_time"),
+        modes=(MODE_HARDPOINT,),
+        compute=_rate_over_maps(_terms("contested_hill_time"), _terms("hill_time")),
+        note="Hill time held while an opponent was also on the hill.",
+    ),
+    Metric(
+        key="clutch_wins_pr",
+        label="Clutch wins per round",
+        category="objective",
+        tier="fun",
+        unit="per round",
+        higher_is_better=True,
+        formula="sum(clutch_1v1 … clutch_1v4) / sum(snd_rounds)",
+        denom_kind="rounds",
+        min_denom=float(MIN_SND_ROUNDS),
+        sources=("clutch_1v1", "snd_rounds"),
+        modes=(MODE_SND,),
+        compute=_rate(_terms("clutch_1v1", "clutch_1v2", "clutch_1v3", "clutch_1v4"), "snd_rounds"),
+        note=(
+            "Rounds won as the last player alive, counted by the data source. "
+            "Rare enough that a season total is a handful of rounds."
+        ),
+    ),
+)
+
 CATALOG: tuple[Metric, ...] = (
     *_SLAYING,
+    *_UNTIMED,
     *_DISCIPLINE,
     *_BURST,
     *_HARDPOINT,
@@ -2237,10 +2423,13 @@ SPLIT_METRIC = Metric(
     tier="standard",
     unit="z difference",
     higher_is_better=True,
-    formula="z(hill_time_share) - z(kills_p10), within the same season and mode",
+    formula=(
+        "z(hill_time_share) - z(kills_p10, or kills_pm where the title records no map time),"
+        " within the same season and mode"
+    ),
     denom_kind="maps",
     min_denom=float(MIN_MAPS),
-    sources=("hill_time",),
+    sources=("hill_time", "kills"),
     modes=(MODE_HARDPOINT,),
     compute=lambda _agg: None,
     note=(
@@ -2250,6 +2439,11 @@ SPLIT_METRIC = Metric(
 )
 
 
+# Slaying columns the split can pair with, most preferred first: the per-10-minute
+# form where the title records map time, the per-map form everywhere else.
+SPLIT_SLAY_KEYS: tuple[str, ...] = ("kills_p10", "kills_pm")
+
+
 def _split_rows(run_id: int, loaded: Loaded, rows: list[PlayerRow]) -> list[PlayerRow]:
     hardpoint_ids = {agg.mode_id for agg in loaded.aggregates if agg.mode_slug == MODE_HARDPOINT}
     z_by: dict[tuple[str, int, int, int | None], float] = {}
@@ -2257,7 +2451,7 @@ def _split_rows(run_id: int, loaded: Loaded, rows: list[PlayerRow]) -> list[Play
     for _, player_id, season_id, mode_id, metric, _, denom, z, _, _ in rows:
         if mode_id not in hardpoint_ids or z is None:
             continue
-        if metric in ("hill_time_share", "kills_p10"):
+        if metric == "hill_time_share" or metric in SPLIT_SLAY_KEYS:
             z_by[(metric, player_id, season_id, mode_id)] = z
             if metric == "hill_time_share":
                 denom_by[(player_id, season_id, mode_id)] = denom
@@ -2266,7 +2460,14 @@ def _split_rows(run_id: int, loaded: Loaded, rows: list[PlayerRow]) -> list[Play
     for (metric, player_id, season_id, mode_id), z in z_by.items():
         if metric != "hill_time_share":
             continue
-        slay = z_by.get(("kills_p10", player_id, season_id, mode_id))
+        slay = next(
+            (
+                s
+                for s in (z_by.get((key, player_id, season_id, mode_id)) for key in SPLIT_SLAY_KEYS)
+                if s is not None
+            ),
+            None,
+        )
         if slay is None:
             continue
         denom = denom_by[(player_id, season_id, mode_id)]
@@ -2358,7 +2559,6 @@ JOIN series s      ON s.id = g.series_id
 JOIN events ev     ON ev.id = s.event_id
 JOIN seasons se    ON se.id = ev.season_id
 JOIN game_modes gm ON gm.id = g.mode_id
-WHERE g.duration_s IS NOT NULL
 """
 
 

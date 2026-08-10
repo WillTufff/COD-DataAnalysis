@@ -78,18 +78,31 @@ ARMS = ("global", "mode", "blend")
 
 # The mode rotation each title plays, in map order. This is a league rule, not
 # an observation of these series: it is what both teams know they are walking
-# into. Every title's first three maps are fixed and the last two repeat the
+# into. Deriving it from the series being predicted would leak the result, so it
+# is declared here and checked against the archive by a test rather than read
+# off it. Every title's first three maps are fixed and the last two repeat the
 # first two, which is why a best-of-five rollup needs only this.
+#
+# Maps 1, 2, 4 and 5 are Hardpoint, Search, Hardpoint, Search in every title the
+# archive covers, so the third map is the only thing that varies and the only
+# thing declared per title. A title missing from this table has no rollup at
+# all — the condition `checks.sh` fails on, since a new title arriving without a
+# rotation is exactly what should stop a release.
+THIRD_MAP: dict[str, str] = {
+    "IW": "uplink",
+    "WWII": "capture-the-flag",
+    "BO4": "control",
+    "MW19": "domination",
+    "BOCW": "control",
+    "VG": "control",
+    "MWII": "control",
+    "MWIII": "control",
+    "BO6": "control",
+    "BO7": "overload",
+}
 ROTATION: dict[str, tuple[str, ...]] = {
-    "IW": ("hardpoint", "search-and-destroy", "uplink", "hardpoint", "search-and-destroy"),
-    "WWII": (
-        "hardpoint",
-        "search-and-destroy",
-        "capture-the-flag",
-        "hardpoint",
-        "search-and-destroy",
-    ),
-    "BO4": ("hardpoint", "search-and-destroy", "control", "hardpoint", "search-and-destroy"),
+    title: ("hardpoint", "search-and-destroy", third, "hardpoint", "search-and-destroy")
+    for title, third in THIRD_MAP.items()
 }
 SERIES_WINS_NEEDED = 3
 
@@ -240,6 +253,7 @@ class Walk:
     state: State
     n_series_rolled: int
     n_series_no_rotation: int
+    n_series_other_format: int  # not a race to three, so no best-of-five rollup
 
 
 def _bo5(ps: Sequence[float]) -> float:
@@ -293,6 +307,7 @@ def walk_forward(
     at = 0
     rolled = 0
     no_rotation = 0
+    other_format = 0
 
     for block in _series_blocks(maps):
         head = block[0]
@@ -302,11 +317,19 @@ def walk_forward(
         # nothing inside the series informs the series prediction. Series whose
         # maps are archived without a winner are still rolled up — the rollup
         # asks about the series, and the series has a winner.
+        #
+        # Whether this was a race to three is read from the winner's map count
+        # and not from `best_of`, which is unreliable: series are recorded as
+        # best-of-seven on five-map scorelines and vice versa. A race to four
+        # or a series the archive holds two maps of is counted and skipped,
+        # because _bo5 would be answering a question those series did not ask.
         rotation = ROTATION.get(head.title)
         wins1 = sum(1 for m in block if m.team1_won)
         wins2 = len(block) - wins1
         if rotation is None:
             no_rotation += 1
+        elif max(wins1, wins2) != SERIES_WINS_NEEDED:
+            other_format += 1
         elif wins1 != wins2:
             for arm in ARMS:
                 p = _bo5([state.predict(arm, l1, l2, mode) for mode in rotation])
@@ -335,6 +358,7 @@ def walk_forward(
         state=state,
         n_series_rolled=rolled,
         n_series_no_rotation=no_rotation,
+        n_series_other_format=other_format,
     )
 
 
@@ -604,6 +628,7 @@ def build_artifacts(
         "series_rollup": {
             "n_series": walk.n_series_rolled,
             "n_series_no_rotation": walk.n_series_no_rotation,
+            "n_series_other_format": walk.n_series_other_format,
             "wins_needed": SERIES_WINS_NEEDED,
             "rotation": {t: list(r) for t, r in ROTATION.items()},
             "method": (

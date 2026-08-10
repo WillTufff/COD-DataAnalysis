@@ -14,23 +14,16 @@ from cdlhub_analytics.metrics import (
 )
 
 
-def full_coverage(*, exclude: dict[str, set[str]] | None = None) -> Coverage:
+def full_coverage(
+    *,
+    exclude: dict[str, set[str]] | None = None,
+    titles: tuple[str, ...] = maprows.TITLE_ORDER,
+) -> Coverage:
     """Every column tracked for every title, minus any named exclusions."""
     excluded = exclude or {}
-    columns = (
-        *maprows.NUMERIC_EXTRAS,
-        "avg_kill_dist_m",
-        "kills",
-        "deaths",
-        "assists",
-        "hill_time",
-        "first_bloods",
-        "plants",
-        "defuses",
-        "damage",
-    )
+    columns = (*maprows.MEASURED_KEYS, maprows.DURATION_KEY)
     coverage: Coverage = {}
-    for title in maprows.TITLE_ORDER:
+    for title in titles:
         coverage[title] = {
             col: KeyCoverage(
                 rows=1000, present=1000, nonzero=0 if col in excluded.get(title, set()) else 1000
@@ -137,7 +130,10 @@ def test_zero_denominator_emits_nothing(key: str, agg: Aggregate) -> None:
 
 
 def test_titles_derived_from_which_columns_carry_data() -> None:
-    cov = full_coverage(exclude={"IW": {"snd_firstdeaths"}, "BO4": {"kills_stayed_alive"}})
+    cov = full_coverage(
+        exclude={"IW": {"snd_firstdeaths"}, "BO4": {"kills_stayed_alive"}},
+        titles=("IW", "WWII", "BO4"),
+    )
     assert metric_by_key("snd_fb_net_pr").titles(cov) == ("WWII", "BO4")
     assert metric_by_key("clean_kill_rate").titles(cov) == ("IW", "WWII")
     assert metric_by_key("kills_p10").titles(cov) == ("IW", "WWII", "BO4")
@@ -289,7 +285,7 @@ def test_catalog_entries_well_formed() -> None:
     for m in CATALOG:
         assert m.tier in {"gold", "standard", "fun", "gold-fun"}
         assert m.sources
-        assert set(m.titles(cov)) <= {"IW", "WWII", "BO4"}
+        assert set(m.titles(cov)) <= set(maprows.TITLE_ORDER)
         assert m.modes
         assert m.min_denom > 0
         assert m.label and m.unit and m.formula
@@ -526,20 +522,10 @@ def test_no_duplicate_keys_across_player_and_team_catalogs() -> None:
 
 def test_every_metric_names_sources_that_exist() -> None:
     known = (
-        set(maprows.NUMERIC_EXTRAS)
+        set(maprows.MEASURED_KEYS)
         | set(metrics.KF_KEYS)
         | set(metrics.CLUTCH_KEYS)
-        | {
-            "avg_kill_dist_m",
-            "kills",
-            "deaths",
-            "assists",
-            "hill_time",
-            "first_bloods",
-            "plants",
-            "defuses",
-            "damage",
-        }
+        | {maprows.DURATION_KEY}
     )
     for m in CATALOG:
         assert set(m.sources) <= known, f"{m.key} names an unknown source"

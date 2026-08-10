@@ -6,7 +6,7 @@ import math
 from datetime import date, timedelta
 
 import numpy as np
-from test_player_rating import V1_COLUMNS, coverage_for, synthetic_rows
+from test_player_rating import LEAGUE_SKILL, V1_COLUMNS, coverage_for, synthetic_rows
 
 from cdlhub_analytics.backtest import Prediction
 from cdlhub_analytics.maprows import MODE_HARDPOINT, MapRow
@@ -217,7 +217,7 @@ def test_fit_prefix_arms_rates_the_same_seasons_two_ways() -> None:
     """The comparison in Test B is only a comparison of estimators if both arms
     see identical cohorts, weights and aggregates. So the two tables must cover
     exactly the same keys and differ only in the values."""
-    rows = synthetic_rows()
+    rows = synthetic_rows(n_games=150, skills=LEAGUE_SKILL)
     coverage = coverage_for("WWII", V1_COLUMNS)
     arms = fit_prefix_arms(rows, coverage, "1.0.0")
     assert set(arms) == set(pr.ESTIMATORS)
@@ -229,6 +229,17 @@ def test_fit_prefix_arms_rates_the_same_seasons_two_ways() -> None:
     # Both keep the ordering the synthetic skills imply: 11 > 12 in the blend.
     for table in (hier, legacy):
         assert table[(11, 1, None)] > table[(12, 1, None)]
+
+
+def test_a_cohort_the_variance_fit_cannot_support_is_rated_by_one_arm_only() -> None:
+    """Four players, and the spread of their season scores is smaller than the
+    noise on any one of them. The hierarchical arm says so by publishing nothing
+    for them; the fixed-constant arm has no way to notice and rates them anyway.
+    The prefix therefore has to tolerate arms of different sizes — a missing
+    rating is a rating withheld, not a key the two estimators disagree about."""
+    arms = fit_prefix_arms(synthetic_rows(), coverage_for("WWII", V1_COLUMNS), "1.0.0")
+    assert not arms["hierarchical"]
+    assert arms["z_shrink"]
 
 
 def test_fit_prefix_arms_is_empty_when_the_prefix_cannot_be_fitted() -> None:

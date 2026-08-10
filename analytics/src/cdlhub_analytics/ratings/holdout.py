@@ -265,7 +265,9 @@ def fit_prefix_arms(
         "z_shrink": pr.compute_ratings(fitted.aggs, fitted.fits, fitted.scales, bootstrap=False),
     }
     return {
-        name: {(r.player_id, r.season_id, r.mode_id): r.rating for r in ratings}
+        name: {
+            (r.player_id, r.season_id, r.mode_id): r.rating for r in ratings if r.rating is not None
+        }
         for name, ratings in arms.items()
     }
 

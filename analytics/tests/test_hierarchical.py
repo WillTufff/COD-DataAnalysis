@@ -20,6 +20,8 @@ from cdlhub_analytics.ratings import hierarchical as hier
 from cdlhub_analytics.ratings import player_rating as pr
 from cdlhub_analytics.ratings.hierarchical import (
     FALLBACK_K,
+    TAU2_COLLAPSE_FLOOR,
+    TAU2_START_FLOOR,
     CohortModel,
     _em,
     _loglik,
@@ -33,6 +35,13 @@ from cdlhub_analytics.ratings.hierarchical import (
 from cdlhub_analytics.regress import LogisticFit
 
 UNIT = (np.array([0.0]), np.array([1.0]), np.array([1.0]))  # feat_mu, feat_sd, weights
+
+
+def rated(row: pr.SeasonRating) -> float:
+    """The rating as a number. A row that withholds one fails the test that
+    asked for it rather than being compared against None."""
+    assert row.rating is not None, (row.player_id, row.season_id, row.mode_id)
+    return row.rating
 
 
 def one_feature_cohort(
@@ -321,6 +330,60 @@ def test_cohort_with_no_real_spread_says_so_in_its_intervals() -> None:
     assert post.sd > abs(post.z), "an interval that fails to cover zero would be a claim"
 
 
+def test_zero_is_a_fixed_point_of_the_em_map() -> None:
+    """Started at τ² = 0 the loop returns zero and calls it convergence: b is
+    zero, so θ̂ is μ, so the M-step returns zero again on step one having looked
+    at nothing. Pinned here because it is the mechanism the start floor exists to
+    avoid, and because no tolerance escapes it — a later loosening of EM_TOL
+    would leave this exactly as it is."""
+    rng = np.random.default_rng(9)
+    x = rng.normal(0.0, 1.5, size=200)
+    v = np.full(200, 0.25)
+    _mu, tau2, iterations, converged = _em(x, v, 0.0)
+    assert converged and iterations == 1 and tau2 < 1e-9
+    # The same data from a positive start finds the spread that is really there.
+    _mu2, tau2_floored, iters, _ = _em(x, v, TAU2_START_FLOOR * float(x.var(ddof=1)))
+    assert iters > 1
+    assert tau2_floored == pytest.approx(float(x.var()) - 0.25, rel=0.05)
+
+
+def test_a_negative_moment_estimate_does_not_start_on_the_boundary() -> None:
+    """Var(x) − mean(v) goes negative when σ² is large, which is a property of the
+    noise rather than of the players. Starting there is starting on the fixed
+    point, which is how two published seasons came to rate every player 1.00; the
+    floor makes the fit iterate to the boundary instead of assuming it."""
+    members = one_feature_cohort(60, 40, sigma=2.0, tau=0.0, seed=31)
+    model = fit_cohort(members, scale_for(members), unit_fit())
+    assert model is not None and model.estimated
+    assert model.iterations > 1, "a fit that never iterated has not looked at the cohort"
+    # It arrives where the data really is, and says so on both flags.
+    assert model.collapsed and model.stalled
+
+
+def test_a_cohort_with_spread_is_neither_collapsed_nor_stalled() -> None:
+    members = one_feature_cohort(200, 30, sigma=2.0, tau=1.0, seed=17)
+    model = fit_cohort(members, scale_for(members), unit_fit())
+    assert model is not None
+    assert not model.collapsed and not model.stalled
+    assert model.tau2 > TAU2_COLLAPSE_FLOOR * model.mean_obs_var
+
+
+def test_a_collapsed_cohort_publishes_no_rating() -> None:
+    """1.00 for every player is a claim that they tied, not an abstention from
+    the claim. So the row keeps its map count and drops its number — the same
+    rule the metric layer applies below MIN_Z_COHORT."""
+    members = one_feature_cohort(60, 40, sigma=2.0, tau=0.0, seed=31)
+    scales = {(1, 1): scale_for(members)}
+    fits = {(1, 1): unit_fit()}
+    models = hier.build_models(members, fits, scales)
+    assert models[(1, 1)].collapsed
+    ratings = compute_ratings(members, fits, scales, models)
+    assert ratings and all(r.rating is None and r.rating_sd is None for r in ratings)
+    blend = [r for r in ratings if r.mode_id is None]
+    assert len(blend) == len(members)
+    assert all(r.maps == 40 for r in blend), "a withheld rating still says how much it saw"
+
+
 def test_two_player_cohort_is_still_fittable_and_a_lone_player_is_not() -> None:
     assert fit_cohort(ragged_cohort([10]), scale_for([]), unit_fit()) is None
     model = fit_cohort(ragged_cohort([10, 10]), scale_for([]), unit_fit())
@@ -381,7 +444,7 @@ def test_blended_variance_adds_the_modes_in_quadrature() -> None:
         mode_rows = [by_key[(pid, 1)], by_key[(pid, 2)]]
         share = [r.maps / 30.0 for r in mode_rows]
         blend = by_key[(pid, None)]
-        expected = 1.0 + sum(w * (r.rating - 1.0) for w, r in zip(share, mode_rows, strict=True))
+        expected = 1.0 + sum(w * (rated(r) - 1.0) for w, r in zip(share, mode_rows, strict=True))
         assert blend.rating == pytest.approx(expected)
         sds = [r.rating_sd for r in mode_rows]
         assert all(sd is not None for sd in sds)

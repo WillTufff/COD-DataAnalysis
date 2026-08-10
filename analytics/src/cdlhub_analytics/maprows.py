@@ -25,7 +25,18 @@ import psycopg
 TITLE_IW = "IW"
 TITLE_WWII = "WWII"
 TITLE_BO4 = "BO4"
-TITLE_ORDER = (TITLE_IW, TITLE_WWII, TITLE_BO4)
+TITLE_ORDER = (
+    TITLE_IW,
+    TITLE_WWII,
+    TITLE_BO4,
+    "MW19",
+    "BOCW",
+    "VG",
+    "MWII",
+    "MWIII",
+    "BO6",
+    "BO7",
+)
 
 MIN_NONZERO_ROWS = 20
 
@@ -35,7 +46,10 @@ MODE_CONTROL = "control"
 MODE_CTF = "capture-the-flag"
 MODE_UPLINK = "uplink"
 
-# Typed columns on game_player_stats, read straight off the row.
+# Typed columns on game_player_stats, read straight off the row. Keys shared
+# with NUMERIC_EXTRAS (snd_rounds, ctrl_captures) merge typed-first: the CWL
+# archive reports them in extras, Cito in columns, and either way it is one
+# quantity under one key.
 TYPED_COLUMNS: tuple[str, ...] = (
     "kills",
     "deaths",
@@ -45,6 +59,18 @@ TYPED_COLUMNS: tuple[str, ...] = (
     "first_bloods",
     "plants",
     "defuses",
+    "contested_hill_time",
+    "first_deaths",
+    "captures",
+    "non_traded_kills",
+    "snd_rounds",
+    "clutch_1v1",
+    "clutch_1v2",
+    "clutch_1v3",
+    "clutch_1v4",
+    "ctl_attack_rounds",
+    "ctl_defense_rounds",
+    "ctrl_captures",
 )
 
 # extras keys that are counts, summable across maps.
@@ -104,14 +130,19 @@ NUMERIC_EXTRAS: tuple[str, ...] = (
 # A per-map mean, not a count: it re-weights by that map's kills rather than summing.
 KILL_DIST = "avg_kill_dist_m"
 
-MEASURED_KEYS: tuple[str, ...] = (*TYPED_COLUMNS, *NUMERIC_EXTRAS, KILL_DIST)
+MEASURED_KEYS: tuple[str, ...] = tuple(dict.fromkeys((*TYPED_COLUMNS, *NUMERIC_EXTRAS, KILL_DIST)))
 
 MAP_SQL = """
 SELECT gps.player_id, gps.team_id, g.id AS game_id, se.id AS season_id,
        g.mode_id, gm.slug AS mode_slug, t.short_name AS title,
        ev.id AS event_id, s.played_at, g.duration_s, g.winner_team_id,
        gps.kills, gps.deaths, gps.assists, gps.damage, gps.hill_time,
-       gps.first_bloods, gps.plants, gps.defuses, gps.extras,
+       gps.first_bloods, gps.plants, gps.defuses,
+       gps.contested_hill_time, gps.first_deaths, gps.captures,
+       gps.non_traded_kills, gps.snd_rounds,
+       gps.clutch_1v1, gps.clutch_1v2, gps.clutch_1v3, gps.clutch_1v4,
+       gps.ctl_attack_rounds, gps.ctl_defense_rounds, gps.ctl_zone_captures,
+       gps.extras,
        sum(COALESCE(gps.kills, 0))
          OVER (PARTITION BY gps.game_id, gps.team_id) AS team_kills_map,
        sum(COALESCE(gps.hill_time, 0))
@@ -123,9 +154,12 @@ JOIN events ev     ON ev.id = s.event_id
 JOIN seasons se    ON se.id = ev.season_id
 JOIN titles t      ON t.id = se.title_id
 JOIN game_modes gm ON gm.id = g.mode_id
-WHERE g.duration_s IS NOT NULL
 ORDER BY s.played_at, g.id, gps.player_id
 """
+
+# Map time itself, tracked like a column: Cito games carry no duration, so
+# per-10-minute metrics gate on this key to stay off titles that cannot pace.
+DURATION_KEY = "duration_s"
 
 
 @dataclass(frozen=True)
@@ -220,22 +254,36 @@ class Loaded:
 def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
     """Every player-map in the archive, in played order, with coverage measured."""
     out = Loaded()
+    extras_at = 11 + len(TYPED_COLUMNS)
     for r in conn.execute(MAP_SQL):
         title = cast(str, r[6])
-        extras = cast(dict[str, Any], r[19] or {})
+        extras = cast(dict[str, Any], r[extras_at] or {})
+        duration = cast("int | None", r[9])
 
-        values: dict[str, float] = {}
+        # Typed column first, extras key as fallback, one coverage record per
+        # key either way.
+        merged: dict[str, float | None] = {}
         for i, name in enumerate(TYPED_COLUMNS):
             raw = cast("int | None", r[11 + i])
-            value = None if raw is None else float(raw)
-            record_coverage(out.coverage, title, name, value)
-            if value is not None:
-                values[name] = value
+            merged[name] = None if raw is None else float(raw)
         for name in (*NUMERIC_EXTRAS, KILL_DIST):
-            value = extras_number(extras, name)
+            if merged.get(name) is None:
+                merged[name] = extras_number(extras, name)
+        if merged.get("ctrl_rounds") is None:
+            attack, defense = merged.get("ctl_attack_rounds"), merged.get("ctl_defense_rounds")
+            if attack is not None or defense is not None:
+                merged["ctrl_rounds"] = (attack or 0.0) + (defense or 0.0)
+        # The archive reports first deaths in extras and only for SnD; the CDL
+        # source reports the same quantity in a column. One key, either way.
+        if merged.get("snd_firstdeaths") is None:
+            merged["snd_firstdeaths"] = merged.get("first_deaths")
+
+        values: dict[str, float] = {}
+        for name, value in merged.items():
             record_coverage(out.coverage, title, name, value)
             if value is not None:
                 values[name] = value
+        record_coverage(out.coverage, title, DURATION_KEY, float(duration) if duration else None)
 
         out.rows.append(
             MapRow(
@@ -248,11 +296,11 @@ def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
                 title=title,
                 event_id=cast(int, r[7]),
                 played_at=cast(datetime, r[8]).date(),
-                duration_s=float(cast(int, r[9])),
+                duration_s=float(duration or 0),
                 winner_team_id=cast("int | None", r[10]),
                 values=values,
-                team_kills=float(cast(int, r[20]) or 0),
-                team_hill_time=float(cast(int, r[21]) or 0),
+                team_kills=float(cast(int, r[extras_at + 1]) or 0),
+                team_hill_time=float(cast(int, r[extras_at + 2]) or 0),
             )
         )
     return out

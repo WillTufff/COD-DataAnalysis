@@ -13,7 +13,7 @@ import argparse
 import json
 import sys
 
-from . import backtest, cohort, era, insights, metrics, roundwp, seriesdyn, style
+from . import backtest, cohort, era, events, insights, metrics, roundwp, seriesdyn, style
 from .db import connect
 from .ratings import (
     comparison,
@@ -39,7 +39,9 @@ GLICKO_PERIOD = fit.DEFAULT_PERIOD
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dsn", default=None)
+    events.add_argument(ap)
     args = ap.parse_args(argv)
+    progress = events.StageEvents(args.events == "ndjson")
 
     from .writeback import open_run, prune_superseded
 
@@ -54,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(series)} decided series through {through}")
         print(f"org lineage: {n_merged} teams rated under an earlier brand")
 
+        progress.stage("era_adjust")
         era_run = open_run(
             conn,
             "era_adjust",
@@ -64,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         n = era.compute_and_write(conn, era_run)
         print(f"era_adjust run {era_run}: {n} player-season-mode rows")
 
+        progress.stage("metric_layer")
         metric_run = open_run(
             conn,
             metrics.MODEL,
@@ -89,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         # probability each kill added. Independent of everything below it —
         # nothing in the ratings reads it, deliberately, for the reason the
         # reliability block gives.
+        progress.stage("round_wp")
         round_run = open_run(
             conn,
             roundwp.MODEL,
@@ -154,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"round_wp run {round_run}: no kill feed in this database, nothing to fit")
 
+        progress.stage("elo")
         elo_run = open_run(
             conn,
             "elo",
@@ -170,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             f"accuracy {report.accuracy:.3f}"
         )
 
+        progress.stage("glicko2")
         glicko_run = open_run(
             conn,
             "glicko2",
@@ -210,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Every feature-set version is fitted and backtested; the published one
         # is named in player_rating, never inferred from insertion order.
+        progress.stage("player_rating")
         rating_rows, rating_coverage = player_rating.load(conn)
         rating_runs: dict[str, int] = {}
         for version in player_rating.ALL_VERSIONS:
@@ -396,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         # winprob's baseline features are only a baseline if they come from the
         # same fits as the rows it is tabled against, so the rating settings are
         # handed over here rather than restated inside the module.
+        progress.stage("winprob")
         wp_run = open_run(
             conn,
             "winprob",
@@ -464,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         # The same teams rated on the 5,087 maps underneath those series, and
         # once per mode. Fitted after winprob because its series rollup is
         # compared against the whole series-level table, not scored alone.
+        progress.stage("map_elo")
         maps = maplevel.load_maps(conn)
         map_run = open_run(conn, maplevel.MODEL, maplevel.VERSION, maplevel.params(), through)
         map_arts, map_series_preds = maplevel.build_artifacts(
@@ -523,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
         # whether any of it is memory rather than the two teams being further
         # apart than the rating said. Fitted after map_elo because it freezes the
         # same map-level ratings at the start of each series.
+        progress.stage("series_dynamics")
         sd_run = open_run(conn, seriesdyn.MODEL, seriesdyn.VERSION, seriesdyn.params(), through)
         sd_arts = seriesdyn.build_artifacts(conn, lineage)
         for name, payload in sd_arts.items():
@@ -572,16 +583,19 @@ def main(argv: list[str] | None = None) -> int:
         # projected out of it, and the archetype taxonomy that does not survive
         # a cloud with no clusters in it. Fitted after the ratings because it
         # residualises against the published composite.
+        progress.stage("player_style")
         style_run = open_run(conn, style.MODEL, style.VERSION, style.params(), through)
         orientation = {m.key: m.higher_is_better for m in metrics.CATALOG}
-        style_arts, style_fit = style.build_artifacts(conn, metric_run, pr_run, orientation)
+        style_arts, style_fits = style.build_artifacts(conn, metric_run, pr_run, orientation)
         for name, payload in style_arts.items():
             conn.execute(
                 "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
                 (style_run, name, json.dumps(payload)),
             )
-        if style_fit is not None:
-            rows = style.axis_rows(style_fit)
+        if style_fits:
+            # One fit per era; a player-season belongs to exactly one of them,
+            # so the axis rows of the two never collide.
+            rows = [r for f in style_fits for r in style.axis_rows(f)]
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO player_style_season "
@@ -590,12 +604,21 @@ def main(argv: list[str] | None = None) -> int:
                     [(style_run, *r) for r in rows],
                 )
             print(f"player_style run {style_run}: {len(rows)} player-season-axis rows")
-            print(f"  {style.headline(style_fit)}")
-            for axis in style_arts["player_style"]["bases"][0]["axes"]:
-                print(f"  axis {axis['index']} {axis['name']}: {axis['share']:.1%} of residual")
+            for style_fit in style_fits:
+                print(f"  {style.headline(style_fit)}")
+                payload = next(
+                    b
+                    for b in style_arts["player_style"]["bases"]
+                    if b["basis"] == style_fit.basis.name
+                )
+                for axis in payload["axes"]:
+                    print(
+                        f"    axis {axis['index']} {axis['name']}: {axis['share']:.1%} of residual"
+                    )
         else:
             print(f"player_style run {style_run}: too few complete rows, nothing fitted")
 
+        progress.stage("insights")
         ins_run = open_run(
             conn,
             "insights",
@@ -642,6 +665,7 @@ def main(argv: list[str] | None = None) -> int:
             detail = ", ".join(f"{m} x{n}" for m, n in sorted(removed.items()))
             print(f"pruned superseded runs: {detail}")
 
+        progress.done()
         conn.commit()
     return 0
 

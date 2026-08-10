@@ -2,13 +2,16 @@
 walk-forward hygiene, shrinkage, rating ordering, and per-cohort feature
 resolution. No database required."""
 
+from collections import defaultdict
 from datetime import date, timedelta
+from itertools import combinations
 from typing import Any, cast
 
 import numpy as np
 import pytest
 
 from cdlhub_analytics.maprows import (
+    DURATION_KEY,
     MODE_HARDPOINT,
     MODE_SND,
     Coverage,
@@ -20,8 +23,12 @@ from cdlhub_analytics.ratings.player_rating import (
     MIN_TRAIN_GAMES,
     SHRINK_FALLBACK,
     Cohort,
+    Feature,
+    FeatureSpec,
     ModeFit,
+    Paced,
     PlayerModeAgg,
+    SeasonRating,
     _estimate_shrinkage,
     _shrink,
     aggregate_players,
@@ -41,38 +48,71 @@ from cdlhub_analytics.regress import LogisticFit
 # Player skill: (mean kills per map). Team 1 = {11, 12}, team 2 = {21, 22}.
 SKILL = {11: 30.0, 12: 20.0, 21: 20.0, 22: 15.0}
 
+# Six teams of two. Four players cannot support a variance-components fit — the
+# spread of four season scores is smaller than the noise on any one of them, so
+# the hierarchical estimator abstains and only the fixed-constant one publishes.
+# Anything testing the two estimators against each other needs a cohort the
+# harder of them can actually fit.
+LEAGUE_SKILL = {
+    t * 10 + i: float(kills)
+    for t, pair in enumerate([(28, 24), (26, 22), (24, 20), (22, 18), (20, 16), (18, 14)], start=1)
+    for i, kills in enumerate(pair, start=1)
+}
+
 TRACKED = KeyCoverage(rows=1000, present=1000, nonzero=1000)
 UNTRACKED = KeyCoverage(rows=1000, present=1000, nonzero=0)
 
-V1_COLUMNS = ("kills", "deaths", "assists", "hill_time")
+V1_COLUMNS = ("kills", "deaths", "assists", "hill_time", DURATION_KEY)
 
 
 def coverage_for(title: str, columns: tuple[str, ...], missing: tuple[str, ...] = ()) -> Coverage:
     return {title: {c: (UNTRACKED if c in missing else TRACKED) for c in columns}}
 
 
-def synthetic_rows(n_games: int = 80, seed: int = 5) -> list[MapRow]:
-    """Two teams, one season-mode cohort, two events. Kills and deaths carry
+def rated(row: SeasonRating) -> float:
+    """The rating as a number. A row that withholds one fails the test that
+    asked for it rather than being compared against None."""
+    assert row.rating is not None, (row.player_id, row.season_id, row.mode_id)
+    return row.rating
+
+
+def declared(spec: FeatureSpec) -> tuple[Feature, ...]:
+    """Both arms of a Paced pair, or the single feature."""
+    return (spec.timed, spec.per_map) if isinstance(spec, Paced) else (spec,)
+
+
+def synthetic_rows(
+    n_games: int = 80, seed: int = 5, skills: dict[int, float] = SKILL
+) -> list[MapRow]:
+    """One season-mode cohort over a league, two events. Kills and deaths carry
     independent signal about who wins the map; assists and objective are pure
     noise — so the regression has real structure to find, with no collinear
-    degeneracy hiding it."""
+    degeneracy hiding it.
+
+    A player's team is the tens digit of their id, and the schedule is every
+    pair of teams in turn, so a larger roster still has every team measured
+    against every other. Two teams reduce to the fixed matchup this started as.
+    """
     rng = np.random.default_rng(seed)
     rows: list[MapRow] = []
     day0 = date(2018, 1, 1)
+    roster: dict[int, list[int]] = defaultdict(list)
+    for p in skills:
+        roster[p // 10].append(p)
+    schedule = list(combinations(sorted(roster), 2))
     for g in range(n_games):
-        kills = {p: max(0.0, rng.normal(mu, 3.0)) for p, mu in SKILL.items()}
-        deaths = {p: max(0.0, rng.normal(20.0, 3.0)) for p in SKILL}
-        latent = (kills[11] + kills[12] - kills[21] - kills[22]) - (
-            deaths[11] + deaths[12] - deaths[21] - deaths[22]
-        )
-        team1_won = bool(latent + rng.normal(0.0, 2.0) > 0.0)
+        home, away = schedule[g % len(schedule)]
+        playing = roster[home] + roster[away]
+        kills = {p: max(0.0, rng.normal(skills[p], 3.0)) for p in playing}
+        deaths = {p: max(0.0, rng.normal(20.0, 3.0)) for p in playing}
+        latent = sum((kills[p] - deaths[p]) * (1.0 if p // 10 == home else -1.0) for p in playing)
+        home_won = bool(latent + rng.normal(0.0, 2.0) > 0.0)
         event_id = 1 if g < n_games // 2 else 2
-        for p in SKILL:
-            team = 1 if p < 20 else 2
+        for p in playing:
             rows.append(
                 MapRow(
                     player_id=p,
-                    team_id=team,
+                    team_id=p // 10,
                     game_id=g,
                     season_id=1,
                     mode_id=1,
@@ -81,7 +121,7 @@ def synthetic_rows(n_games: int = 80, seed: int = 5) -> list[MapRow]:
                     event_id=event_id,
                     played_at=day0 + timedelta(days=g),
                     duration_s=600.0,
-                    winner_team_id=1 if team1_won else 2,
+                    winner_team_id=home if home_won else away,
                     values={
                         "kills": kills[p],
                         "deaths": deaths[p],
@@ -149,11 +189,11 @@ def test_ratings_order_scale_and_uncertainty() -> None:
     # The 30-kill player must outrate everyone, and clearly outrate the
     # 15-kill player. (Exact ranks between the two 20-kill-ish players are
     # sampling noise at 80 maps; the model shouldn't pretend otherwise.)
-    ordered = sorted(blended.values(), key=lambda r: r.rating, reverse=True)
+    ordered = sorted(blended.values(), key=rated, reverse=True)
     assert ordered[0].player_id == 11
-    assert blended[11].rating > blended[22].rating + 0.05
+    assert rated(blended[11]) > rated(blended[22]) + 0.05
     # Normalized: cohort centers on 1.0.
-    mean = float(np.mean([r.rating for r in blended.values()]))
+    mean = float(np.mean([rated(r) for r in blended.values()]))
     assert abs(mean - 1.0) < 0.05
     # Bootstrap uncertainty exists on blended rows and stays bounded.
     # (A 4-player cohort standardizes coarsely, so sds run larger here than
@@ -272,7 +312,15 @@ def test_cohort_scale_estimates_the_prior_when_the_cohort_supports_it() -> None:
 
 # ---------------------------------------------------------------- resolution
 
-HP_COLUMNS = ("kills", "deaths", "hill_time", "hill_captures", "time_alive_s", "num_lives")
+HP_COLUMNS = (
+    "kills",
+    "deaths",
+    "hill_time",
+    "hill_captures",
+    "time_alive_s",
+    "num_lives",
+    DURATION_KEY,
+)
 SND_COLUMNS = (
     "kills",
     "deaths",
@@ -307,6 +355,34 @@ def test_untracked_column_drops_only_its_own_feature() -> None:
         "hill_time_p10",
         "hill_captures_p10",
     ]
+
+
+def test_a_title_without_map_time_keeps_the_mode_per_map() -> None:
+    """The CDL box scores carry no clock. Every per-10-minute rate resolves to
+    its per-map twin instead of reporting itself available on the numerator and
+    then emptying the cohort one zero denominator at a time."""
+    timed = resolve_features("2.0.0", MODE_HARDPOINT, coverage_for("MW19", HP_COLUMNS), "MW19")
+    untimed = resolve_features(
+        "2.0.0",
+        MODE_HARDPOINT,
+        coverage_for("MW19", HP_COLUMNS, missing=(DURATION_KEY,)),
+        "MW19",
+    )
+    assert [f.key for f in timed] == [
+        "kills_p10",
+        "deaths_p10",
+        "hill_time_p10",
+        "hill_captures_p10",
+        "time_per_life_s",
+    ]
+    assert [f.key for f in untimed] == [
+        "kills_pm",
+        "deaths_pm",
+        "hill_time_pm",
+        "hill_captures_pm",
+        "time_per_life_s",
+    ]
+    assert {f.denom_kind for f in untimed} == {"maps", "lives"}
 
 
 def test_iw_snd_drops_the_first_death_family() -> None:
@@ -346,8 +422,10 @@ def test_every_feature_declares_its_denominator_sources(version: str) -> None:
     untracked the rate cannot be formed, so coverage has to gate on it too."""
     from cdlhub_analytics.ratings.player_rating import VERSIONS
 
-    for features in VERSIONS[version].values():
-        for f in features:
+    for spec in VERSIONS[version].values():
+        for f in (f for s in spec for f in declared(s)):
+            if f.denom_kind == "minutes":
+                assert DURATION_KEY in f.sources, f.key
             if f.denom_kind == "rounds":
                 assert any(s.endswith("rounds") for s in f.sources), f.key
             if f.denom_kind == "lives":
@@ -476,6 +554,6 @@ def test_golden_ratings_do_not_drift() -> None:
 
     blended = {r.player_id: r for r in ratings if r.mode_id is None}
     for player_id, (rating, sd) in GOLDEN_V1.items():
-        assert abs(blended[player_id].rating - rating) < 1e-6, player_id
+        assert abs(rated(blended[player_id]) - rating) < 1e-6, player_id
         actual_sd = blended[player_id].rating_sd
         assert actual_sd is not None and abs(actual_sd - sd) < 1e-6, player_id
