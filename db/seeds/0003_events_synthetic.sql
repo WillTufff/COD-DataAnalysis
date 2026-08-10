@@ -1226,16 +1226,16 @@ WHERE s.liquipedia_match_id = 'dev-ev0s5' AND g.ordinal = 5
   AND p.handle = 'Kenny' AND t.name = 'OpTic Texas';
 
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 1, 1, 200000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 1, 1, 200000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major A 2025' AND t.name = 'LA Thieves';
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 2, 2, 120000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 2, 2, 120000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major A 2025' AND t.name = 'OpTic Texas';
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 3, 3, 100000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 3, 3, 100000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major A 2025' AND t.name = 'Toronto Ultra';
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 4, 4, 80000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 4, 4, 80000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major A 2025' AND t.name = 'Atlanta FaZe';
 
 -- ===== Dev Fixture Major B 2025 =====
@@ -2550,16 +2550,16 @@ WHERE s.liquipedia_match_id = 'dev-ev1s5' AND g.ordinal = 5
   AND p.handle = 'Drazah' AND t.name = 'Atlanta FaZe';
 
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 1, 1, 200000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 1, 1, 200000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major B 2025' AND t.name = 'Toronto Ultra';
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 2, 2, 120000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 2, 2, 120000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major B 2025' AND t.name = 'Atlanta FaZe';
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 3, 3, 100000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 3, 3, 100000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major B 2025' AND t.name = 'LA Thieves';
 INSERT INTO event_placements (event_id, team_id, placement_min, placement_max, prize, data_source)
-SELECT e.id, t.id, 4, 4, 80000 FROM events e, teams t, 'cwl_archive'
+SELECT e.id, t.id, 4, 4, 80000, 'cwl_archive' FROM events e, teams t
 WHERE e.name = 'Dev Fixture Major B 2025' AND t.name = 'OpTic Texas';
 
 COMMIT;
