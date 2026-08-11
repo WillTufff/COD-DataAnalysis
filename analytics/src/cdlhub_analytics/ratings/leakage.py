@@ -38,7 +38,7 @@ from ..maprows import Coverage, MapRow
 from . import player_rating as pr
 
 
-def _sign_rule(diffs: Sequence[pr.GameDiff], j: int) -> tuple[int, int, int]:
+def sign_rule(diffs: Sequence[pr.GameDiff], j: int) -> tuple[int, int, int]:
     """(correct, n, direction) for feature j, scored by the differential's sign.
 
     Maps where the two teams tie exactly on the column are skipped: the rule has
@@ -94,7 +94,7 @@ def measure(
             continue
         features: list[dict[str, Any]] = []
         for j, f in enumerate(cohort.features):
-            correct, n, direction = _sign_rule(scored, j)
+            correct, n, direction = sign_rule(scored, j)
             if not n:
                 continue
             features.append(

@@ -2,10 +2,10 @@
 
     uv run python -m cdlhub_analytics.ops <command> [--dsn DSN] [--snapshots DIR]
 
-Commands: summary, runs, run <id>, history <model>, models, sources, lineage,
-pacing, quality, services, identity, jobs, artifact <run_id> <name>, backups,
-backup, restore <name>. One JSON object per command on stdout, errors on stderr
-with a non-zero exit.
+Commands: summary, runs, run <id>, history <model>, models, metric-diff,
+sources, lineage, pacing, quality, services, identity, jobs,
+artifact <run_id> <name>, backups, backup, restore <name>. One JSON object per
+command on stdout, errors on stderr with a non-zero exit.
 
 `identity` writes to aliases.json only. `backup` writes a dump outside the
 repository, and `restore` is the one command that writes to the database.
@@ -32,6 +32,7 @@ from . import (
     backups,
     identity,
     lineage,
+    metricdiff,
     models,
     pacing,
     quality,
@@ -59,15 +60,37 @@ JOBS: list[dict[str, Any]] = [
             "elo",
             "glicko2",
             "player_rating",
+            "rapm",
             "winprob",
             "map_elo",
+            "preflight",
+            "season_rapm",
             "series_dynamics",
             "player_style",
             "insights",
+            "metric_diff",
         ],
         "destructive": False,
         "events": True,
-        "est_seconds": 420,
+        # Measured, not guessed. player_rating fits every feature-set version and
+        # there are four; its stage alone runs about two minutes. `preflight`
+        # adds 20 seconds, measured: one second for the identification
+        # statistics — one pass over the admitted maps — and the rest for the
+        # simulated leagues. `season_rapm` adds 12 seconds, measured: the
+        # penalty search is a few dozen Cholesky factorizations of a
+        # thousand-column matrix, and the split-half reliability refits every
+        # cell twice.
+        "est_seconds": 515,
+    },
+    {
+        "id": "metric_diff",
+        "label": "Metric diff (snapshot and compare)",
+        "cwd": "analytics",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_analytics.metricdiff"],
+        "stages": ["metric_diff"],
+        "destructive": False,
+        "events": True,
+        "est_seconds": 30,
     },
     {
         "id": "refresh",
@@ -230,6 +253,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("name")
     sub.add_parser("jobs", parents=[common])
     sub.add_parser("models", parents=[common])
+    sub.add_parser("metric-diff", parents=[common])
     sub.add_parser("lineage", parents=[common])
 
     services_cmd = sub.add_parser("services", parents=[common])
@@ -269,6 +293,8 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         return services.report(dsn, args.web_port)
     if args.command == "models":
         return _with_conn(dsn, models.report)
+    if args.command == "metric-diff":
+        return _with_conn(dsn, metricdiff.report)
     if args.command == "lineage":
         return _with_conn(dsn, lambda c: lineage.report(c, snapshots))
     if args.command == "runs":

@@ -71,28 +71,48 @@ TYPED_COLUMNS: tuple[str, ...] = (
     "ctl_attack_rounds",
     "ctl_defense_rounds",
     "ctrl_captures",
+    "headshots",
+    "suicides",
+    "team_kills",
+    "hits",
+    "shots",
+    "hill_captures",
+    "hill_defends",
+    "bomb_pickups",
+    "multikill_2",
+    "multikill_3",
+    "multikill_4",
 )
 
-# extras keys that are counts, summable across maps.
+# Columns whose name differs from the key everything downstream reads them by.
+# Migration 0015 promoted the archive's `2-piece`/`3-piece`/`4-piece` counts out
+# of extras, and a column cannot lead with a digit; the metric layer's keys are
+# published and do not move for a storage change.
+TYPED_ALIASES: dict[str, str] = {
+    "multikill_2": "2_piece",
+    "multikill_3": "3_piece",
+    "multikill_4": "4_piece",
+}
+
+# The player's primary weapon on the map: a label, not a count, so it travels
+# beside `values` rather than in it. Observed on 2017-2019 only, and the only
+# role ground truth in the record.
+WEAPON_KEY = "fave_weapon"
+
+# The map's score margin, tracked like a column so a title that records no map
+# score is visible as one rather than as a run of draws.
+MARGIN_KEY = "margin"
+
+# extras keys that are counts, summable across maps. The dozen the fits read
+# every run moved to columns in migration 0015 and are listed above instead —
+# one home per quantity, so the two cannot drift.
 NUMERIC_EXTRAS: tuple[str, ...] = (
-    "2_piece",
-    "3_piece",
-    "4_piece",
     "4_streak",
     "5_streak",
     "6_streak",
     "7_streak",
     "8plus_streak",
-    "bomb_pickups",
     "bomb_sneak_defuses",
-    "headshots",
-    "hill_captures",
-    "hill_defends",
-    "hits",
-    "shots",
-    "snd_rounds",
-    "suicides",
-    "team_kills",
     "time_alive_s",
     "num_lives",
     "kills_stayed_alive",
@@ -130,7 +150,17 @@ NUMERIC_EXTRAS: tuple[str, ...] = (
 # A per-map mean, not a count: it re-weights by that map's kills rather than summing.
 KILL_DIST = "avg_kill_dist_m"
 
-MEASURED_KEYS: tuple[str, ...] = tuple(dict.fromkeys((*TYPED_COLUMNS, *NUMERIC_EXTRAS, KILL_DIST)))
+# The keys a metric may name as a source — logical names, so an aliased column
+# is known by the name the catalog uses rather than by the name it is stored as.
+MEASURED_KEYS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        (
+            *(TYPED_ALIASES.get(name, name) for name in TYPED_COLUMNS),
+            *NUMERIC_EXTRAS,
+            KILL_DIST,
+        )
+    )
+)
 
 MAP_SQL = """
 SELECT gps.player_id, gps.team_id, g.id AS game_id, se.id AS season_id,
@@ -142,11 +172,22 @@ SELECT gps.player_id, gps.team_id, g.id AS game_id, se.id AS season_id,
        gps.non_traded_kills, gps.snd_rounds,
        gps.clutch_1v1, gps.clutch_1v2, gps.clutch_1v3, gps.clutch_1v4,
        gps.ctl_attack_rounds, gps.ctl_defense_rounds, gps.ctl_zone_captures,
+       gps.headshots, gps.suicides, gps.team_kills, gps.hits, gps.shots,
+       gps.hill_captures, gps.hill_defends, gps.bomb_pickups,
+       gps.multikill_2, gps.multikill_3, gps.multikill_4,
        gps.extras,
        sum(COALESCE(gps.kills, 0))
          OVER (PARTITION BY gps.game_id, gps.team_id) AS team_kills_map,
        sum(COALESCE(gps.hill_time, 0))
-         OVER (PARTITION BY gps.game_id, gps.team_id) AS team_hill_time_map
+         OVER (PARTITION BY gps.game_id, gps.team_id) AS team_hill_time_map,
+       gps.fave_weapon,
+       s.id AS series_id,
+       -- The map's score margin from this player's side. Maps within a series
+       -- share a lineup, a day and an opponent, so the series is also the unit
+       -- every interval in the rating stack resamples.
+       CASE WHEN gps.team_id = s.team1_id THEN g.team1_score - g.team2_score
+            WHEN gps.team_id = s.team2_id THEN g.team2_score - g.team1_score
+       END AS margin
 FROM game_player_stats gps
 JOIN games g       ON g.id = gps.game_id
 JOIN series s      ON s.id = g.series_id
@@ -169,6 +210,7 @@ class MapRow:
     player_id: int
     team_id: int
     game_id: int
+    series_id: int
     season_id: int
     mode_id: int
     mode_slug: str
@@ -180,6 +222,11 @@ class MapRow:
     values: dict[str, float]  # measured keys only — absent means not reported
     team_kills: float
     team_hill_time: float
+    weapon: str | None = None
+    # The map's score margin from this side, where the record carries both
+    # scores. None on the 27 maps that carry neither; a plus-minus fitted on
+    # margin says so rather than reading a missing score as a draw.
+    margin: float | None = None
 
     @property
     def won(self) -> bool | None:
@@ -265,7 +312,7 @@ def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
         merged: dict[str, float | None] = {}
         for i, name in enumerate(TYPED_COLUMNS):
             raw = cast("int | None", r[11 + i])
-            merged[name] = None if raw is None else float(raw)
+            merged[TYPED_ALIASES.get(name, name)] = None if raw is None else float(raw)
         for name in (*NUMERIC_EXTRAS, KILL_DIST):
             if merged.get(name) is None:
                 merged[name] = extras_number(extras, name)
@@ -284,12 +331,17 @@ def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
             if value is not None:
                 values[name] = value
         record_coverage(out.coverage, title, DURATION_KEY, float(duration) if duration else None)
+        weapon = cast("str | None", r[extras_at + 3])
+        record_coverage(out.coverage, title, WEAPON_KEY, 1.0 if weapon else None)
+        margin = cast("int | None", r[extras_at + 5])
+        record_coverage(out.coverage, title, MARGIN_KEY, None if margin is None else float(margin))
 
         out.rows.append(
             MapRow(
                 player_id=cast(int, r[0]),
                 team_id=cast(int, r[1]),
                 game_id=cast(int, r[2]),
+                series_id=cast(int, r[extras_at + 4]),
                 season_id=cast(int, r[3]),
                 mode_id=cast(int, r[4]),
                 mode_slug=cast(str, r[5]),
@@ -301,6 +353,8 @@ def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
                 values=values,
                 team_kills=float(cast(int, r[extras_at + 1]) or 0),
                 team_hill_time=float(cast(int, r[extras_at + 2]) or 0),
+                weapon=weapon,
+                margin=None if margin is None else float(margin),
             )
         )
     return out

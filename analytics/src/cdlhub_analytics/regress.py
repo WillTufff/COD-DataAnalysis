@@ -12,12 +12,31 @@ below tol. Inputs are expected standardized; l2 is on that scale.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
+
+
+def matrix_hash(matrix: NDArray[Any], columns: list[str] | None = None) -> str:
+    """A design matrix's fingerprint: shape, column names and contents.
+
+    Contents are hashed as C-contiguous float64, so the digest does not move
+    with the storage dtype or with an array's stride layout. Stored beside a
+    fit so a refit that produced different numbers can be told apart from a
+    refit that was handed different data.
+    """
+    values = np.ascontiguousarray(matrix, dtype=np.float64)
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(repr(values.shape).encode())
+    if columns is not None:
+        digest.update("\n".join(columns).encode())
+    digest.update(values.tobytes())
+    return digest.hexdigest()
 
 
 @dataclass

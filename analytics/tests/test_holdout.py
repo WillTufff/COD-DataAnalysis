@@ -64,6 +64,7 @@ def row(
         player_id=player_id,
         team_id=team_id,
         game_id=game_id,
+        series_id=game_id,
         season_id=2,
         mode_id=mode_id,
         mode_slug=MODE_HARDPOINT,

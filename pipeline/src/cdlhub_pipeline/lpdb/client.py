@@ -23,6 +23,10 @@ BASE_URL = "https://api.liquipedia.net/api/v3"
 WIKI = "callofduty"
 MIN_INTERVAL_S = 5.0
 PAGE_LIMIT = 1000  # the server maximum; larger values are silently capped
+# A page of 1000 placements with rosters attached takes the server well past
+# the 30s httpx default, so the read timeout is the query's, not the network's.
+READ_TIMEOUT_S = 120.0
+RETRY_BACKOFF_S = 30.0
 
 SNAPSHOT_ROOT = REPO_ROOT / "pipeline" / "snapshots" / "lpdb"
 
@@ -49,7 +53,7 @@ class LpdbClient:
                 "Authorization": f"Apikey {_env('LPDB_API_KEY')}",
                 "User-Agent": _env("CDLHUB_UA"),
             },
-            timeout=30.0,
+            timeout=httpx.Timeout(30.0, read=READ_TIMEOUT_S),
         )
         self.calls = 0
         self._last_call = 0.0
@@ -64,7 +68,26 @@ class LpdbClient:
             gap = time.monotonic() - self._last_call if self._last_call else None
             self._last_call = time.monotonic()
             self.calls += 1
-            resp = self.http.get(f"/{table}", params=merged)
+            try:
+                resp = self.http.get(f"/{table}", params=merged)
+            except httpx.TransportError as exc:
+                # A wide query over a large page can take longer to build than
+                # the read timeout allows, and the connection dropping is not
+                # the server asking us to stop. Backed off like a 5xx and
+                # counted like a call, because the server may well have served
+                # it; four failures in a row is a real outage and propagates.
+                if attempt == 3:
+                    raise
+                reqlog.append(
+                    SNAPSHOT_ROOT,
+                    endpoint=f"/{table}",
+                    status=0,
+                    waited_ms=int(gap * 1000) if gap is not None else None,
+                    min_interval_s=MIN_INTERVAL_S,
+                )
+                print(f"  transport error on /{table} ({exc.__class__.__name__}), retrying")
+                time.sleep(RETRY_BACKOFF_S * (attempt + 1))
+                continue
             reqlog.append(
                 SNAPSHOT_ROOT,
                 endpoint=f"/{table}",

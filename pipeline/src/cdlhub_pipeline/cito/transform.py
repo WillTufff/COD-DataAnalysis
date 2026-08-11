@@ -113,6 +113,18 @@ class StatLine:
 
 
 @dataclass
+class Segment:
+    """One hill rotation or one round, from one team's side of the map."""
+
+    team_slug: str
+    kind: str  # 'hill' | 'control_round' | 'snd_round'
+    ordinal: int
+    score: int | None = None  # hill: the team's cumulative map score after it
+    won: bool | None = None  # round kinds
+    win_type: str | None = None  # round kinds
+
+
+@dataclass
 class Game:
     ordinal: int
     map_name: str
@@ -121,6 +133,7 @@ class Game:
     team2_score: int | None
     winner_slug: str | None
     lines: list[StatLine] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)
 
 
 @dataclass
@@ -138,6 +151,49 @@ class Series:
     best_of: int | None
     round_label: str | None
     games: list[Game] = field(default_factory=list)
+
+
+HILL = "hill"
+CONTROL_ROUND = "control_round"
+SND_ROUND = "snd_round"
+
+# breakdown.teamGameStats sub-object -> (segment kind, its list of entries).
+# Every map carries all three keys and populates the one its mode uses.
+_ROUND_BLOCKS = (("control", CONTROL_ROUND), ("searchAndDestroy", SND_ROUND))
+
+
+def parse_segments(breakdown: dict[str, Any], pair: set[str]) -> list[Segment]:
+    """Hill scores and round results out of one map's `teamGameStats`.
+
+    The block is repeated verbatim under every player of the map, so callers
+    parse the first copy they see and skip the rest; this function reads one
+    copy. A team not in the series is dropped the same way a stray stat line is.
+    """
+    out: list[Segment] = []
+    for team in breakdown.get("teamGameStats") or []:
+        slug = team.get("teamSlug")
+        if slug not in pair:
+            continue
+        for entry in (team.get("hardpoint") or {}).get("hillScores") or []:
+            hill, score = entry.get("hill"), entry.get("score")
+            if hill is None or score is None:
+                continue
+            out.append(Segment(team_slug=slug, kind=HILL, ordinal=int(hill), score=int(score)))
+        for block, kind in _ROUND_BLOCKS:
+            for entry in (team.get(block) or {}).get("rounds") or []:
+                number = entry.get("round")
+                if number is None:
+                    continue
+                out.append(
+                    Segment(
+                        team_slug=slug,
+                        kind=kind,
+                        ordinal=int(number),
+                        won=entry.get("won"),
+                        win_type=entry.get("winType"),
+                    )
+                )
+    return out
 
 
 @dataclass
@@ -265,8 +321,19 @@ def _build_games(
         for mp in player.get("maps") or []:
             num = mp["mapNumber"]
             meta = by_map.setdefault(
-                num, {"map": mp["mapName"], "mode": mp["gameMode"], "scores": {}, "opp": {}}
+                num,
+                {
+                    "map": mp["mapName"],
+                    "mode": mp["gameMode"],
+                    "scores": {},
+                    "opp": {},
+                    "segments": [],
+                },
             )
+            # The breakdown is repeated under every player of the map; the
+            # first copy is the map's, and the rest are the same bytes again.
+            if not meta["segments"]:
+                meta["segments"] = parse_segments(mp.get("breakdown") or {}, pair)
             if mp.get("teamScore") is not None:
                 prev = meta["scores"].get(slug)
                 if prev is not None and prev != mp["teamScore"]:
@@ -298,6 +365,7 @@ def _build_games(
                 team2_score=s2,
                 winner_slug=winner,
                 lines=lines[num],
+                segments=meta["segments"],
             )
         )
     return games

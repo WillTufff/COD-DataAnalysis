@@ -22,6 +22,12 @@ from typing import Any, cast
 
 import psycopg
 
+from . import provenance
+
+# The key `open_run` writes the reproducibility record under. Nothing else in
+# the package may use it as a hyperparameter name.
+PROVENANCE_KEY = "provenance"
+
 
 def git_sha() -> str | None:
     try:
@@ -40,6 +46,7 @@ def open_run(
     params: dict[str, Any],
     data_through: date,
 ) -> int:
+    params = {**params, PROVENANCE_KEY: provenance.block()}
     row = conn.execute(
         "SELECT id FROM model_runs WHERE model = %s AND version = %s AND data_through = %s",
         (model, version, data_through),

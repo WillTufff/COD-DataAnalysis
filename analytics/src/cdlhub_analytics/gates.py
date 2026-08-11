@@ -25,13 +25,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import defaultdict
 from typing import Any, cast
 
 import psycopg
 
 from . import metrics, seriesdyn, style
 from .db import connect
-from .ratings import maplevel, player_rating
+from .metricdiff import MODEL as METRIC_DIFF_MODEL
+from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
+from .ratings import maplevel, player_rating, statespace
 from .style import marker_column
 from .writeback import latest_run_id
 
@@ -40,6 +43,11 @@ from .writeback import latest_run_id
 RATING_MODEL = "player_rating"
 STYLE_MODEL = style.MODEL
 DYNAMICS_MODEL = seriesdyn.MODEL
+
+# Models written by the pipeline package rather than through
+# `writeback.open_run`, so they carry no provenance block and are not asked for
+# an evaluation-set hash.
+EXTERNAL_MODELS = {"kill_feed_reconciliation"}
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -58,7 +66,7 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "assists"),
-        ("streak depth", "deep_streak_rate"),
+        ("streak depth", "streak6"),
         ("risk", "eight_plus_streaks"),
     ),
     "extended CWL": (
@@ -80,7 +88,7 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
     "extended CDL": (
         ("volume", "kills"),
         ("survival", "deaths"),
-        ("axis 3", "kd"),
+        ("axis 3", "plus_minus"),
         ("axis 4", "damage"),
         ("axis 5", "damage"),
     ),
@@ -186,6 +194,122 @@ def basis_failures(payload: dict[str, Any]) -> list[str]:
     return bad
 
 
+def season_rapm_failures(
+    payload: dict[str, Any], stored: list[tuple[str, str, int, float]]
+) -> list[str]:
+    """The season-varying plus-minus, checked against what permitted it.
+
+    Three ways this can ship wrong and none of them raise on their own. The
+    resolution can drift from the pre-flight verdict that allowed it, so a CWL
+    season coefficient appears where the identification measurement said only an
+    era is supportable. The filtered family can go missing, which leaves every
+    forward test with nothing it is allowed to read while the smoothed rows sit
+    there looking usable. And an era coefficient — stored against each season it
+    covers — can stop being one number wearing several labels, at which point a
+    reader counting rows is counting estimates that were never made.
+    """
+    bad = []
+    if not payload.get("available"):
+        return [f"season plus-minus did not fit: {payload.get('reason')}"]
+
+    fitted = payload["resolution_by_league"]
+    for cell in payload["by_cell"]:
+        # An era cell names itself "<league> era"; a season cell "<year> <league>".
+        league = cell["cell"].split()[0] if cell["resolution"] == "era" else None
+        if league is not None and fitted.get(league) != "era":
+            bad.append(f"cell '{cell['cell']}' is era-resolution and {league} is not pooled")
+
+    scopes = {scope for scope, _resolution, _season, _coef in stored}
+    if stored and "filtered" not in scopes:
+        bad.append("no filtered coefficients stored: a forward test has nothing it may read")
+
+    # One estimate, several season labels. Grouped by (scope, player) over the
+    # era rows: more than one distinct coefficient means they were fitted apart.
+    era_coefs: dict[tuple[str, int], set[float]] = defaultdict(set)
+    for scope, resolution, player_id, coef in stored:
+        if resolution == "era":
+            era_coefs[(scope, player_id)].add(round(coef, 9))
+    split = [key for key, values in era_coefs.items() if len(values) > 1]
+    if split:
+        bad.append(
+            f"{len(split)} era coefficients differ across the seasons they are filed under, "
+            "so the rows are being read as separate estimates"
+        )
+    return bad
+
+
+def season_rapm_rows(conn: psycopg.Connection[Any]) -> list[tuple[str, str, int, float]]:
+    """(scope, resolution, player_id, coef) for the newest season-varying run."""
+    run_id = latest_run_id(conn, statespace.MODEL)
+    if run_id is None:
+        raise CannotRun(f"no {statespace.MODEL} run in this database")
+    rows = conn.execute(
+        "SELECT scope, resolution, player_id, coef FROM player_rapm WHERE run_id = %s",
+        (run_id,),
+    ).fetchall()
+    return [(str(r[0]), str(r[1]), int(cast(int, r[2])), float(cast(float, r[3]))) for r in rows]
+
+
+def harness_failures(report: dict[str, Any], models: set[str]) -> list[str]:
+    """A run set with no diff report is a release nobody measured.
+
+    Every phase from here on changes published numbers, and the promise each of
+    them makes is that the moves are named. That promise is only checkable if
+    the harness ran over the same runs the release publishes.
+    """
+    bad = []
+    covered = {run["model"] for run in report.get("current", {}).get("runs", [])}
+    missing = sorted(models - covered - {METRIC_DIFF_MODEL})
+    for model in missing:
+        bad.append(f"{model} published a run the metric diff never snapshotted")
+    if not report.get("available") and report.get("reason"):
+        bad.append(f"no comparison was made: {report['reason']}")
+    return bad
+
+
+def population_failures(
+    population: dict[str, Any], stamped: list[tuple[str, str | None]]
+) -> list[str]:
+    """The evaluation population is held fixed, and every run says which one.
+
+    A version compared against the version before it on a different set of maps
+    is a comparison of two rulers. The hash each run records is what makes that
+    detectable from outside the model.
+    """
+    bad = []
+    if not population.get("frozen"):
+        return ["no evaluation population has been cut (metricdiff --freeze CUT)"]
+    if not population.get("readable", True):
+        return [f"evaluation population '{population.get('cut')}': {population.get('reason')}"]
+
+    frozen_hash = population.get("sha256")
+    for model, recorded in stamped:
+        if recorded is None:
+            bad.append(f"{model} recorded no evaluation-set hash")
+        elif recorded != frozen_hash:
+            bad.append(
+                f"{model} was scored against evaluation set {recorded[:16]}, "
+                f"frozen set is {str(frozen_hash)[:16]}"
+            )
+    return bad
+
+
+def evaluation_stamps(conn: psycopg.Connection[Any]) -> list[tuple[str, str | None]]:
+    """Per model, the evaluation-set hash its newest run recorded."""
+    rows = conn.execute(
+        "SELECT DISTINCT ON (model) model, "
+        "  params->'provenance'->'evaluation_set'->>'sha256' "
+        "FROM model_runs WHERE NOT (model = ANY(%s)) ORDER BY model, created_at DESC, id DESC",
+        (sorted(EXTERNAL_MODELS | {METRIC_DIFF_MODEL}),),
+    ).fetchall()
+    return [(str(r[0]), None if r[1] is None else str(r[1])) for r in rows]
+
+
+def published_models(conn: psycopg.Connection[Any]) -> set[str]:
+    rows = conn.execute("SELECT DISTINCT model FROM model_runs").fetchall()
+    return {str(r[0]) for r in rows}
+
+
 def mode_naming_failures(scored: list[tuple[str, int]], named: set[str]) -> list[str]:
     """A mode the metric layer scores and `game_modes` does not name reaches the
     site as its raw slug, in a list of properly named ones. The site derives
@@ -233,6 +357,24 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
         ("cohort", cohort_failures(rating_artifact(conn, "rating_posterior"))),
         ("basis", basis_failures(artifact(conn, STYLE_MODEL, "player_style"))),
         ("mode naming", mode_naming_failures(*scored_modes(conn))),
+        (
+            "season plus-minus",
+            season_rapm_failures(
+                artifact(conn, statespace.MODEL, "rapm_season"), season_rapm_rows(conn)
+            ),
+        ),
+        (
+            "metric diff",
+            harness_failures(
+                artifact(conn, METRIC_DIFF_MODEL, REPORT_ARTIFACT), published_models(conn)
+            ),
+        ),
+        (
+            "evaluation population",
+            population_failures(
+                artifact(conn, METRIC_DIFF_MODEL, POPULATION_ARTIFACT), evaluation_stamps(conn)
+            ),
+        ),
     ]
 
 

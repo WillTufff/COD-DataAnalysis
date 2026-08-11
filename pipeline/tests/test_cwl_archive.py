@@ -52,11 +52,13 @@ def test_parse_row_maps_basics_and_extras() -> None:
     assert line.first_bloods is None and line.plants is None  # empty stays absent
     assert line.won and line.team_score == 250
     assert line.ended_at == datetime(2019, 8, 14, 17, 17, 25, tzinfo=UTC)
-    # measured stats land in extras with normalized keys
+    # the keys every fit reads are typed fields, not extras (migration 0015)
+    assert line.hill_captures == 4
+    assert line.fave_weapon == "Saug 9mm"  # trailing 'm' not stripped from a label
+    assert "hill_captures" not in line.extras and "fave_weapon" not in line.extras
+    # everything else measured still lands in extras with normalized keys
     assert line.extras["ekia"] == 28
-    assert line.extras["hill_captures"] == 4
     assert line.extras["avg_kill_dist_m"] == 23.1
-    assert line.extras["fave_weapon"] == "Saug 9mm"  # trailing 'm' preserved on strings
     # derived stats are dropped
     for k in ("k_d", "plus_/_", "accuracy_pct"):
         assert k not in line.extras

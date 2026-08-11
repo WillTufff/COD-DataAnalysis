@@ -8,10 +8,12 @@ refusal to score a round whose feed contradicts itself.
 
 from __future__ import annotations
 
+import random
 from datetime import date, timedelta
 
 import numpy as np
 
+from cdlhub_analytics import roundwp
 from cdlhub_analytics.roundwp import (
     LAPLACE,
     RoundTimeline,
@@ -209,6 +211,33 @@ def test_reliability_is_withheld_rather_than_guessed_at_on_a_thin_sample() -> No
     table = StateTable([(a, b, 0, 0.5) for a in range(1, 5) for b in range(1, 5)])
     out = wpa([build_round([(1000, 5, 1)], winner=TEAM_A)], table)
     assert out["reliability"]["available"] is False
+
+
+def test_the_reliability_interval_does_not_depend_on_the_order_players_arrive_in() -> None:
+    """A reload renumbers rows; a published interval must not notice.
+
+    The bootstrap draws positions, so an interval computed over players in
+    archive order moves whenever that order does — with the correlations
+    themselves unmoved, which is the signature this was caught by. The
+    observations are ordered by their own contents instead.
+    """
+    rng = random.Random(11)
+    players = list(range(500, 560))
+    rounds = {p: 40.0 + rng.random() for p in players}
+    kills = {p: 10.0 * rng.random() for p in players}
+    wpa_a = {p: rng.random() for p in players}
+    wpa_b = {p: rng.random() for p in players}
+
+    def call(order: list[int]) -> dict[str, object]:
+        return roundwp._reliability(
+            ({p: wpa_a[p] for p in order}, {p: wpa_b[p] for p in order}),
+            ({p: kills[p] for p in order}, {p: kills[p] for p in order}),
+            ({p: rounds[p] for p in order}, {p: rounds[p] for p in order}),
+        )
+
+    shuffled = players[:]
+    rng.shuffle(shuffled)
+    assert call(players) == call(shuffled)
 
 
 # ===== the backtest =====

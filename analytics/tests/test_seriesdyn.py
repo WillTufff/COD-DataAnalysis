@@ -361,7 +361,7 @@ def _mixed_league(rng: np.random.Generator, n: int = 300) -> list[MapRow]:
 def test_the_regression_reports_every_spec_it_was_asked_for() -> None:
     rng = np.random.default_rng(3)
     rows = _mixed_league(rng)
-    out: dict[str, Any] = fit_specs(rows, "test", rng, specs=("strength_prev",))
+    out: dict[str, Any] = fit_specs(rows, "test", specs=("strength_prev",))
     assert out["available"]
     assert [s["spec"] for s in out["specs"]] == ["strength_prev"]
     assert [t["term"] for t in out["specs"][0]["terms"]] == ["strength", "prev"]
@@ -369,9 +369,8 @@ def test_the_regression_reports_every_spec_it_was_asked_for() -> None:
 
 
 def test_too_few_maps_is_reported_rather_than_fitted() -> None:
-    rng = np.random.default_rng(1)
     series = [build_series([True, True, True], sid=1)]
-    out = fit_specs(map_rows(series, frozen_for(series)), "test", rng)
+    out = fit_specs(map_rows(series, frozen_for(series)), "test")
     assert out["available"] is False
     assert out["n_maps"] == 2
 
@@ -379,10 +378,9 @@ def test_too_few_maps_is_reported_rather_than_fitted() -> None:
 def test_a_column_that_never_varies_is_refused_rather_than_inverted() -> None:
     """With no ridge there is nothing holding up a singular design, so the fit
     has to check rather than raise out of numpy."""
-    rng = np.random.default_rng(9)
     series = [build_series([True, True, True], sid=i + 1, day=i) for i in range(200)]
     rows = map_rows(series, frozen_for(series))  # every strength identical, every prev +1
-    out = fit_specs(rows, "test", rng, specs=("strength_prev",))
+    out = fit_specs(rows, "test", specs=("strength_prev",))
     assert out["available"] is False
     assert "constant" in out["reason"]
 

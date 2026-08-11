@@ -152,14 +152,37 @@ def _overlap_days(left: dict[str, Any], right: dict[str, Any]) -> int | None:
     return (min(a[1], b[1]) - max(a[0], b[0])).days + 1
 
 
+def _map_windows(teams: list[dict[str, Any]]) -> dict[str, tuple[date, date]]:
+    """First and last map date per team, from the box scores themselves."""
+    windows: dict[str, tuple[date, date]] = {}
+    for team in teams:
+        first, last = team["first_date"], team["last_date"]
+        if isinstance(first, date) and isinstance(last, date):
+            windows[str(team["team"])] = (first, last)
+    return windows
+
+
 def _stint_conflicts(
-    left: list[dict[str, Any]], right: list[dict[str, Any]]
+    left: list[dict[str, Any]],
+    right: list[dict[str, Any]],
+    left_teams: dict[str, tuple[date, date]],
+    right_teams: dict[str, tuple[date, date]],
 ) -> list[dict[str, Any]]:
-    """Stints that run at the same time on different teams."""
+    """Stints that run at the same time on different teams.
+
+    An archive stint spans its whole event, so a player who changed teams
+    inside one event gets two stints that overlap by construction. Where both
+    teams have maps to check against, the conflict has to hold for the actual
+    map dates too.
+    """
     conflicts: list[dict[str, Any]] = []
     for a in left:
         for b in right:
             if a["team"] == b["team"]:
+                continue
+            a_maps = left_teams.get(str(a["team"]))
+            b_maps = right_teams.get(str(b["team"]))
+            if a_maps and b_maps and (a_maps[0] > b_maps[1] or b_maps[0] > a_maps[1]):
                 continue
             a_end = a["end_date"] or date.max
             b_end = b["end_date"] or date.max
@@ -259,7 +282,12 @@ def candidates(conn: Conn) -> list[dict[str, Any]]:
             "shared_teams": shared,
             "overlap_days": _overlap_days(left, right),
             "gap_days": _gap_days(left, right),
-            "stint_conflicts": _stint_conflicts(stints.get(left_id, []), stints.get(right_id, [])),
+            "stint_conflicts": _stint_conflicts(
+                stints.get(left_id, []),
+                stints.get(right_id, []),
+                _map_windows(teams.get(left_id, [])),
+                _map_windows(teams.get(right_id, [])),
+            ),
         }
         result.append(
             {

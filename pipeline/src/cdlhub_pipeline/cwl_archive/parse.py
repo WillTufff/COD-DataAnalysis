@@ -37,6 +37,19 @@ _MAPPED = {
     "snd firstbloods": "first_bloods",
     "bomb plants": "plants",
     "bomb defuses": "defuses",
+    "headshots": "headshots",
+    "suicides": "suicides",
+    "team kills": "team_kills",
+    "hits": "hits",
+    "shots": "shots",
+    "hill captures": "hill_captures",
+    "hill defends": "hill_defends",
+    "bomb pickups": "bomb_pickups",
+    "snd rounds": "snd_rounds",
+    "2-piece": "multikill_2",
+    "3-piece": "multikill_3",
+    "4-piece": "multikill_4",
+    "fave weapon": "fave_weapon",
 }
 
 # Derived columns: recomputable from basics, not stored.
@@ -88,6 +101,19 @@ class ArchiveStatLine(BaseModel):
     first_bloods: int | None = None
     plants: int | None = None
     defuses: int | None = None
+    headshots: int | None = None
+    suicides: int | None = None
+    team_kills: int | None = None
+    hits: int | None = None
+    shots: int | None = None
+    hill_captures: int | None = None
+    hill_defends: int | None = None
+    bomb_pickups: int | None = None
+    snd_rounds: int | None = None
+    multikill_2: int | None = None
+    multikill_3: int | None = None
+    multikill_4: int | None = None
+    fave_weapon: str | None = None
     extras: dict[str, int | float | str] = {}
 
     @model_validator(mode="after")
@@ -135,6 +161,10 @@ def _opt_int(row: dict[str, str], col: str) -> int | None:
     return int(float(v))
 
 
+def _opt_str(row: dict[str, str], col: str) -> str | None:
+    return row.get(col, "").strip() or None
+
+
 def parse_row(row: dict[str, str]) -> ArchiveStatLine:
     extras: dict[str, int | float | str] = {}
     for col, raw in row.items():
@@ -165,6 +195,19 @@ def parse_row(row: dict[str, str]) -> ArchiveStatLine:
         first_bloods=_opt_int(row, "snd firstbloods"),
         plants=_opt_int(row, "bomb plants"),
         defuses=_opt_int(row, "bomb defuses"),
+        headshots=_opt_int(row, "headshots"),
+        suicides=_opt_int(row, "suicides"),
+        team_kills=_opt_int(row, "team kills"),
+        hits=_opt_int(row, "hits"),
+        shots=_opt_int(row, "shots"),
+        hill_captures=_opt_int(row, "hill captures"),
+        hill_defends=_opt_int(row, "hill defends"),
+        bomb_pickups=_opt_int(row, "bomb pickups"),
+        snd_rounds=_opt_int(row, "snd rounds"),
+        multikill_2=_opt_int(row, "2-piece"),
+        multikill_3=_opt_int(row, "3-piece"),
+        multikill_4=_opt_int(row, "4-piece"),
+        fave_weapon=_opt_str(row, "fave weapon"),
         extras=extras,
     )
 

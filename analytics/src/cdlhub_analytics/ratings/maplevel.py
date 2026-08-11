@@ -503,12 +503,22 @@ def specialization(
     for i, m in enumerate(maps):
         by_event[m.event_id].append(i)
 
+    # Events in an order fixed by what they contain, not by when their id first
+    # appeared. One generator shuffles every event in turn, so the order decides
+    # which draws land on which event — and with `event_id` deciding it, a reload
+    # that renumbered events moved this null while no map moved. The date breaks
+    # ties, which is the event's own property rather than the loader's.
+    events = sorted(
+        by_event.values(),
+        key=lambda idxs: (sorted(maps[i].mode for i in idxs), maps[idxs[0]].played_at),
+    )
+
     rng = np.random.default_rng(PERMUTATION_SEED)
     base = [m.mode for m in maps]
     null: list[float] = []
     for _ in range(n_permutations):
         shuffled = list(base)
-        for idxs in by_event.values():
+        for idxs in events:
             picked = [base[i] for i in idxs]
             rng.shuffle(picked)
             for slot, mode in zip(idxs, picked, strict=True):

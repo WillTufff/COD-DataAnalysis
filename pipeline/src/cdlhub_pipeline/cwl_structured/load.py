@@ -117,6 +117,13 @@ class Importer:
             pid, alias = cast(int, row[0]), cast(str, row[1])
             aliases_of[pid].add(alias)
 
+        # The box score is parsed with the alias map already applied, so a
+        # merged spelling never reaches player_aliases. The feed still uses it,
+        # so index each alias source under the handle it maps onto.
+        sources_of: dict[str, set[str]] = defaultdict(set)
+        for source, canonical in self.aliases.players.items():
+            sources_of[canonical.lower()].add(source)
+
         rosters: dict[str, Roster] = {}
         rows = self.conn.execute(
             """
@@ -138,6 +145,8 @@ class Importer:
             for spelling in {handle, *aliases_of.get(pid, set())}:
                 for form in (spelling, self.aliases.player(spelling)):
                     r.handle_to_pid[form.lower()] = pid
+                for source in sources_of.get(spelling.lower(), ()):
+                    r.handle_to_pid[source.lower()] = pid
         return rosters
 
     # ---- per-game parsing ---------------------------------------------------

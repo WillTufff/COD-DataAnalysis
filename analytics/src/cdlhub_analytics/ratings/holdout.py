@@ -54,6 +54,7 @@ from ..backtest import Prediction, evaluate
 from ..era import MIN_MAPS
 from ..maprows import Coverage, MapRow
 from ..regress import fit_logistic_l2
+from ..resample import order as content_order
 from . import hierarchical as hier
 from . import player_rating as pr
 from . import rapm as rapm_mod
@@ -99,6 +100,52 @@ def _ci(draws: Sequence[float]) -> tuple[float | None, float | None]:
     return (round(float(lo), 4), round(float(hi), 4))
 
 
+PERSISTENCE_COLUMNS = ("rating_now", "kd_now", "rating_next", "kd_next")
+
+
+def persistence_columns(
+    rating: dict[tuple[int, int], tuple[int, float]],
+    kd: dict[tuple[int, int], tuple[int, float]],
+    transitions: Sequence[tuple[int, int]],
+) -> tuple[dict[str, list[float]], list[int]]:
+    """The four aligned columns the persistence test resamples, and their counts.
+
+    A player-season enters only if both quantities exist on both sides, so all
+    four cells are computed on exactly the same players. Kept as four aligned
+    columns rather than four pair lists, so the caller can resample players once
+    and read every correlation off the same draw.
+
+    The rows are then ordered by what each player-season measured. They were
+    collected in `player_id` order, which is the loader's numbering rather than
+    anything about the players, and the bootstrap picks positions — so that
+    numbering decided which players shared a position with which, and a reload
+    that renumbered the table moved all four intervals while none of the four
+    correlations moved. All four columns enter the sort, so the pairing that
+    makes the contrasts legitimate survives it.
+    """
+    cols: dict[str, list[float]] = {k: [] for k in PERSISTENCE_COLUMNS}
+    used_per_transition: list[int] = []
+    for a, b in transitions:
+        used = 0
+        for pid, season in sorted(rating):
+            if season != a:
+                continue
+            keys = [(pid, a), (pid, b)]
+            if not all(k in rating and k in kd for k in keys):
+                continue
+            if any(min(rating[k][0], kd[k][0]) < MIN_MAPS_EACH_SIDE for k in keys):
+                continue
+            used += 1
+            cols["rating_now"].append(rating[(pid, a)][1])
+            cols["kd_now"].append(kd[(pid, a)][1])
+            cols["rating_next"].append(rating[(pid, b)][1])
+            cols["kd_next"].append(kd[(pid, b)][1])
+        used_per_transition.append(used)
+
+    take = content_order([cols[k] for k in PERSISTENCE_COLUMNS])
+    return {k: [cols[k][i] for i in take] for k in PERSISTENCE_COLUMNS}, used_per_transition
+
+
 def persistence(
     conn: psycopg.Connection[tuple[object, ...]], rating_run_id: int, era_run_id: int
 ) -> dict[str, Any]:
@@ -122,36 +169,17 @@ def persistence(
     order = sorted(seasons, key=lambda s: seasons[s]["year"])
     transitions = list(zip(order, order[1:], strict=False))
 
-    # A player-season enters only if both quantities exist on both sides, so all
-    # four cells are computed on exactly the same players. Kept as four aligned
-    # columns rather than four pair lists, so the contrasts below can resample
-    # players once and read every correlation off the same draw.
-    cols: dict[str, list[float]] = defaultdict(list)
-    per_transition = []
-    for a, b in transitions:
-        used = 0
-        for pid, season in sorted(rating):
-            if season != a:
-                continue
-            keys = [(pid, a), (pid, b)]
-            if not all(k in rating and k in kd for k in keys):
-                continue
-            if any(min(rating[k][0], kd[k][0]) < MIN_MAPS_EACH_SIDE for k in keys):
-                continue
-            used += 1
-            cols["rating_now"].append(rating[(pid, a)][1])
-            cols["kd_now"].append(kd[(pid, a)][1])
-            cols["rating_next"].append(rating[(pid, b)][1])
-            cols["kd_next"].append(kd[(pid, b)][1])
-        per_transition.append(
-            {
-                "from_year": seasons[a]["year"],
-                "from_title": seasons[a]["title"],
-                "to_year": seasons[b]["year"],
-                "to_title": seasons[b]["title"],
-                "n": used,
-            }
-        )
+    cols, used_per_transition = persistence_columns(rating, kd, transitions)
+    per_transition = [
+        {
+            "from_year": seasons[a]["year"],
+            "from_title": seasons[a]["title"],
+            "to_year": seasons[b]["year"],
+            "to_title": seasons[b]["title"],
+            "n": used,
+        }
+        for (a, b), used in zip(transitions, used_per_transition, strict=True)
+    ]
 
     n = len(cols["rating_now"])
     combos = [
@@ -485,9 +513,20 @@ def _brier_contrasts(preds: dict[str, dict[int, Prediction]]) -> dict[str, Any]:
     named = {k: v for k, v in preds.items() if v}
     if "rating" not in named or len(named) < 2:
         return {"available": False, "reason": "nothing to compare the rating against"}
-    common = sorted(set.intersection(*(set(v) for v in named.values())))
-    if len(common) < 50:
+    shared = set.intersection(*(set(v) for v in named.values()))
+    if len(shared) < 50:
         return {"available": False, "reason": "too few commonly scored maps"}
+    # Ordered by what every predictor said about a map, not by the map's id: the
+    # bootstrap draws positions, and positions handed out by a surrogate key move
+    # whenever a reload renumbers the games underneath.
+    ranked = sorted(named)
+    common = sorted(
+        shared,
+        key=lambda g: (
+            tuple((named[name][g].p, named[name][g].won) for name in ranked),
+            str(g),
+        ),
+    )
 
     # Per-map squared error, aligned across predictors.
     err = {

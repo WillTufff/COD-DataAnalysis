@@ -87,6 +87,17 @@ quantity, and nothing is averaged across the seam. And the kill-feed tier — tr
 clutch reconstruction, man-advantage, engagement distance — is 2017-2018 only, and
 always was.
 
+**A trade is not the same thing as the kill feed, and this page used to conflate them.**
+The feed is what allows a trade to be *reconstructed*: two death timestamps, two teams, a
+window between them. That is 2017-2018 and nothing has changed about it. But trade economy
+as a measured quantity is not only reconstructible — the CDL-era source counts it directly,
+in a `non_traded_kills` column that is populated from 2022 onward. So the record carries
+trade economy at both ends and not in the middle: reconstructed for 2017-2018, counted for
+2022-2026, and genuinely absent for 2019-2021. The two are different measurements of the
+same idea and are never mixed inside a cohort — the reconstructed form is a share of a
+player's *deaths* that nobody answered, the counted form a share of their *kills* that
+nobody answered, and no title has both.
+
 Project code is licensed AGPL-3.0.
 
 ### Completeness is published
@@ -904,7 +915,9 @@ declaration is what drops them. That leaves CDL Control fitted on kills and deat
 a slaying rating with a Control label, and the one cohort on this page whose
 [beyond-the-gunfight ratio](#how-much-of-the-weights-is-signal) cannot be computed because
 it has no non-slaying feature to compute it from. A CWL-era rating still blends three
-richer cohorts than a CDL-era one does.
+richer cohorts than a CDL-era one does. (This describes the published version. The 2.2.0
+feature set, fitted and compared but not published, gives 2022-2025 Control a non-slaying
+column and therefore a ratio — see [four feature sets, compared](#what-the-rating-measures-four-feature-sets-compared).)
 
 Its validation is walk-forward within each (season × mode): every event's maps are
 predicted using weights trained only on earlier events. That number establishes one
@@ -1225,10 +1238,10 @@ well as per ratio, and the artifact now records which denominator each feature r
 to, so this table and the feature table above are remeasured on each rerun rather than
 transcribed.
 
-### What the rating measures: three feature sets, compared
+### What the rating measures: four feature sets, compared
 
 Steps 2 to 4 above never change. What changed across versions is step 1's answer to
-"which numbers describe a team's map", and all three answers are kept runnable so the
+"which numbers describe a team's map", and all four answers are kept runnable so the
 choice can be checked rather than asserted.
 
 - **1.0.0** — kills, deaths, assists and one objective column per mode, all per ten
@@ -1241,6 +1254,13 @@ choice can be checked rather than asserted.
   untraded-death rate and trade kills in Hardpoint and Search & Destroy, plus deaths
   that surrendered a man advantage in Search & Destroy. **This is the published
   version.**
+- **2.2.0** — claims the columns both archives already populate and that no earlier
+  version had named. Nothing new was fetched: damage, the share of a player's kills
+  nobody traded back, contested hill time, shot accuracy, headshots per kill and hill
+  defends were all loaded, all coverage-measured, and all unused. Fitted, backtested
+  and compared here; **not yet the published version** — promoting one changes what the
+  site's leaderboards mean, which is a decision this page records rather than a
+  consequence of a feature set existing.
 
 No version declares which titles it applies to. Every feature names the source columns
 it reads, and a cohort keeps a feature only if its title actually populated those
@@ -1271,6 +1291,94 @@ across their seasons and are the shortest sets on the page: no kill feed exists 
 neither are hill captures or Control captures. Control is left with the kills/deaths pair
 and nothing else, which is why it is the one cohort with no
 [beyond-the-gunfight ratio](#how-much-of-the-weights-is-signal) to report.
+
+**2.2.0 changes that last sentence for most, and not all, of the CDL era.** The columns it
+claims land like this, each one still gated on measured availability:
+
+| Cohort | Gains |
+|---|---|
+| 2017-2018 Hardpoint | hill defends, accuracy, headshots per kill |
+| 2017-2018 Search & Destroy, Capture the Flag, Uplink | accuracy, headshots per kill |
+| 2019 BO4 Hardpoint / Control / Search & Destroy | damage, headshots per kill (and hill defends in Hardpoint) |
+| 2020-2026 Hardpoint | damage |
+| 2022-2026 Hardpoint | the above plus non-traded-kill share |
+| 2022-2025 Hardpoint | the above plus contested hill time |
+| 2020-2026 Search & Destroy | damage per round |
+| 2022-2026 Search & Destroy | the above plus non-traded-kill share |
+| 2022-2025 Control | damage, non-traded-kill share |
+| 2021 BOCW Control | damage, and nothing else |
+
+**Damage counts as part of the gunfight, not beyond it**, and that is a measurement rather
+than a convention: the damage differential correlates 0.82 to 0.94 with the kills
+differential in every CDL cohort. The entry player who wins a duel's damage without its kill
+is a real thing; at the resolution of one number per team per map, this column is a
+better-resolved reading of the same gunfight. Counting it as "the rest" would have inflated
+the beyond-the-gunfight ratio with a column that is mostly kills. Non-traded-kill share does
+not have that problem — it is a share of a player's own kills, and correlates 0.13 to 0.39
+with the kills differential in Search & Destroy — so it is the column that gives **2022-2025
+Control a beyond-the-gunfight ratio for the first time.**
+
+**2021 Control still has none, and that is a fact about the season rather than a gap.**
+Non-traded kills and the Control round counts are declared and empty for Black Ops Cold War,
+it records no assists at all, and damage belongs to the slaying pair. There is nothing beyond
+the gunfight in that box score to report.
+
+**Contested hill time is the one recovered column that is a new axis rather than a sharper
+reading of an old one.** Hardpoint scores a point per second of hill control, so `hill_time`
+*is* the scoreboard; occupancy while the hill was contested is strictly less of it. Measured
+against each other the two differentials correlate only 0.13 to 0.30, which is much weaker
+than the "sharper version of hill time" reading would predict. It is available for 2022-2025
+and is declared-but-empty for 2020, 2021 and 2026.
+
+**Two columns are fitted but flagged as not travelling.** Every column is measured on three
+things, not one: whether it is available and complete, whether it already knows the winner,
+and whether its relationship to the result *holds across titles*. Hill defends and headshots
+per kill pass the first two and fail the third. Hill defends points at hill time +0.72 on
+Infinite Warfare, +0.44 on WWII and **−0.30 on Black Ops 4**; headshots per kill runs at a
+sign-rule accuracy of 0.58 and points one way on WWII and Black Ops 4 and both ways across
+Infinite Warfare's three cohorts. A column whose sign against the same quantity flips between
+titles is not one quantity measured twice. Both stay in this retrospective decomposition,
+where each cohort fits its own weights and a flip between titles costs nothing, and both are
+marked as ineligible for anything that has to carry a number across a title seam.
+
+**One column was measured and rejected.** The CDL source records how many Control rounds each
+player spent attacking and defending. It is not a player statistic: one team's attack rounds
+are the other team's defence rounds on **974 of 974** Control maps, and 343 of those tie
+exactly, so the differential records which side each team started on and nothing else. It
+already reaches the model where it belongs — as the round denominator derived from it — and
+as a feature it would have put the coin toss in the rating.
+
+**What the new columns cost, since a rate needs a denominator on both sides.** Eight of 737
+WWII Capture the Flag maps and one of 256 Black Ops 6 Control maps leave the design because
+one team recorded no shots, or no kills, so accuracy or a per-kill share cannot be formed for
+that side. A half-measured map is not an observation, so it is dropped rather than imputed;
+the same nine maps also leave the four-way version comparison, which is why the earlier
+versions' comparison numbers move very slightly while their ratings do not move at all.
+
+**And 2.2.0 loses the map backtest, which is worth stating first rather than last.** Over the
+9,193 maps all four versions predict, Brier goes 1.0.0 0.05571, 2.0.0 0.04740, 2.1.0 0.04718,
+**2.2.0 0.04825** — a small regression, losing in 19 of 25 cohorts. Two things about that,
+and neither is "the columns are worthless".
+
+The first is that this is the test the page above spends several paragraphs explaining should
+not be read as predictive skill. The map backtest rewards knowing the result, and the columns
+that know it best are the ones already in every version: captures pick the winner of a Capture
+the Flag map on 100% of maps by their sign alone, hill time on 96%. Almost everything 2.2.0
+adds is *less* leaky than what was already there, so a small loss on a leakage-rewarding test
+is close to what the page's own
+[sign-rule baseline](#what-the-map-backtest-does-not-establish) predicts. The second is mechanical: the ridge strength is a single fixed constant across a
+standardized design, and CDL Hardpoint goes from three columns to six on a few hundred maps.
+More columns under an unchanged penalty means more shrinkage spread thinner and more
+estimation variance, which is the ordinary cost of a wider model on a small cohort and not a
+verdict on any column in it.
+
+Where a new column is a genuinely new axis rather than a rival reading of an old one, it wins:
+2024 Control improves by 0.0048 and 2023 Control by 0.0029, the two cohorts where non-traded
+kill share arrives into a set that previously held nothing but kills and deaths.
+
+This is one reason 2.2.0 is not the published version. The other is that promoting a version
+is a decision about what the site's leaderboards mean, and a feature set does not earn that by
+existing.
 
 The denominators fork with the era, because map duration is the one column the CDL source
 does not carry: Search & Destroy is per round throughout, while Hardpoint and Control are
@@ -1534,7 +1642,7 @@ One row per map, one column per player, +1 for one side and −1 for the other, 
 regressed on the map result. A coefficient is a player's estimated contribution to the
 log-odds of winning a map, holding the other seven constant. No box-score column enters at
 any point, which is what makes it an independent check rather than another view of the same
-data. 11,609 decided maps, 268 players with at least 20 of them.
+data. 11,575 decided maps, 265 players with at least 20 of them.
 
 Two things have to be reported rather than assumed away, and together they decide how much
 the leaderboard means. Both have improved substantially with the CDL era, for a reason
@@ -1545,13 +1653,13 @@ exactly what breaks the collinearity this method suffers from.
 appear apart are one column wearing four names; ridge responds by splitting the credit
 evenly, which is correct and is also indistinguishable from a finding. So every coefficient
 is published beside that player's *teammate concentration* — the share of their maps spent
-alongside their most frequent teammate. The median is **0.70**, down from 0.81 on the CWL
-archive alone, and **91 of 268 players sit at 0.9 or above** — a third, where it was 44%.
-None of the top five coefficients now belongs to a player at concentration 1.00; three of
+alongside their most frequent teammate. The median is **0.68**, down from 0.81 on the CWL
+archive alone, and **90 of 265 players sit at 0.9 or above** — a third, where it was 44%.
+None of the top five coefficients now belongs to a player at concentration 1.00; two of
 the five clear 1.96 standard errors with a concentration below 0.9.
 
 **Shrinkage.** Standard errors come from the penalized Hessian and are published with every
-coefficient. The median is 0.32 against a coefficient spread of 0.43, and **54 of 268
+coefficient. The median is 0.31 against a coefficient spread of 0.42, and **53 of 265
 coefficients exceed 1.96 standard errors** — where on the CWL archive it was 7 of 196, with
 a median standard error larger than the whole spread of the estimates. The ridge path still
 says the penalty is doing real work: as it rises from 0.25 to 64 the spread of coefficients
@@ -1623,22 +1731,246 @@ published rating run and recomputed on every rerun.
 
 The `rapm` artifact publishes the forty highest and forty lowest coefficients, which is
 the right shape for reading the distribution and the wrong shape for reading a player: it
-names 80 of the 268 players the model fits, so the other 188 could not be looked up at
+names 80 of the 265 players the model fits, so the other 185 could not be looked up at
 all. `player_rapm` (migration 0013) stores the whole fit, one row per player per rating
 run, and the player page reads that.
 
 Publishing a per-player coefficient raises the obvious hazard, so the table is explicit
-about it. **54 of the 268 coefficients exceed 1.96 SE, and 45 of those also sit below 0.9
+about it. **53 of the 265 coefficients exceed 1.96 SE, and 44 of those also sit below 0.9
 teammate concentration** — so for the first time the method resolves a meaningful number
 of individuals rather than a handful of duos. On the CWL archive alone that count was one.
-The median standard error is 0.32 against a coefficient spread of 0.42, so for the other
-214 players the ridge penalty is still comparable to or larger than the signal, and a
+The median standard error is 0.31 against a coefficient spread of 0.42, so for the other
+212 players the ridge penalty is still comparable to or larger than the signal, and a
 coefficient that does not clear its own error is not a ranking position.
 
 So the player page draws the interval as the chart and prints the coefficient as a label
 on it, states in words whether the interval covers zero, and adds a second notice when
 concentration is at or above 0.9. Nothing renders the coefficient without its standard
 error.
+
+### Can the plus-minus have a time axis?
+
+The coefficient above is one number for a whole career, which cannot express a peak, a
+decline, or a player who changed. The obvious repair is one coefficient per player per
+season. Whether this record supports that is a question with an answer, and it is answered
+here before any such model is fitted rather than after — the `rapm_identification`,
+`rapm_recovery` and `rapm_preflight_verdict` artifacts, stored under their own
+`rapm_preflight` run.
+
+**A season identifies lineups, not players.** Every row of the design is one lineup against
+another, so the row space is spanned by lineup *differences*. That puts a hard ceiling on
+what a season can identify: **distinct lineups minus the number of separate pools they fall
+into**, no matter how many players those lineups contain. Measured on the 11,575 admitted
+maps, with a column per (player, season) and a team-season column on each side:
+
+| | Columns | Rank | What the schedule allowed |
+|---|---|---|---|
+| Season-expanded design | 1,188 | 427 | 428 |
+| Career design (what ships today) | 340 | 270 | — |
+
+The rank is not merely below the column count, it is **exactly what the schedule permits and
+not one direction more**: 438 distinct lineups in ten seasons, all but one connected, so 428
+directions are available and 427 are realized. 2021 is typical — 63 player columns and 12
+team columns, 38 lineups, rank 37. The 761 missing directions are not weakly identified.
+They are not identified at all, and any number a penalty puts there is the penalty's.
+
+**Which is visible per column, too.** For each column, the share of its posterior variance
+supplied by the penalty rather than by the data is λ·[(XᵀX + λI)⁻¹]ⱼⱼ. It cannot reach 1: a
+player whose four-man lineup never changes shares one identified direction with three
+teammates and a team column, so their share sits near k/(k+1) — 0.80 at 4v4, 0.83 at 5v5.
+Against that reference, **42% of CDL player-season columns and 53% of CWL ones are penalty
+dominated**, where the career design's figure is 9%. A flat threshold of 0.9 would have
+reported no problem anywhere, which is why the reference is derived rather than picked.
+
+**And a simulation says what that costs.** A generated league — known trajectories with
+peaks, an explicit team-season effect, roster churn as a dial, mode margins censored at the
+real caps of 250, 3 and 6, and map noise solved so the league is exactly as predictable as
+this one — is handed to the estimator the phase would use. Recovery is scored on deviations
+from the team-season mean, because separating *teammates* is the whole claim:
+
+| Effective lineups per team-season | Teammate recovery *r* |
+|---|---|
+| 1.0 (nothing changes) | **−0.06** |
+| 1.3 | 0.25 |
+| 1.8 | 0.29 |
+| 2.5 | 0.30 |
+| 3.4 | 0.33 |
+
+The first row is the negative control and it is the important one: where a lineup never
+changes and no player transfers, the estimator recovers **nothing** about who inside it was
+worth more. Turn transfers back on, change nothing else, and the same frozen season recovers
+*r* = 0.50 — every point of it imported from other seasons by the random-walk penalty.
+That is the failure mode this pre-flight exists to price, measured rather than argued.
+
+The last row matters too, and it is not good news. **More roster movement than any real
+team-season has still tops out near 0.33**, so the binding constraint is not only churn: a
+map in this league is close to a coin flip, and the noise the calibration matches — the map
+model picks 59.5% of maps — leaves little room to resolve one player inside a lineup however
+often the lineup changes.
+
+Two further numbers come from the same harness. The penalized-Hessian intervals cover the
+truth at **91–98%** against a nominal 95%, so they are near enough nominal to use. And a
+two-sided penalty scored on a forward test beats the one-sided fit by **+0.026** of
+correlation while predicting a season it has already seen — small, real, and exactly the
+contamination that makes the smoothed and filtered families a distinction rather than a
+preference.
+
+**The verdict, against thresholds declared before the measurement.** The rule stops a
+season-varying plus-minus only if all three hold: the median team-season carries under 1.5
+effective lineups, the design identifies under half its player columns, and the simulation
+fails to separate teammates at that lineup variety. The two eras do not answer alike:
+
+| | Effective lineups | Rank / player columns | Simulated recovery | |
+|---|---|---|---|---|
+| CDL 2020–2026 | 1.94 | 48% | 0.29 | two clauses — does not stop |
+| CWL 2017–2019 | 1.00 | 41% | −0.06 | all three — stops |
+
+So the time axis is as fine as each era can carry: **season resolution for the CDL era,
+published as deviations from an explicit team-season effect, and pooled to era level for
+2017–2019**, where within-season lineup variety identifies nothing. A rank-deficient design
+that still recovers what was put into it is not a failure — that is what a penalty is for —
+which is why the rule is a conjunction and why the CDL era, deficient on rank alone, ships.
+But 0.29 is weak recovery, not good recovery, and the CDL season coefficients this permits
+should be read as what they are: a noisy deviation from a team, not a ranking of four
+players.
+
+**And the forward test this feeds has less power than the plan assumes.** The record holds
+**561 consecutive player-seasons**, against which the smallest detectable gap in next-season
+persistence — over a baseline *r* of 0.564 — is **0.08**. That is a floor: it assumes
+independent observations, and clustering the resample widens it. A gate declared below 0.08
+cannot be met by a model that works.
+
+Nothing in *this* section fits a season-varying model to real maps: everything above runs
+on generated data. What the verdict permitted is fitted in the section that follows, at the
+resolution it permitted per era, and the career plus-minus above is unchanged and still the
+published one.
+
+### Season plus-minus: the time axis the record turned out to carry
+
+The pre-flight above ends in a fork rather than a yes, and both branches ship: **one
+coefficient per player per season for the CDL era, pooled to one per player per era for
+2017–2019**, all of them as deviations from an explicit team-season effect. The model reads
+that resolution out of the verdict artifact rather than declaring it, so an era that grows
+into season resolution gets it without a code change. The `rapm_season` artifact and the
+`player_rapm` rows it summarizes are stored under their own run.
+
+**The model.** One row per map, +1 for the four players on one side and −1 for the other,
+expanded to one column per (player, time cell), plus a team-season column on each side.
+Fitted by generalized ridge:
+
+```
+minimize  ‖y − Xβ‖²  +  λ₀ Σ β²_{p,t}  +  λ_w Σ (β_{p,t} − β_{p,t−1})²
+```
+
+The second term is a Gaussian random walk on player value — the state-space formulation
+written as a penalty. Both λ are chosen by **generalized cross-validation** with the
+hat-matrix trace computed exactly, never by searching against held-out maps, which would
+turn the backtest into a selection statistic. On this record that lands at **λ₀ = 32.5,
+λ_w = 7.4**, spending **255 effective degrees of freedom** on 938 columns: 711 player cells,
+223 team-seasons and 4 replacement buckets.
+
+**The response is the map's score margin, rank-transformed to normal scores within (season,
+mode).** Margin carries far more per row than a binary win, and it is censored rather than
+merely heteroskedastic — Hardpoint runs to 250, Control to 3, Search & Destroy to 6 — so the
+raw number is non-linear in value at exactly the tail where the best players live, and ranks
+survive the cap. 11,571 of the 11,575 admitted maps carry it; the other four have a margin
+that is absent, zero, or contradicts the recorded winner, and they are **named by game id in
+the artifact** rather than counted and forgotten. Two of the four are 2017 Uplink maps level
+at regulation with a winner the archive knows, which is not an error; the other two are — a
+Search & Destroy map recorded at 3-6 to the team that won it, and a Control map whose scores
+are both −1, a sentinel for "unknown" wearing the type of a real number. Neither is fixable
+from inside this repository, so both are declared here, reported by the ingest quality
+checks, and excluded from the signed targets while staying in the binary one. Binary win and mode-standardized margin are fitted from the same factorization and
+published as sensitivity, never averaged in: their coefficient orderings correlate **0.913**
+and **0.982** with the published one.
+
+**Three population rules, not two.** *Column admission*: below 8 maps in a cell a player
+does not get a column and the map is not dropped — the slot joins a shared replacement
+bucket for that cell, because dropping the map would discard a real result and bias the fit
+toward teams whose opponents happened to be established. **21 players** are pooled this way,
+into 4 buckets, and the buckets' own coefficients are the directly interesting number: what
+a replacement-level slot is worth. They run from **−0.02** (2021, 2022) to **−0.24** (2026,
+SE 0.08). *Fit inclusion*: every admitted cell enters however thin, which is what the walk
+penalty is for. *Publication*: a higher floor of 20 maps, which leaves **1,010 published
+player-cells** in 2,020 rows over two scopes.
+
+**Two coefficient families, and only one may be read forward.** The walk penalty is
+two-sided — β at 2023 is pulled toward 2024 as much as toward 2022 — so a `smoothed`
+coefficient has already seen the season it would be asked to predict. That contamination
+arrives through the penalty rather than through a column, so nothing written against the
+design matrix can detect it. `filtered` refits through each cell and nothing later, and a
+forward test reading a smoothed row raises rather than warning. The two families correlate
+**0.996**, which is the honest way to read the split: the leak is small, real, and exactly
+the size the simulation priced it at (+0.026 of forward correlation).
+
+**What a season coefficient is worth, measured three ways.**
+
+| | |
+|---|---|
+| Split-half reliability within a cell, whole series to a side | *r* = **0.50** [0.43, 0.56], Spearman-Brown 0.67 |
+| Median share of a column the penalty supplied | **0.77**, against the 0.80 a never-changing 4v4 lineup cannot go below |
+| Median teammate concentration inside a cell | **1.00** |
+
+The third number is the one that governs how any of this may be presented. Inside a single
+season the median published player **never appears without their most frequent teammate**,
+so their coefficient and that teammate's are one direction wearing two names. The
+reliability figure is directly comparable to the persistence *r* the composite rating
+reports, and it is a genuine result — half the record predicts the other half at 0.50 — but
+it is reliability of a *lineup-entangled* quantity, and 53% of player cells sit at or above
+0.95 of the penalty-dominance reference. Per cell the reliability runs from **0.30** (2021)
+to **0.69** (2022); the CWL era, pooled over three years, reaches 0.49.
+
+**What the schedule allowed each cell, beside the scalar.** Concentration says how entangled
+one player is; the lineup graph says whether the cell could have separated anybody at all.
+
+| Cell | Maps | Player columns | Distinct lineups | Rank ceiling |
+|---|---|---|---|---|
+| CWL era (2017–2019) | 5,087 | 254 | 202 | 200 |
+| 2020 CDL | 718 | 76 | 32 | 31 |
+| 2021 CDL | 858 | 62 | 38 | 37 |
+| 2022 CDL | 830 | 58 | 30 | 29 |
+| 2023 CDL | 994 | 63 | 30 | 29 |
+| 2024 CDL | 1,014 | 65 | 31 | 30 |
+| 2025 CDL | 998 | 62 | 30 | 29 |
+| 2026 CDL | 1,076 | 71 | 36 | 35 |
+
+Every cell holds roughly twice as many player columns as its schedule can identify
+directions. That is not a defect to be fixed by a better solver — it is the league's
+schedule, and it is why the penalty exists and why these numbers are published as noisy
+deviations from a team rather than as a ranking of four players.
+
+**The penalties, reported rather than selected.** Moving λ₀ over 4× either side of the
+chosen value takes the coefficient spread from 0.106 to 0.043 and the ordering's correlation
+with the published fit down to 0.94–0.96, while GCV moves in the fourth decimal (0.8504 to
+0.8548) — the criterion is nearly flat and the ridge dial is doing most of the shrinking.
+The λ_w = 0 row, which is the fit with no time-borrowing at all, correlates **0.988** with
+the published one: at this record's churn, the walk term is a modest smoother rather than
+the thing holding the estimates up.
+
+**Against the career fit that ships today.** An earlier version of this gate asked for a
+reproduction of the published logistic fit, and that was the wrong thing to ask: the λ_w → 0
+limit of a Gaussian fit on transformed margin is not a logistic fit on binary win, and no
+amount of care makes it one. So the comparison is a rank correlation with the two changes
+separated, over the 265 players both fits reach:
+
+| This estimator, collapsed to one cell | Rank correlation with the published career fit |
+|---|---|
+| Gaussian on margin, with the team-season effect | 0.779 |
+| Gaussian on margin, without it | 0.842 |
+| Logistic on map win, with the team-season effect — the like-for-like arm | 0.784 |
+
+Read the middle row against the other two: **the team-season effect moves the ordering more
+than the link function does**. That is the change of interpretation stated plainly. Without
+a team column, team quality has nowhere to go but into the four player columns and ridge
+divides it evenly — "this was a good team" is published as "these were four good players".
+With it, a player's number is what is left after their team-season is accounted for, and the
+players whose published rank it moves most are the ones whose old coefficient was mostly
+their roster's.
+
+So: this is a time axis the record supports at the resolution measured for it, reliable at
+*r* = 0.50 within a cell, and entangled with lineups to the point where the median player is
+inseparable from a teammate. It is published with its standard error and its penalty share
+on every row, and it is not a ranking of the players on a roster.
 
 ## Tier 2b: Series dynamics (shipped)
 
@@ -1968,6 +2300,98 @@ excellent at *both* K/D and an intangible as contradictions, with a headline cla
 the opposite of the truth. And a "nobody in the league matched this" claim requires
 twice the qualifying sample, because clearing a leaderboard minimum is a much weaker
 thing than being unmatched.
+
+## Reproducibility: the metric diff and what a run records
+
+Every model on this page is refitted whenever the record grows or the code changes,
+and every refit moves numbers. Until now "nothing else moved" was an assertion. It is
+now a report.
+
+### The published surface, snapshotted
+
+At the end of each fit, every published number is flattened to a single
+`key -> value` pair and written to a sorted, compressed snapshot: each metric-layer
+cell, era-adjusted z-score, plus-minus coefficient, style axis, team rating, backtest
+figure, finding, and every leaf of every stored artifact payload. The current run is
+around a million such numbers.
+
+A key names the thing rather than the row that held it — a player's handle, a season's
+year and league, a metric's name, an artifact's JSON path — so two snapshots stay
+comparable across a refit, a reload that renumbers a table, or a change to how player
+identity resolves. Lists inside an artifact are keyed by the identity their elements
+carry rather than by position, so a leaderboard that reorders reports the moves it
+contains instead of reporting every row as changed.
+
+### What counts as a move
+
+A number counts as moved when
+
+    |new - old| > 1e-9 + 1e-6 * |old|
+
+Published numbers are stored as 32-bit reals, which carry about seven significant
+digits, so that threshold sits just above the storage floor. It suppresses
+representation noise and nothing else: every real change is counted and the largest
+are named. Values that are not numbers — a finding's headline, a backtest window, a
+verdict such as "the interval excludes zero" — are compared for equality, and a change
+there is reported as a flip rather than a move, because a verdict that reverses is not
+a small difference.
+
+The report gives, per family of numbers, how many moved, how many flipped, how many
+keys appeared and how many vanished; then the largest moves by name with both values;
+then how many it did not name. A truncated list that reads as a complete one is the
+failure this instrument exists to end.
+
+**The first thing it caught was a whole class of them.** Every bootstrap and permutation
+here draws *positions* in a population, and the populations were being ordered by database
+ids — rows in `player_id` order, clusters in the order a `series_id` first appeared, groups
+in the order a dictionary happened to fill. Those ids are assigned by the loader. Reloading
+a source renumbers them, the population permutes, the same seed lands on different
+observations, and a published interval moves while the estimate it brackets does not. The
+harness found two instances and the class was then swept: every such population is now
+ordered **by its own contents**, and every group that resamples on its own — a player's
+maps, a cohort's, an era's — draws from a generator seeded from those contents rather than
+from one generator threaded through a loop. Each site carries a test that renumbers the rows
+underneath it and requires the interval to come back identical.
+
+Landing it moved numbers once, and not only intervals — which is worth stating precisely,
+because the reason is instructive. Every published interval that resamples moved. So did
+14,750 season **ratings**, by up to 0.010 on a scale where the league average is 1.00: the
+per-cohort observation-variance calibration is itself estimated by resampling each player's
+maps, so reseeding it moves the shrinkage constant and therefore the ratings it shrinks.
+Style scores moved with them — up to 0.068 — because the style basis residualizes on the
+published rating before it factors anything. Both are the same fact seen twice: a quantity
+estimated by Monte Carlo has Monte Carlo error, and the estimates it feeds inherit it. What
+changed is that neither depends on the loader's row ids any more.
+
+### The evaluation population is frozen
+
+A rating version is only comparable to the version before it if both were scored on the
+same maps. Repairs to the underlying record change which maps are eligible, so the
+eligible set and the evaluation set are two different objects.
+
+The evaluation set is cut once, hashed, and held fixed. Every model run records that
+hash. Repairs change what is modelled and leave the ruler alone; the difference between
+the frozen set and the currently eligible set is reported at every run and never applied
+silently. Re-cutting is deliberate, takes a new label, and requires every prior version
+to be re-scored on the new cut before the new one is published. A release gate fails when
+a run records no evaluation-set hash, or records one that is not the frozen set's.
+
+### What a run records about itself
+
+A stored backtest that cannot be reproduced exactly is a claim rather than a record. Each
+model run therefore stores, beside its hyperparameters and the commit that produced it:
+
+- the fixed seed of every stage that draws random numbers, so a resampled interval can be
+  recomputed rather than trusted;
+- a hash of the resolved dependency lockfile, so the solver stack is part of the record;
+- the interpreter, numpy and platform versions;
+- the evaluation-set hash above.
+
+Where a model builds a design matrix, the matrix itself is fingerprinted — shape, column
+names and contents — and published with the fit, so a refit that produced different
+numbers can be told apart from a refit that was handed different data. The test suite
+refits the same data twice and requires the results to be identical bit for bit, and walks
+the package to check that no stage owns a seed the run does not write down.
 
 ## Publishing rules
 

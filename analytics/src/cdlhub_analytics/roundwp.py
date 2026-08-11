@@ -974,6 +974,15 @@ def _reliability(
 
     r0, r1 = residual(w0, k0), residual(w1, k1)
 
+    # Ordered by what each player measured, never by who they are. A seeded
+    # bootstrap draws *positions*, so an interval computed over players in the
+    # order they happened to appear in the archive moves whenever a reload
+    # renumbers the rows underneath — the correlations do not move, and only the
+    # bounds do, which is how this was found. Ties are two players carrying the
+    # same numbers, and those are interchangeable to any resample.
+    order = np.lexsort((r1, r0, w1, w0, k1, k0))
+    k0, k1, w0, w1, r0, r1 = (arr[order] for arr in (k0, k1, w0, w1, r0, r1))
+
     rng = np.random.default_rng(BOOTSTRAP_SEED)
     idx = rng.integers(0, n, size=(BOOTSTRAP_B, n))
 

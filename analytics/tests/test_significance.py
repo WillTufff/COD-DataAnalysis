@@ -9,6 +9,7 @@ from cdlhub_analytics.ratings.significance import (
     POWER_FACTOR,
     form_power,
     model_gaps,
+    paired_gaps,
 )
 from cdlhub_analytics.ratings.winprob import FEATURES, SeriesFeatures
 
@@ -144,3 +145,41 @@ def test_form_power_curve_matches_its_own_criterion() -> None:
 
 def test_form_power_needs_a_trace() -> None:
     assert form_power([])["available"] is False
+
+
+# ===== the interval must not move when only the keys move =====
+
+
+def _two_models(keys: list[int]) -> dict[str, dict[int, Prediction]]:
+    """Two models over the same 200 observations, addressed by `keys`.
+
+    The predictions are a fixed list, so relabelling them is exactly the change
+    a reload makes when it renumbers game ids: same evidence, different keys.
+    """
+    rng = np.random.default_rng(11)
+    outcomes = [bool(b) for b in rng.integers(0, 2, size=len(keys))]
+    sharp = [0.75 if w else 0.25 for w in outcomes]
+    blunt = [float(p) for p in rng.uniform(0.35, 0.65, size=len(keys))]
+    return {
+        name: {
+            key: Prediction(p=p, won=w, when=DAY0 + timedelta(days=i), series_id=key)
+            for i, (key, p, w) in enumerate(zip(keys, ps, outcomes, strict=True))
+        }
+        for name, ps in (("sharp", sharp), ("blunt", blunt))
+    }
+
+
+def test_renumbering_the_keys_does_not_move_the_interval() -> None:
+    """The bootstrap draws positions, so its ordering has to come from the
+    evidence rather than from surrogate ids that a reload renumbers."""
+    n = 200
+    original = paired_gaps(_two_models(list(range(n))), unit="map")
+    # Same observations, keys shuffled into a different sort order.
+    shuffled_keys = [(key * 7919) % 100_003 for key in range(n)]
+    assert sorted(shuffled_keys) != list(range(n))
+    renumbered = paired_gaps(_two_models(shuffled_keys), unit="map")
+
+    assert original["pairs"] and renumbered["pairs"]
+    for before, after in zip(original["pairs"], renumbered["pairs"], strict=True):
+        for field in ("delta", "lo", "hi", "se", "mde80", "accuracy_lo", "accuracy_hi"):
+            assert before[field] == after[field], field

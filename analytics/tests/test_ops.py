@@ -79,7 +79,11 @@ def test_every_events_job_emits_the_stages_the_catalog_declares() -> None:
         if not job.get("events"):
             continue
         module = job["argv"][job["argv"].index("-m") + 1]
-        source = REPO_ROOT / job["cwd"] / "src" / Path(*module.split(".")).with_suffix(".py")
+        root = REPO_ROOT / job["cwd"] / "src" / Path(*module.split("."))
+        # `-m` takes a module or a package; a package runs its __main__.
+        source = root.with_suffix(".py")
+        if not source.is_file():
+            source = root / "__main__.py"
         emitted = re.findall(r'progress\.stage\("([^"]+)"\)', source.read_text(encoding="utf-8"))
         assert emitted == job["stages"], job["id"]
 

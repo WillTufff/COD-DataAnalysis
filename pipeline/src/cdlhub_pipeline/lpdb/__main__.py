@@ -59,6 +59,14 @@ def run_load(dsn: str) -> None:
             f"unmatched {len(fix['unmatched'])}; "
             f"lpdb-map-inconsistent {len(fix['inconsistent_lpdb_maps'])}"
         )
+        unmatched_cwl = sum(fix["cwl_unmatched_by_event"].values())
+        print(
+            f"cwl second source: {fix['cwl_score_agreements']} series agree, "
+            f"{len(fix['cwl_score_disagreements'])} disagree, "
+            f"{unmatched_cwl} unmatched (LPDB has no match rows for the open events)"
+        )
+        for kind, count in fix["cwl_disagreement_kinds"].items():
+            print(f"  {count:>4}  {kind}")
     REPORT_PATH.write_text(json.dumps(report, indent=1))
     print(f"report: {REPORT_PATH}")
 

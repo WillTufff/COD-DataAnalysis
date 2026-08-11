@@ -1,5 +1,5 @@
 {
-  "_comment": "Identity corrections, owner-editable. 'players' maps source spellings to canonical handles (the CWL archive title-cases stylized gamertags); 'teams' merges names the CWL archive uses inconsistently for the same team. Source spellings are preserved in player_aliases. 'orgs' groups distinct branded identities under one organisation so a rebrand keeps one rating curve; membership is only asserted where the two brands' series windows do not overlap — a concurrent second roster is an academy team, not a rebrand. 'cito_teams' undoes Cito's retroactive branding: Cito stamps each franchise slot's CURRENT name on every historical match, so each slug maps to its dated brand history, keyed by CDL season year (a season starts in Nov/Dec of the prior calendar year). 'status: review' entries are provisional until the owner confirms them.",
+  "_comment": "Identity corrections, owner-editable. 'players' maps source spellings to canonical handles (the CWL archive title-cases stylized gamertags); 'teams' merges names the CWL archive uses inconsistently for the same team. Casing variants are preserved in player_aliases; a spelling mapped here is applied at parse time and so never reaches that table. 'orgs' groups distinct branded identities under one organisation so a rebrand keeps one rating curve; membership is only asserted where the two brands' series windows do not overlap — a concurrent second roster is an academy team, not a rebrand. 'cito_teams' undoes Cito's retroactive branding: Cito stamps each franchise slot's CURRENT name on every historical match, so each slug maps to its dated brand history, keyed by CDL season year (a season starts in Nov/Dec of the prior calendar year). 'status: review' entries are provisional until the owner confirms them.",
   "players": {
     "Abezy": "aBeZy",
     "Formal": "FormaL",
@@ -7,7 +7,14 @@
     "Slasher": "SlasheR",
     "TJHaly": "TJHaLy",
     "Zooma": "ZooMaa",
-    "Zero": "Zer0"
+    "Zero": "Zer0",
+    "Priestah": "Priestahh",
+    "Wallers": "Wailers",
+    "Novo": "Nevo",
+    "Gunshiii": "Gunsiii",
+    "Setzy": "Setzyy",
+    "TDylan": "Dylan",
+    "Alex": "Alexx"
   },
   "teams": {
     "Team EnVyUs": "Team Envy",
@@ -544,5 +551,68 @@
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/Europe": null,
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/North_America": null,
     "Call_of_Duty_World_League/2019/Pro_League/Play-In": null
-  }
+  },
+  "_comment_identity": "'identity_kept_separate' lists handle pairs confirmed to be two different people. Nothing reads it at load time; it stops a pair being offered again as a merge candidate.",
+  "identity_kept_separate": [
+    [
+      "2ReaL",
+      "dReal"
+    ],
+    [
+      "Cammy",
+      "Sammy"
+    ],
+    [
+      "Denz",
+      "Denza"
+    ],
+    [
+      "Eazy",
+      "Pazy"
+    ],
+    [
+      "FeLo",
+      "Fero"
+    ],
+    [
+      "Fero",
+      "Nero"
+    ],
+    [
+      "Johnny",
+      "oJohnny"
+    ],
+    [
+      "Maux",
+      "Naux"
+    ],
+    [
+      "Nelson",
+      "Nolson"
+    ],
+    [
+      "Nero",
+      "Nevo"
+    ],
+    [
+      "Nova",
+      "Novo"
+    ],
+    [
+      "Phantom",
+      "Phantomz"
+    ],
+    [
+      "Pure",
+      "Purj"
+    ],
+    [
+      "Scump",
+      "Stump"
+    ],
+    [
+      "Zer0",
+      "Zerg"
+    ]
+  ]
 }

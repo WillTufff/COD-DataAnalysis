@@ -63,6 +63,8 @@ import psycopg
 
 from .ratings.maplevel import BLEND_K, ROTATION, K, State
 from .regress import FloatArray, fit_logistic_l2
+from .resample import order as content_order
+from .resample import stream as resample_stream
 
 MODEL = "series_dynamics"
 VERSION = "1.0.0"
@@ -969,7 +971,6 @@ def _phi(z: float) -> float:
 def fit_specs(
     rows: Sequence[MapRow],
     label: str,
-    rng: np.random.Generator,
     specs: Sequence[str] = tuple(_SPECS),
 ) -> dict[str, Any]:
     """Every spec fitted on one set of rows, with clustered bootstrap intervals.
@@ -979,6 +980,11 @@ def fit_specs(
     share something else; treating three maps as three independent observations
     would shrink the interval by roughly the square root of three and
     manufacture the effect being tested.
+
+    The generator is built here from these rows rather than handed in. A shared
+    one would make each call's intervals depend on how much had been drawn from
+    it already — so adding a stage above, or reordering two below, would move
+    numbers that no data supports.
     """
     if len(rows) < 100:
         return {"available": False, "reason": "too few maps", "n_maps": len(rows)}
@@ -999,9 +1005,24 @@ def fit_specs(
     by_series: dict[int, list[int]] = defaultdict(list)
     for i, r in enumerate(rows):
         by_series[r.series_id].append(i)
-    clusters = [np.array(v, dtype=int) for v in by_series.values()]
     y = np.array([r.team1_won for r in rows], dtype=float)
 
+    # Clusters ordered by what the series contains, not by when its id first
+    # appeared in the rows: the draw picks cluster positions, and positions
+    # handed out by a surrogate key move whenever the loader renumbers.
+    named = sorted(used)
+
+    def cluster_contents(members: list[int]) -> tuple[tuple[float, ...], ...]:
+        return tuple(sorted((y[i], *(float(cols[n][i]) for n in named)) for i in members))
+
+    clusters = [np.array(v, dtype=int) for v in sorted(by_series.values(), key=cluster_contents)]
+
+    # Seeded from the same rows in the same content order, or the stream itself
+    # would carry the arrival order the clusters were just freed from.
+    rows_in_order = content_order([y, *(cols[n] for n in named)])
+    rng = resample_stream(
+        BOOTSTRAP_SEED, y[rows_in_order], *(cols[n][rows_in_order] for n in named)
+    )
     idx = rng.integers(0, len(clusters), size=(BOOTSTRAP_B, len(clusters)))
     resamples = [np.concatenate([clusters[c] for c in row]) for row in idx]
 
@@ -1120,7 +1141,19 @@ def build_artifacts(
     if not usable:
         return {}
 
-    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    # The series arrive in the order the loader emitted them, and the bootstrap
+    # below draws positions in these columns — so every gap's interval was a
+    # function of the ids underneath, and a reload that renumbered a few hundred
+    # series would move all of them while no observed or expected rate moved.
+    # Ordered by what each series produced, on every column at once so the
+    # pairing that makes an observed-minus-expected gap legitimate survives it.
+    take = content_order(
+        [observed[k] for k in EVENTS] + [expected[b][k] for b in BENCHMARKS for k in EVENTS]
+    )
+    observed = {k: v[take] for k, v in observed.items()}
+    expected = {b: {k: v[take] for k, v in cols.items()} for b, cols in expected.items()}
+
+    rng = resample_stream(BOOTSTRAP_SEED, *(observed[k] for k in EVENTS))
     idx = rng.integers(0, len(usable), size=(BOOTSTRAP_B, len(usable)))
 
     rows = map_rows(usable, frozen)
@@ -1162,10 +1195,9 @@ def build_artifacts(
         "map2": fit_specs(
             map2,
             "map 2 only — one row per series",
-            rng,
             specs=("strength_only", "prev_only", "strength_prev"),
         ),
-        "consecutive": fit_specs(rows, "every map after the first", rng),
+        "consecutive": fit_specs(rows, "every map after the first"),
         "quality": quality,
     }
     return {"series_dynamics": dynamics, "series_momentum": momentum}

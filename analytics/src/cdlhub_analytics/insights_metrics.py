@@ -402,14 +402,14 @@ def trade_asymmetries(conn: psycopg.Connection[tuple[object, ...]], metric_run: 
 
 _META_EVENT_SQL = """
 SELECT se.id, se.year, t.short_name, ev.id, ev.name, min(s.played_at) AS started,
-       gps.extras->>'fave_weapon' AS weapon, count(*) AS n
+       gps.fave_weapon AS weapon, count(*) AS n
 FROM game_player_stats gps
 JOIN games g       ON g.id = gps.game_id
 JOIN series s      ON s.id = g.series_id
 JOIN events ev     ON ev.id = s.event_id
 JOIN seasons se    ON se.id = ev.season_id
 JOIN titles t      ON t.id = se.title_id
-WHERE gps.extras->>'fave_weapon' IS NOT NULL
+WHERE gps.fave_weapon IS NOT NULL
 GROUP BY 1, 2, 3, 4, 5, 7
 """
 

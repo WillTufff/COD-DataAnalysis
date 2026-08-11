@@ -58,6 +58,37 @@ def _sq_err(p: Prediction) -> float:
     return (p.p - (1.0 if p.won else 0.0)) ** 2
 
 
+def _hit(p: Prediction) -> float:
+    return 1.0 if (p.p >= 0.5) == p.won else 0.0
+
+
+def _stable_order(named: dict[str, dict[Any, Prediction]], keys: set[Any]) -> list[Any]:
+    """The observations, ordered by what they contain rather than by their key.
+
+    The bootstrap below draws row indices, so an observation's identity is its
+    position in this list. Ordering by the caller's key — a game id or a series
+    id — makes those positions depend on surrogate keys, and a reload that
+    deletes and recreates a handful of rows renumbers the rest. The published
+    interval then moves while every point estimate stays put, which is what the
+    metric-diff harness caught: a number that changed with no data behind it.
+
+    Sorting on the predictions themselves fixes the positions to the evidence.
+    Ties order arbitrarily and harmlessly — two observations carrying identical
+    errors are interchangeable, so no resample mean can tell them apart — and
+    the key breaks them only to keep the sort itself reproducible.
+    """
+    models = sorted(named)
+
+    def content(key: Any) -> tuple[Any, ...]:
+        return (
+            tuple(_sq_err(named[name][key]) for name in models),
+            tuple(_hit(named[name][key]) for name in models),
+            str(key),
+        )
+
+    return sorted(keys, key=content)
+
+
 def _percentile_ci(draws: Sequence[float]) -> tuple[float, float]:
     lo, hi = np.percentile(np.asarray(draws, dtype=float), [2.5, 97.5])
     return (float(lo), float(hi))
@@ -104,18 +135,17 @@ def paired_gaps(named: dict[str, dict[Any, Prediction]], unit: str = "series") -
     named = {k: v for k, v in named.items() if v}
     if len(named) < 2:
         return {"available": False, "reason": f"need two models with {unit} ids"}
-    common = sorted(set.intersection(*(set(v) for v in named.values())))
-    if len(common) < 50:
+    shared = set.intersection(*(set(v) for v in named.values()))
+    if len(shared) < 50:
         return {"available": False, "reason": f"too few commonly predicted {unit}s"}
+    common = _stable_order(named, shared)
 
     err = {
         name: np.array([_sq_err(preds[s]) for s in common], dtype=float)
         for name, preds in named.items()
     }
     hit = {
-        name: np.array(
-            [1.0 if (preds[s].p >= 0.5) == preds[s].won else 0.0 for s in common], dtype=float
-        )
+        name: np.array([_hit(preds[s]) for s in common], dtype=float)
         for name, preds in named.items()
     }
 

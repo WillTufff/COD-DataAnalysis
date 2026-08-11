@@ -17,6 +17,7 @@ from cdlhub_analytics.gates import (
     cohort_failures,
     mode_naming_failures,
     rotation_failures,
+    season_rapm_failures,
 )
 
 # ------------------------------------------------------------------- rotation
@@ -173,3 +174,59 @@ def test_a_named_mode_nobody_played_is_not_a_failure() -> None:
     """`game_modes` carries modes no archived season used. A name with no rows
     is spare capacity, not a gap."""
     assert mode_naming_failures([], {"hardpoint", "blitz"}) == []
+
+
+# -------------------------------------------------------- the season plus-minus
+
+
+def _season_payload(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "available": True,
+        "resolution_by_league": {"CDL": "season", "CWL": "era"},
+        "by_cell": [
+            {"cell": "CWL era", "resolution": "era"},
+            {"cell": "2020 CDL", "resolution": "season"},
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
+def _season_rows() -> list[tuple[str, str, int, float]]:
+    return [
+        ("smoothed", "era", 1, 0.04),
+        ("smoothed", "era", 1, 0.04),  # the same estimate, filed under two seasons
+        ("filtered", "era", 1, 0.03),
+        ("filtered", "era", 1, 0.03),
+        ("smoothed", "season", 2, -0.01),
+    ]
+
+
+def test_a_season_fit_at_the_resolution_the_preflight_allowed_passes() -> None:
+    assert season_rapm_failures(_season_payload(), _season_rows()) == []
+
+
+def test_a_fit_that_did_not_run_is_a_failure_rather_than_a_silence() -> None:
+    bad = season_rapm_failures({"available": False, "reason": "not enough admitted maps"}, [])
+    assert bad and "not enough admitted maps" in bad[0]
+
+
+def test_an_era_cell_in_an_era_the_verdict_did_not_pool_fails() -> None:
+    """The resolution drifting from the measurement that permitted it."""
+    payload = _season_payload(resolution_by_league={"CDL": "season", "CWL": "season"})
+    bad = season_rapm_failures(payload, _season_rows())
+    assert bad and "CWL era" in bad[0]
+
+
+def test_storing_only_the_smoothed_family_fails() -> None:
+    """Every forward test would be left with nothing it is allowed to read."""
+    smoothed_only = [r for r in _season_rows() if r[0] == "smoothed"]
+    bad = season_rapm_failures(_season_payload(), smoothed_only)
+    assert bad and "forward test" in bad[0]
+
+
+def test_an_era_coefficient_that_differs_between_its_seasons_fails() -> None:
+    rows = _season_rows()
+    rows[1] = ("smoothed", "era", 1, 0.05)
+    bad = season_rapm_failures(_season_payload(), rows)
+    assert bad and "separate estimates" in bad[0]

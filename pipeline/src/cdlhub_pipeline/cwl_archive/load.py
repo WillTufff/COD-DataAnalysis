@@ -36,6 +36,42 @@ _MODE_NAMES = {  # slug -> display name
     "control": "Control",
 }
 
+# ArchiveStatLine fields that are game_player_stats columns, in insert order.
+# Every name here is both the attribute and the column, so the statement below
+# is generated rather than kept in step by hand.
+STAT_COLUMNS: tuple[str, ...] = (
+    "kills",
+    "deaths",
+    "assists",
+    "damage",
+    "hill_time",
+    "first_bloods",
+    "plants",
+    "defuses",
+    "headshots",
+    "suicides",
+    "team_kills",
+    "hits",
+    "shots",
+    "hill_captures",
+    "hill_defends",
+    "bomb_pickups",
+    "snd_rounds",
+    "multikill_2",
+    "multikill_3",
+    "multikill_4",
+    "fave_weapon",
+)
+
+_STAT_FIELDS = ("game_id", "player_id", "team_id", *STAT_COLUMNS, "extras")
+
+STAT_INSERT_SQL = f"""
+INSERT INTO game_player_stats ({", ".join(_STAT_FIELDS)}, data_source)
+VALUES ({", ".join("%s" for _ in _STAT_FIELDS)}, 'cwl_archive')
+ON CONFLICT (game_id, player_id) DO UPDATE SET
+  {", ".join(f"{name} = EXCLUDED.{name}" for name in _STAT_FIELDS[2:])}
+"""
+
 
 @dataclass
 class GameKey:
@@ -155,9 +191,15 @@ class Loader:
         if row is not None:
             return cast(int, row[0])
         self.counts["events"] += 1
+        # is_lan is left unset on purpose. Stamping `true` here made every CWL
+        # event's venue an importer default that nothing had checked, and the
+        # era/venue confound the rating plan reasons about rested on it. The
+        # flag is set by the stated derivation in `venue.py`, from LPDB's
+        # tournament type or from a curated verdict, and stays NULL where
+        # neither can answer.
         return self._one(
-            "INSERT INTO events (season_id, name, tier, start_date, end_date, location, is_lan)"
-            " VALUES (%s, %s, %s, %s, %s, %s, true) RETURNING id",
+            "INSERT INTO events (season_id, name, tier, start_date, end_date, location)"
+            " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (season_id, ev.name, ev.tier, ev.start_date, ev.end_date, ev.location),
         )
 
@@ -271,30 +313,12 @@ class Loader:
                     tid = self.team_id(team_name)
                     for ln in lns:
                         self.conn.execute(
-                            """
-                            INSERT INTO game_player_stats
-                              (game_id, player_id, team_id, kills, deaths, assists, damage,
-                               hill_time, first_bloods, plants, defuses, extras, data_source)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cwl_archive')
-                            ON CONFLICT (game_id, player_id) DO UPDATE SET
-                              team_id = EXCLUDED.team_id, kills = EXCLUDED.kills,
-                              deaths = EXCLUDED.deaths, assists = EXCLUDED.assists,
-                              damage = EXCLUDED.damage, hill_time = EXCLUDED.hill_time,
-                              first_bloods = EXCLUDED.first_bloods, plants = EXCLUDED.plants,
-                              defuses = EXCLUDED.defuses, extras = EXCLUDED.extras
-                            """,
+                            STAT_INSERT_SQL,
                             (
                                 game_id,
                                 player_ids[ln.player.lower()],
                                 tid,
-                                ln.kills,
-                                ln.deaths,
-                                ln.assists,
-                                ln.damage,
-                                ln.hill_time,
-                                ln.first_bloods,
-                                ln.plants,
-                                ln.defuses,
+                                *(getattr(ln, name) for name in STAT_COLUMNS),
                                 json.dumps(ln.extras) if ln.extras else None,
                             ),
                         )

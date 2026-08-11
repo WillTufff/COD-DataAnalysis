@@ -6,6 +6,15 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.0",
     "psycopg[binary]>=3.2",
+    # PC: connected components, bridges and algebraic connectivity of the
+    # teammate graph, which is what says whether a plus-minus column is
+    # separable from its lineup. Used only through ratings/graphs.py.
+    "networkx>=3.3",
+    # P1: the Cholesky factor a generalized ridge is solved and scored through,
+    # its log-determinant (REML), the normal quantile the rank transform of a
+    # censored margin is defined by, and the simplex the two penalties are tuned
+    # on. Used only through ratings/numerics.py.
+    "scipy>=1.18.0",
 ]
 
 [dependency-groups]
@@ -13,6 +22,13 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
     "mypy>=1.11",
+    # networkx ships no py.typed; typeshed's stubs are what keep --strict over
+    # the adapter rather than an ignore_missing_imports override for it.
+    "types-networkx>=3.3",
+    # scipy ships no py.typed either, and its stubs are a real package rather
+    # than a typeshed one. With them the override list stays empty, which is
+    # what the adapter policy was written to make possible rather than assume.
+    "scipy-stubs>=1.18.0.1",
 ]
 
 [build-system]

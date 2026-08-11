@@ -12,10 +12,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import cast
+
+import psycopg
 
 from . import backtest, cohort, era, events, insights, metrics, roundwp, seriesdyn, style
 from .db import connect
+from .metricdiff import run as metricdiff
 from .ratings import (
+    admission,
     comparison,
     fit,
     hierarchical,
@@ -23,17 +28,80 @@ from .ratings import (
     leakage,
     maplevel,
     player_rating,
+    preflight,
     rapm,
     significance,
+    simleague,
+    statespace,
     sweep,
     winprob,
 )
+
+Conn = psycopg.Connection[tuple[object, ...]]
 
 ELO_K = 32.0
 GLICKO_TAU = 0.5
 # A CWL event is a few days of dense play then weeks of nothing, which is the
 # shape Glicko-2's rating periods assume. See fit.PERIODS and the sweep artifact.
 GLICKO_PERIOD = fit.DEFAULT_PERIOD
+
+
+# Roster-stint roles that make a slot a substitute or a coach. Matched on the
+# loaded `roster_stints.role`, which is LPDB's free text, so the test is a
+# substring rather than a set — "Head Coach", "SnD Coach" and "Temp Sub" are
+# all real values.
+SUBSTITUTE_ROLES = ("sub", "stand-in")
+COACH_ROLES = ("coach",)
+
+_SUB_MATCH = " OR ".join(f"lower(rs.role) LIKE '%%{term}%%'" for term in SUBSTITUTE_ROLES)
+_COACH_MATCH = " OR ".join(f"lower(role) LIKE '%%{term}%%'" for term in COACH_ROLES)
+
+# Slots a substitute actually filled: the stint has to cover the map's date, so
+# a player who once stood in for someone does not have their whole career
+# flagged. An open-ended stint runs to today.
+_SUBSTITUTE_SLOTS_SQL = f"""
+SELECT DISTINCT gps.game_id, gps.player_id
+FROM game_player_stats gps
+JOIN games g       ON g.id = gps.game_id
+JOIN series s      ON s.id = g.series_id
+JOIN roster_stints rs ON rs.player_id = gps.player_id
+                     AND s.played_at::date >= rs.start_date
+                     AND s.played_at::date <= COALESCE(rs.end_date, CURRENT_DATE)
+WHERE rs.role IS NOT NULL AND ({_SUB_MATCH})
+"""  # noqa: S608 (the match clause is built from the literals above)
+
+# Coach-only people: every stint they have is a coaching one. A player who
+# later coached is not one of these, and should not be.
+_COACH_ONLY_SQL = f"""
+SELECT player_id FROM roster_stints
+GROUP BY player_id
+HAVING count(*) FILTER (WHERE role IS NOT NULL AND ({_COACH_MATCH})) = count(*)
+"""  # noqa: S608 (as above)
+
+
+def rapm_identity(conn: Conn) -> rapm.Identity:
+    """Who the plus-minus columns are, per PD item 6's rule.
+
+    Unresolved means the handle is still an open merge candidate in the ops
+    identity queue — a question nobody has answered, not a question nobody
+    asked. The count travels with the coefficients so a reader can see how much
+    of the leaderboard rests on it.
+    """
+    from .ops import identity as identity_queue
+
+    open_candidates: set[int] = set()
+    for pair in identity_queue.candidates(conn):
+        for side in ("left", "right"):
+            open_candidates.add(int(pair[side]["player_id"]))
+    substitutes = {
+        (cast(int, r[0]), cast(int, r[1])) for r in conn.execute(_SUBSTITUTE_SLOTS_SQL).fetchall()
+    }
+    coaches = {cast(int, r[0]) for r in conn.execute(_COACH_ONLY_SQL).fetchall()}
+    return rapm.Identity(
+        unresolved_players=frozenset(open_candidates),
+        substitute_slots=frozenset(substitutes),
+        coach_only_players=frozenset(coaches),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -299,20 +367,39 @@ def main(argv: list[str] | None = None) -> int:
             f"{player_rating.PUBLISHED_VERSION} brier {best['brier']:.4f}"
         )
 
-        # How much of that accuracy is the scoreboard predicting itself. Stored
-        # with the published rating so the map backtest is never read without it.
-        leak = leakage.measure(conn, player_rating.PUBLISHED_VERSION, rating_rows, rating_coverage)
-        conn.execute(
-            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
-            (pr_run, "feature_sign_baseline", json.dumps(leak)),
-        )
-        worst = min(leak["by_cohort"], key=lambda c: c["model_gain"])
-        print(
-            f"sign-rule baseline: {worst['year']} {worst['title']} {worst['mode']} "
-            f"best column {worst['best_feature']['key']} alone picks "
-            f"{worst['best_feature']['accuracy']:.1%} vs model "
-            f"{worst['model_accuracy']:.1%} ({worst['model_gain'] * 100:+.1f} pt)"
-        )
+        # How much of that accuracy is the scoreboard predicting itself. Every
+        # version is measured, onto its own run, and not only the published one:
+        # a version that is fitted but not yet published is exactly the one
+        # whose new columns have not faced the sign rule, which is the moment
+        # the review is worth having. The site reads this per rating run, so it
+        # keeps seeing the published version's copy.
+        for version, run in rating_runs.items():
+            leak = leakage.measure(conn, version, rating_rows, rating_coverage)
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (run, "feature_sign_baseline", json.dumps(leak)),
+            )
+            worst = min(leak["by_cohort"], key=lambda c: c["model_gain"])
+            print(
+                f"sign-rule baseline {version}: {worst['year']} {worst['title']} "
+                f"{worst['mode']} best column {worst['best_feature']['key']} alone picks "
+                f"{worst['best_feature']['accuracy']:.1%} vs model "
+                f"{worst['model_accuracy']:.1%} ({worst['model_gain'] * 100:+.1f} pt)"
+            )
+
+            # The same maps read per column rather than per cohort: which titles
+            # carry it, what it costs in dropped sides, whether it already knows
+            # the winner and whether it points the same way on every title.
+            admitted = admission.measure(conn, version, rating_rows, rating_coverage)
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (run, "feature_admission", json.dumps(admitted)),
+            )
+            print(
+                f"  admission {version}: {admitted['n_features']} columns, "
+                f"{admitted['n_leaky']} at or above {admission.LEAKY_ACCURACY:.0%} on the sign "
+                f"rule alone, {admitted['n_not_portable']} pointing different ways across titles"
+            )
 
         # The two tests the rating can fail: does it persist for a player, and
         # does a roster forecast future map wins. Whatever they say gets stored.
@@ -335,31 +422,6 @@ def main(argv: list[str] | None = None) -> int:
         published_ratings = holdout.fit_prefix(
             usable_rows, rating_coverage, player_rating.PUBLISHED_VERSION
         )
-        rapm_art = rapm.artifact(usable_rows, published_ratings)
-        conn.execute(
-            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
-            (pr_run, "rapm", json.dumps(rapm_art)),
-        )
-        if rapm_art["available"]:
-            print(
-                f"rapm over {rapm_art['n_maps']} maps, {rapm_art['n_players']} players: "
-                f"{rapm_art['n_resolved']} coefficients exceed 1.96 SE; "
-                f"{rapm_art['n_concentrated']} players never play apart from one teammate "
-                f"(median concentration {rapm_art['concentration_median']:.2f})"
-            )
-        # The artifact above is a top-and-bottom-forty. Player pages need the
-        # whole fit, so it also lands in a table keyed by player.
-        rapm_rows = rapm.player_rows(usable_rows)
-        if rapm_rows:
-            with conn.cursor() as cur:
-                cur.executemany(
-                    "INSERT INTO player_rapm "
-                    "(run_id, player_id, maps, coef, se, teammate_concentration) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
-                    [(pr_run, *r) for r in rapm_rows],
-                )
-            print(f"  {len(rapm_rows)} player_rapm rows written")
-
         forecast = holdout.roster_forecast(
             conn, player_rating.PUBLISHED_VERSION, glicko_run, rating_rows, rating_coverage
         )
@@ -400,6 +462,50 @@ def main(argv: list[str] | None = None) -> int:
                         else ")"
                     )
                 )
+
+        # Declared as its own stage: it is minutes of work inside a stage that
+        # claims to be finished, so the ops app's progress bar was reporting the
+        # run further along than it was.
+        progress.stage("rapm")
+        identity = rapm_identity(conn)
+        rapm_art = rapm.artifact(usable_rows, published_ratings, identity=identity)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (pr_run, "rapm", json.dumps(rapm_art)),
+        )
+        if rapm_art["available"]:
+            print(
+                f"rapm over {rapm_art['n_maps']} maps, {rapm_art['n_players']} players: "
+                f"{rapm_art['n_resolved']} coefficients exceed 1.96 SE; "
+                f"{rapm_art['n_concentrated']} players never play apart from one teammate "
+                f"(median concentration {rapm_art['concentration_median']:.2f})"
+            )
+            lineup = rapm_art["lineup"]
+            print(
+                f"  lineup rule: {lineup['maps_dropped']} maps dropped for an "
+                f"incomplete or unequal side"
+            )
+            ident = rapm_art["identity"]
+            if ident:
+                print(
+                    f"  identity: {ident['unresolved_players']} handles still open merge "
+                    f"candidates, touching {ident['maps_with_an_unresolved_slot']} maps "
+                    f"({ident['share_of_maps_unresolved']:.1%}); "
+                    f"{ident['substitute_slots']} substitute slots; "
+                    f"{ident['coach_slots']} coach slots"
+                )
+        # The artifact above is a top-and-bottom-forty. Player pages need the
+        # whole fit, so it also lands in a table keyed by player.
+        rapm_rows = rapm.player_rows(usable_rows)
+        if rapm_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_rapm "
+                    "(run_id, player_id, maps, coef, se, teammate_concentration) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [(pr_run, *r) for r in rapm_rows],
+                )
+            print(f"  {len(rapm_rows)} player_rapm rows written")
 
         # winprob's baseline features are only a baseline if they come from the
         # same fits as the rows it is tabled against, so the rating settings are
@@ -528,6 +634,160 @@ def main(argv: list[str] | None = None) -> int:
                     f"[{p['lo']:+.5f}, {p['hi']:+.5f}] p={p['dm_p']:.3f} ({verdict})"
                 )
 
+        # Whether the next phase is available at all. The published plus-minus
+        # has one coefficient per career; giving it one per season is only worth
+        # writing if the record identifies it, and that is measurable before
+        # anything is fitted. Placed after map_elo because the simulation is
+        # calibrated to that model's own map accuracy — a synthetic league has to
+        # be as hard to predict as this one or its recovery curve is a statement
+        # about the generator.
+        progress.stage("preflight")
+        seasons = preflight.load_seasons(conn)
+        identification = preflight.measure(usable_rows, seasons)
+        published_arm = mb["arms"][mb["published_arm"]]
+        recovery = simleague.artifact(
+            map_accuracy=float(published_arm["accuracy"]),
+            n_persistence_pairs=int(persist["n_pairs"]),
+            baseline_r=float(persist["cells"]["kd->kd"]["r"]),
+        )
+        fork = preflight.verdict(identification, recovery["recovery_closed"])
+        pc_run = open_run(
+            conn,
+            "rapm_preflight",
+            "1.0.0",
+            {
+                "penalty_lambda": preflight.PENALTY_LAMBDA,
+                "thin_column_maps": preflight.THIN_COLUMN_MAPS,
+                "stop_rule": fork["thresholds"],
+                "design_hash": identification.design_hash,
+                "simulation_seed": simleague.SEED,
+                "simulation_replicates": recovery["replicates"],
+            },
+            through,
+        )
+        for name, payload in (
+            ("rapm_identification", identification.payload()),
+            ("rapm_recovery", recovery),
+            ("rapm_preflight_verdict", fork),
+        ):
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (pc_run, name, json.dumps(payload)),
+            )
+        expanded = identification.payload()["season_expanded"]
+        print(
+            f"rapm_preflight run {pc_run}: season-expanded design {expanded['columns']} columns, "
+            f"rank {expanded['rank']} against a schedule ceiling of {expanded['rank_ceiling']} "
+            f"({expanded['distinct_lineups']} distinct lineups)"
+        )
+        for era_row in fork["by_era"]:
+            print(
+                f"  {era_row['league']}: {era_row['median_effective_lineups']} effective "
+                f"lineups per team-season, rank {era_row['rank_share']:.0%} of player columns, "
+                f"simulated teammate recovery r={era_row['recovery_within_team']} "
+                f"-> {era_row['branch']}"
+            )
+        print(
+            f"  borrowed at zero churn: r={recovery['borrowing']['open']} with transfers, "
+            f"r={recovery['borrowing']['closed']} without; smoothing inflates a forward test "
+            f"by {recovery['smoothing']['inflation']:+.4f}; persistence MDE80 "
+            f"{recovery['power']['mde80']}"
+        )
+        print(f"  fork: {fork['branch']}")
+
+        # The model the pre-flight above cleared, at the resolution it cleared
+        # per era: one coefficient per player per season for the CDL, pooled to
+        # the era for 2017-2019, both as deviations from an explicit
+        # team-season effect. Placed here because the resolution is read from
+        # that verdict rather than declared, so this stage cannot drift from the
+        # measurement that permits it.
+        progress.stage("season_rapm")
+        how = statespace.resolutions(fork)
+        admitted_games, _lineup_rule = rapm.admitted_maps(usable_rows)
+        season_art, season_rows = statespace.artifact(
+            admitted_games, seasons, how, [(row[0], row[2]) for row in rapm_rows]
+        )
+        ss_run = open_run(
+            conn,
+            statespace.MODEL,
+            statespace.VERSION,
+            {
+                "resolution_by_league": how,
+                "preflight_branch": fork["branch"],
+                "preflight_run_id": pc_run,
+                "admission_maps": statespace.ADMISSION_MAPS,
+                "publication_maps": statespace.MIN_MAPS_PUBLISH,
+                "response": statespace.MARGIN,
+                "bootstrap_b": statespace.BOOTSTRAP_B,
+                "bootstrap_seed": statespace.BOOTSTRAP_SEED,
+                "design_hash": season_art.get("design_hash"),
+                "penalties": season_art.get("penalties"),
+            },
+            through,
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (ss_run, "rapm_season", json.dumps(season_art)),
+        )
+        if season_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_rapm "
+                    "(run_id, scope, player_id, season_id, resolution, maps, coef, se, "
+                    "teammate_concentration, penalty_share) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            ss_run,
+                            c.scope,
+                            c.player_id,
+                            c.season_id,
+                            c.resolution,
+                            c.maps,
+                            c.coef,
+                            c.se,
+                            c.teammate_concentration,
+                            c.penalty_share,
+                        )
+                        for c in season_rows
+                    ],
+                )
+        if season_art["available"]:
+            cols, pen = season_art["columns"], season_art["penalties"]
+            print(
+                f"season_rapm run {ss_run}: {cols['player_cells']} player cells, "
+                f"{cols['team_seasons']} team-seasons and {cols['replacement_buckets']} "
+                f"replacement buckets over {season_art['n_maps_fitted']} maps "
+                f"(λ0={pen['lambda0']}, λw={pen['lambda_walk']} by GCV, "
+                f"{pen['effective_df']} effective df)"
+            )
+            print(
+                "  resolution: "
+                + ", ".join(f"{k} {v}" for k, v in season_art["resolution_by_league"].items())
+                + f"; {len(season_rows)} rows written over two scopes"
+            )
+            share = season_art["penalty_share"]
+            print(
+                f"  {share['dominated_share']:.0%} of player cells are penalty dominated "
+                f"against a reference of {share['reference']} (k/(k+1)); median teammate "
+                f"concentration inside a cell "
+                f"{season_art['teammate_concentration']['median']}"
+            )
+            rel = season_art["reliability"]
+            if rel["available"]:
+                print(
+                    f"  split-half reliability within a cell over {rel['n_player_cells']} "
+                    f"player-cells: r={rel['r']} [{rel['lo']}, {rel['hi']}], "
+                    f"Spearman-Brown {rel['spearman_brown']}"
+                )
+            for arm in season_art["against_published"].get("arms", []):
+                print(
+                    f"  vs the published career fit, {arm['arm']}: "
+                    f"rank corr {arm['rank_corr']} over {arm['n_players']} players"
+                )
+        else:
+            print(f"season_rapm run {ss_run}: {season_art['reason']}")
+
         # What a series is, as opposed to what its teams are: the value of a 1-0
         # lead, how often a race to three sweeps or goes the distance, and
         # whether any of it is memory rather than the two teams being further
@@ -654,6 +914,8 @@ def main(argv: list[str] | None = None) -> int:
                 "elo": [elo_run],
                 "glicko2": [glicko_run],
                 "player_rating": list(rating_runs.values()),
+                "rapm_preflight": [pc_run],
+                statespace.MODEL: [ss_run],
                 "winprob": [wp_run],
                 maplevel.MODEL: [map_run],
                 seriesdyn.MODEL: [sd_run],
@@ -665,8 +927,29 @@ def main(argv: list[str] | None = None) -> int:
             detail = ", ".join(f"{m} x{n}" for m, n in sorted(removed.items()))
             print(f"pruned superseded runs: {detail}")
 
+        # What this run changed about every number above, against the run
+        # before it. Last, because it snapshots what the others just wrote.
+        progress.stage("metric_diff")
+        diff = metricdiff.execute(conn)
+        print(metricdiff.headline(diff))
+        print(metricdiff.population_line(diff["population"]))
+        for fam in diff["families"]:
+            if fam["moved"] or fam["flipped"] or fam["added"] or fam["removed"]:
+                print(
+                    f"  {fam['family']:16s} {fam['moved']:>8,} moved  "
+                    f"{fam['flipped']:>6,} flipped  {fam['added']:>6,} new  "
+                    f"{fam['removed']:>6,} gone  max |delta| {fam['max_abs_delta']:g}"
+                )
+        for mover in diff["movers"][:20]:
+            print(f"  {mover['key']}: {mover['old']:g} -> {mover['new']:g} ({mover['delta']:+g})")
+        if diff["movers_omitted"]:
+            print(f"  ... and {diff['movers_omitted']:,} more moves not named here")
+
         progress.done()
         conn.commit()
+        pruned = metricdiff.publish(diff)
+        if pruned:
+            print(f"pruned {pruned} superseded snapshot{'s' if pruned != 1 else ''}")
     return 0
 
 

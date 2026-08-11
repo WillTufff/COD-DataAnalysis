@@ -2979,7 +2979,8 @@ def build_team_rows(
 
 MIN_META_PLAYER_MAPS = 30
 
-# extras key -> artifact name
+# loadout key -> artifact name. Every one is an extras key except fave_weapon,
+# which migration 0015 promoted to a column; `_choice_sql` below picks the home.
 META_KEYS: dict[str, str] = {
     "fave_weapon": "meta_weapons",
     "fave_specialist": "meta_specialists",
@@ -2993,7 +2994,7 @@ META_KEYS: dict[str, str] = {
 
 _META_SQL = """
 SELECT se.id AS season_id, gm.slug AS mode_slug, t.short_name AS title,
-       gps.extras->>%(key)s AS choice,
+       {choice} AS choice,
        count(*) AS n_player_maps,
        count(*) FILTER (WHERE gps.team_id = g.winner_team_id) AS wins,
        count(*) FILTER (WHERE g.winner_team_id IS NOT NULL) AS decided
@@ -3004,9 +3005,17 @@ JOIN events ev     ON ev.id = s.event_id
 JOIN seasons se    ON se.id = ev.season_id
 JOIN titles t      ON t.id = se.title_id
 JOIN game_modes gm ON gm.id = g.mode_id
-WHERE g.duration_s IS NOT NULL AND gps.extras->>%(key)s IS NOT NULL
+WHERE g.duration_s IS NOT NULL AND {choice} IS NOT NULL
 GROUP BY 1, 2, 3, 4
 """
+
+# The promoted loadout key reads its column; the rest stay in extras. Never
+# interpolated from caller input — the keys are the literals in META_KEYS.
+WEAPON_META_KEY = "fave_weapon"
+
+
+def _choice_sql(key: str) -> str:
+    return f"gps.{WEAPON_META_KEY}" if key == WEAPON_META_KEY else "gps.extras->>%(key)s"
 
 
 def build_meta_artifacts(
@@ -3016,7 +3025,9 @@ def build_meta_artifacts(
     artifacts: dict[str, dict[str, Any]] = {}
     for key, name in META_KEYS.items():
         grouped: dict[tuple[int, str, str], list[tuple[str, int, int, int]]] = {}
-        for row in conn.execute(_META_SQL, {"key": key}):
+        sql = _META_SQL.format(choice=_choice_sql(key))
+        params = {} if key == WEAPON_META_KEY else {"key": key}
+        for row in conn.execute(sql, params):
             season_id, mode_slug, title, choice, n, wins, decided = row
             if not choice:
                 continue

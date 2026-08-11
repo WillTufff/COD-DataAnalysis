@@ -81,6 +81,7 @@ import psycopg
 from ..era import MIN_MAPS
 from ..maprows import Coverage, MapRow
 from ..regress import FloatArray
+from ..resample import stream as resample_stream
 from . import player_rating as pr
 
 EM_TOL = 1e-12  # relative change in τ² that ends the iteration
@@ -291,7 +292,6 @@ def resample_score_var(
     agg: pr.PlayerModeAgg,
     scale: pr.CohortScale,
     fit: pr.ModeFit,
-    rng: np.random.Generator,
     b: int = CHECK_B,
 ) -> float | None:
     """The sampling variance of x_i, by resampling this player's own maps.
@@ -312,12 +312,19 @@ def resample_score_var(
     """
     if agg.maps < 2:
         return None
+    # This player's own maps, ordered by their own contents, drawn from a stream
+    # this player's own contents seed. The generator used to be threaded through
+    # a loop over players in `player_id` order, so every player's variance
+    # estimate depended on their position in the loader's numbering — and the
+    # cohort factor built from those estimates moved when the numbering did.
+    numerators, denominators = pr.stat_order(agg)
+    rng = resample_stream(CHECK_SEED, numerators, denominators)
     idx = rng.integers(0, agg.maps, size=(b, agg.maps))
-    totals = agg.denominators[idx].sum(axis=1)  # (b, F)
+    totals = denominators[idx].sum(axis=1)  # (b, F)
     ok = np.all(totals > 0, axis=1)
     if ok.sum() < 2:
         return None
-    feats = agg.numerators[idx].sum(axis=1)[ok] / totals[ok]
+    feats = numerators[idx].sum(axis=1)[ok] / totals[ok]
     draws = ((feats - scale.feat_mu) / scale.feat_sd) @ fit.weights
     m = float(agg.maps)
     return float(np.var(draws, ddof=1)) * m / (m - 1.0)
@@ -344,13 +351,14 @@ def calibrate(
     intervals — it eats the between-player variance and reports a cohort as
     flatter than it really is.
     """
-    rng = np.random.default_rng(CHECK_SEED)
     ratios: list[float] = []
     for a in sorted(members, key=lambda a: a.player_id):
         assumed = sigma2 / a.maps
-        drawn = resample_score_var(a, scale, fit, rng, b) if assumed > 0.0 else None
+        drawn = resample_score_var(a, scale, fit, b) if assumed > 0.0 else None
         if drawn is not None:
             ratios.append(drawn / assumed)
+    # Averaged, so the order this loop ran in no longer reaches the factor at
+    # all: each member draws from its own stream.
     if len(ratios) < 10:
         return (1.0, {"n": len(ratios), "applied": 1.0, "ratio": None})
     factor = float(np.mean(ratios))

@@ -29,6 +29,7 @@ from typing import Any, cast
 
 import psycopg
 
+from .. import venue
 from ..identity import Aliases
 from .pull import (
     GAME_SEASONS,
@@ -177,11 +178,13 @@ class LpdbLoader:
             "unmatched_tournaments": [],
             "teams_created": [],
             "unparseable_placements": [],
+            "placement_non_team_rows": 0,
             "teams_updated": [],
             "teams_region_from_lineage": [],
             "teams_without_lpdb_row": [],
             "events_enriched": {},
             "tournaments_unmatched": [],
+            "venue": [],
             "stints_loaded": 0,
             "stints_skipped": [],
             "stint_players_created": [],
@@ -336,6 +339,13 @@ class LpdbLoader:
     def _load_placement(self, event_id: int, season: int, row: dict[str, Any]) -> None:
         if row["opponentname"] in ("", "TBD"):  # unresolved bracket slots
             return
+        # The pull no longer filters `opponenttype`, so individual awards and
+        # solo finishes arrive alongside team placements. `event_placements` is
+        # keyed on a team, and `team_id(create=True)` would mint a team named
+        # after a player, so the filter moves here rather than disappearing.
+        if str(row.get("opponenttype") or "team") != "team":
+            self.report["placement_non_team_rows"] += 1
+            return
         placement = parse_placement(row.get("placement") or "")
         if placement is None:
             if row.get("placement"):  # empty = participant-only row, not worth noise
@@ -464,10 +474,12 @@ class LpdbLoader:
                 )
                 continue
             by_event[event_id].append(row)
+        lpdb_types: dict[int, str | None] = {}
         for event_id, group in sorted(by_event.items()):
             # one page speaks for the event; sub-pages (stages, qualifiers)
             # carry partial prize pools, so the largest-pool page wins
             rep = max(group, key=lambda r: r.get("prizepool") or 0)
+            lpdb_types[event_id] = rep.get("type")
             locations = rep.get("locations") or {}
             parts = [locations.get("city1") or "", locations.get("country1") or ""]
             location = ", ".join(p for p in parts if p) or None
@@ -481,8 +493,7 @@ class LpdbLoader:
                   publisher_tier = COALESCE(NULLIF(%s, ''), publisher_tier),
                   format = COALESCE(NULLIF(%s, ''), format),
                   prize_pool = COALESCE(%s, prize_pool),
-                  location = COALESCE(%s, location),
-                  is_lan = COALESCE(%s, is_lan)
+                  location = COALESCE(%s, location)
                 WHERE id = %s
                 """,
                 (
@@ -492,12 +503,49 @@ class LpdbLoader:
                     rep.get("format"),
                     rep.get("prizepool") or None,
                     location,
-                    {"Offline": True, "Online": False}.get(str(rep.get("type") or "")),
                     event_id,
                 ),
             )
             self.report["events_enriched"][str(event_id)] = rep["pagename"]
             self.counts["events_enriched"] += 1
+
+        self.apply_venue(lpdb_types)
+
+    def apply_venue(self, lpdb_types: dict[int, str | None]) -> None:
+        """Set `is_lan` on every event from the stated derivation (venue.py).
+
+        Runs over all events, not only the ones LPDB matched, because the events
+        that most need a verdict are the ones with no tournament page — the nine
+        CWL opens whose flag was the archive importer's default. The verdict is
+        written whole, undecided included: an event that stops being decidable
+        loses its flag rather than keeping what a loader once put there.
+        """
+        rules = venue.VenueRules.load()
+        events = self.conn.execute(
+            "SELECT e.id, se.year, e.name FROM events e "
+            "LEFT JOIN seasons se ON se.id = e.season_id ORDER BY se.year, e.name"
+        ).fetchall()
+        for row in events:
+            event_id, season_year, event_name = (
+                cast(int, row[0]),
+                cast("int | None", row[1]),
+                cast(str, row[2]),
+            )
+            verdict = venue.derive(rules, season_year, event_name, lpdb_types.get(event_id))
+            self.conn.execute(
+                "UPDATE events SET is_lan = %s WHERE id = %s", (verdict.is_lan, event_id)
+            )
+            self.report["venue"].append(
+                {
+                    "season": season_year,
+                    "event": event_name,
+                    "is_lan": verdict.is_lan,
+                    "source": verdict.source,
+                    "reviewed": verdict.reviewed,
+                    "reason": verdict.reason,
+                }
+            )
+            self.counts["events_venue_set"] += 1
 
     def load_roster_stints(self, rows: list[dict[str, Any]]) -> None:
         self.conn.execute("DELETE FROM roster_stints WHERE source = %s", (SOURCE,))

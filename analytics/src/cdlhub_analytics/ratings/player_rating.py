@@ -53,6 +53,10 @@ ships with the model, per the publishing rule.
          rates are per round, not per minute.
   2.1.0  adds the kill-feed tier (trades, man-advantage) to hardpoint and
          search-and-destroy, for the cohorts that have a feed.
+  2.2.0  claims the columns both archives already populate and no version had
+         named: damage, non-traded-kill share, contested hill time, accuracy,
+         headshot rate and hill defends. No new fetch; the CDL-era cohorts stop
+         being the shortest sets on the page.
 
 Every feature declares the source columns it reads — including its denominator,
 which is a measured column like any other — and a cohort keeps only the features
@@ -108,6 +112,8 @@ from ..metrics import (
     compute_map_trades,
 )
 from ..regress import FloatArray, LogisticFit, fit_logistic_l2
+from ..resample import order as content_order
+from ..resample import stream as resample_stream
 
 L2 = 1.0  # ridge strength on standardized map diffs
 SHRINK_FALLBACK = 15.0  # prior strength used only when a cohort's variance ratio is unusable
@@ -120,6 +126,27 @@ MIN_COHORT_FEATURES = 2  # a cohort with fewer surviving features is not rated
 
 
 # ---------------------------------------------------------------- features
+
+# Which rating may read a column. The two ratings are judged on different tests,
+# so they cannot have the same leakage rule: a retrospective estimate is
+# entitled to use the win condition, and a forecast is not. Carrying that as a
+# table in a document drifts the first time a column is added, so it is a field
+# on the feature and an assertion in the test suite instead.
+#
+#   BOTH        no closer to the outcome than any other box-score column
+#   CONDITIONAL less leaky than the score itself, and not clean
+#   VALUE_ONLY  is the win condition, or does not mean the same thing twice
+#
+# Every constructor takes it without a default. An omission is a type error at
+# the call site rather than a column that quietly inherits the permissive tag.
+ELIGIBLE_BOTH = "both"
+ELIGIBLE_CONDITIONAL = "conditional"
+ELIGIBLE_VALUE_ONLY = "value_only"
+ELIGIBILITY: tuple[str, ...] = (ELIGIBLE_BOTH, ELIGIBLE_CONDITIONAL, ELIGIBLE_VALUE_ONLY)
+
+# What a SKILL feature set may contain. CONDITIONAL is admitted here and carries
+# its caveat in the artifact; VALUE_ONLY never is.
+SKILL_ELIGIBLE: frozenset[str] = frozenset({ELIGIBLE_BOTH, ELIGIBLE_CONDITIONAL})
 
 
 @dataclass(frozen=True)
@@ -137,14 +164,30 @@ class Feature:
     denominator: Callable[[MapRow], float]
     denom_kind: str
     sources: tuple[str, ...]
+    eligibility: str
     slaying: bool = False  # part of the kills/deaths pair, for the gunfight-vs-rest reading
     needs_feed: bool = False  # only computable on a reconciled kill-feed map
+
+    @property
+    def skill_eligible(self) -> bool:
+        return self.eligibility in SKILL_ELIGIBLE
 
     def available(self, coverage: Coverage, title: str) -> bool:
         return all(tracked(coverage, title, src) for src in self.sources)
 
     def resolve(self, coverage: Coverage, title: str) -> Feature | None:
         return self if self.available(coverage, title) else None
+
+
+def skill_features(features: Sequence[Feature]) -> tuple[Feature, ...]:
+    """The subset a forecast-judged rating may read.
+
+    Nothing consumes this yet — the published composite is retrospective, and
+    the forward-judged rating is a later phase. It exists now so the tag is
+    enforced by a filter with a test behind it rather than by a promise, which
+    is the whole reason the eligibility field is not a comment.
+    """
+    return tuple(f for f in features if f.skill_eligible)
 
 
 @dataclass(frozen=True)
@@ -195,7 +238,7 @@ def _per_map(_row: MapRow) -> float:
     return 1.0
 
 
-def _time(key: str, label: str, *sources: str, slaying: bool = False) -> Feature:
+def _time(key: str, label: str, *sources: str, eligibility: str, slaying: bool = False) -> Feature:
     """A per-10-minute rate.
 
     The denominator is a source like any other: map time is recorded for some
@@ -211,6 +254,7 @@ def _time(key: str, label: str, *sources: str, slaying: bool = False) -> Feature
         denominator=_per10,
         denom_kind="minutes",
         sources=(*cols, DURATION_KEY),
+        eligibility=eligibility,
         slaying=slaying,
     )
 
@@ -220,6 +264,7 @@ def _per_round(
     label: str,
     numerator: Callable[[MapRow], float],
     *sources: str,
+    eligibility: str,
     slaying: bool = False,
 ) -> Feature:
     return Feature(
@@ -229,12 +274,13 @@ def _per_round(
         denominator=_col("snd_rounds"),
         denom_kind="rounds",
         sources=(*sources, "snd_rounds"),
+        eligibility=eligibility,
         slaying=slaying,
     )
 
 
 def _per_ctrl_round(
-    key: str, label: str, numerator: Callable[[MapRow], float], *sources: str
+    key: str, label: str, numerator: Callable[[MapRow], float], *sources: str, eligibility: str
 ) -> Feature:
     return Feature(
         key=key,
@@ -243,10 +289,13 @@ def _per_ctrl_round(
         denominator=_col("ctrl_rounds"),
         denom_kind="rounds",
         sources=(*sources, "ctrl_rounds"),
+        eligibility=eligibility,
     )
 
 
-def _per_map_feature(key: str, label: str, *sources: str, slaying: bool = False) -> Feature:
+def _per_map_feature(
+    key: str, label: str, *sources: str, eligibility: str, slaying: bool = False
+) -> Feature:
     cols = sources or (key,)
     return Feature(
         key=f"{key}_pm",
@@ -255,26 +304,39 @@ def _per_map_feature(key: str, label: str, *sources: str, slaying: bool = False)
         denominator=_per_map,
         denom_kind="maps",
         sources=cols,
+        eligibility=eligibility,
         slaying=slaying,
     )
 
 
-def _paced(key: str, timed: str, per_map: str, *sources: str, slaying: bool = False) -> Paced:
+def _paced(
+    key: str, timed: str, per_map: str, *sources: str, eligibility: str, slaying: bool = False
+) -> Paced:
     """Per 10 minutes where the title records map time, per map where it does not."""
     return Paced(
-        timed=_time(key, timed, *sources, slaying=slaying),
-        per_map=_per_map_feature(key, per_map, *sources, slaying=slaying),
+        timed=_time(key, timed, *sources, eligibility=eligibility, slaying=slaying),
+        per_map=_per_map_feature(key, per_map, *sources, eligibility=eligibility, slaying=slaying),
     )
 
 
-KILLS = _paced("kills", "Kills per 10 min", "Kills per map", slaying=True)
-DEATHS = _paced("deaths", "Deaths per 10 min", "Deaths per map", slaying=True)
-ASSISTS = _paced("assists", "Assists per 10 min", "Assists per map")
+KILLS = _paced(
+    "kills", "Kills per 10 min", "Kills per map", eligibility=ELIGIBLE_BOTH, slaying=True
+)
+DEATHS = _paced(
+    "deaths", "Deaths per 10 min", "Deaths per map", eligibility=ELIGIBLE_BOTH, slaying=True
+)
+ASSISTS = _paced("assists", "Assists per 10 min", "Assists per map", eligibility=ELIGIBLE_BOTH)
 
 # --- 1.0.0: one objective column per mode, everything per unit of pace ---
 
 _OBJ_V1 = {
-    MODE_HARDPOINT: _paced("obj", "Hill time per 10 min", "Hill time per map", "hill_time"),
+    MODE_HARDPOINT: _paced(
+        "obj",
+        "Hill time per 10 min",
+        "Hill time per map",
+        "hill_time",
+        eligibility=ELIGIBLE_VALUE_ONLY,
+    ),
     MODE_SND: _paced(
         "obj",
         "SnD objective per 10 min",
@@ -282,13 +344,29 @@ _OBJ_V1 = {
         "first_bloods",
         "plants",
         "defuses",
+        eligibility=ELIGIBLE_VALUE_ONLY,
     ),
-    MODE_CONTROL: _paced("obj", "Captures per 10 min", "Captures per map", "ctrl_captures"),
+    MODE_CONTROL: _paced(
+        "obj",
+        "Captures per 10 min",
+        "Captures per map",
+        "ctrl_captures",
+        eligibility=ELIGIBLE_VALUE_ONLY,
+    ),
     MODE_CTF: _paced(
-        "obj", "Flag plays per 10 min", "Flag plays per map", "ctf_captures", "ctf_returns"
+        "obj",
+        "Flag plays per 10 min",
+        "Flag plays per map",
+        "ctf_captures",
+        "ctf_returns",
+        eligibility=ELIGIBLE_VALUE_ONLY,
     ),
     MODE_UPLINK: _paced(
-        "obj", "Uplink points per 10 min", "Uplink points per map", "uplink_points"
+        "obj",
+        "Uplink points per 10 min",
+        "Uplink points per map",
+        "uplink_points",
+        eligibility=ELIGIBLE_VALUE_ONLY,
     ),
 }
 
@@ -305,25 +383,64 @@ TIME_PER_LIFE = Feature(
     denominator=_col("num_lives"),
     denom_kind="lives",
     sources=("time_alive_s", "num_lives"),
+    eligibility=ELIGIBLE_BOTH,
 )
 
 FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
     MODE_HARDPOINT: (
         KILLS,
         DEATHS,
-        _paced("hill_time", "Hill time per 10 min", "Hill seconds per map"),
-        _paced("hill_captures", "Hill captures per 10 min", "Hill captures per map"),
+        _paced(
+            "hill_time",
+            "Hill time per 10 min",
+            "Hill seconds per map",
+            eligibility=ELIGIBLE_VALUE_ONLY,
+        ),
+        _paced(
+            "hill_captures",
+            "Hill captures per 10 min",
+            "Hill captures per map",
+            eligibility=ELIGIBLE_CONDITIONAL,
+        ),
         TIME_PER_LIFE,
     ),
     MODE_SND: (
-        _per_round("snd_kpr", "Kills per round", _col("kills"), "kills", slaying=True),
-        _per_round("snd_dpr", "Deaths per round", _col("deaths"), "deaths", slaying=True),
-        _per_round("snd_fb_rate", "First bloods per round", _col("first_bloods"), "first_bloods"),
         _per_round(
-            "snd_fd_rate", "First deaths per round", _col("snd_firstdeaths"), "snd_firstdeaths"
+            "snd_kpr",
+            "Kills per round",
+            _col("kills"),
+            "kills",
+            eligibility=ELIGIBLE_BOTH,
+            slaying=True,
         ),
         _per_round(
-            "snd_survival_rate", "Survivals per round", _col("snd_survives"), "snd_survives"
+            "snd_dpr",
+            "Deaths per round",
+            _col("deaths"),
+            "deaths",
+            eligibility=ELIGIBLE_BOTH,
+            slaying=True,
+        ),
+        _per_round(
+            "snd_fb_rate",
+            "First bloods per round",
+            _col("first_bloods"),
+            "first_bloods",
+            eligibility=ELIGIBLE_BOTH,
+        ),
+        _per_round(
+            "snd_fd_rate",
+            "First deaths per round",
+            _col("snd_firstdeaths"),
+            "snd_firstdeaths",
+            eligibility=ELIGIBLE_BOTH,
+        ),
+        _per_round(
+            "snd_survival_rate",
+            "Survivals per round",
+            _col("snd_survives"),
+            "snd_survives",
+            eligibility=ELIGIBLE_CONDITIONAL,
         ),
         _per_round(
             "snd_bomb_pr",
@@ -331,31 +448,44 @@ FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
             _col("plants", "defuses"),
             "plants",
             "defuses",
+            eligibility=ELIGIBLE_VALUE_ONLY,
         ),
     ),
     MODE_CONTROL: (
         KILLS,
         DEATHS,
-        _per_map_feature("ctrl_caps", "Captures per map", "ctrl_captures"),
+        _per_map_feature(
+            "ctrl_caps", "Captures per map", "ctrl_captures", eligibility=ELIGIBLE_VALUE_ONLY
+        ),
         _per_ctrl_round(
             "ctrl_fb_net_pr",
             "First-blood net per round",
             _net("ctrl_firstbloods", "ctrl_firstdeaths"),
             "ctrl_firstbloods",
             "ctrl_firstdeaths",
+            eligibility=ELIGIBLE_BOTH,
         ),
     ),
     MODE_CTF: (
         KILLS,
         DEATHS,
-        _per_map_feature("ctf_caps", "Captures per map", "ctf_captures"),
-        _per_map_feature("ctf_returns", "Returns per map", "ctf_returns"),
-        _per_map_feature("ctf_carry_time_s", "Flag carry seconds per map", "ctf_flag_carry_time_s"),
+        _per_map_feature(
+            "ctf_caps", "Captures per map", "ctf_captures", eligibility=ELIGIBLE_VALUE_ONLY
+        ),
+        _per_map_feature(
+            "ctf_returns", "Returns per map", "ctf_returns", eligibility=ELIGIBLE_CONDITIONAL
+        ),
+        _per_map_feature(
+            "ctf_carry_time_s",
+            "Flag carry seconds per map",
+            "ctf_flag_carry_time_s",
+            eligibility=ELIGIBLE_CONDITIONAL,
+        ),
     ),
     MODE_UPLINK: (
         KILLS,
         DEATHS,
-        _per_map_feature("uplink_points", "Uplink points per map"),
+        _per_map_feature("uplink_points", "Uplink points per map", eligibility=ELIGIBLE_VALUE_ONLY),
     ),
 }
 
@@ -377,6 +507,7 @@ def _feed(
     denominator: Callable[[MapRow], float],
     denom_kind: str,
     *sources: str,
+    eligibility: str,
 ) -> Feature:
     return Feature(
         key=key,
@@ -385,6 +516,7 @@ def _feed(
         denominator=denominator,
         denom_kind=denom_kind,
         sources=sources,
+        eligibility=eligibility,
         needs_feed=True,
     )
 
@@ -397,6 +529,7 @@ UNTRADED_DEATH_RATE = _feed(
     "feed deaths",
     KF_UNTRADED,
     KF_DEATHS,
+    eligibility=ELIGIBLE_BOTH,
 )
 TRADE_KILLS_P10 = _feed(
     "trade_kills_p10",
@@ -406,6 +539,7 @@ TRADE_KILLS_P10 = _feed(
     "minutes",
     KF_TRADE_KILLS,
     DURATION_KEY,
+    eligibility=ELIGIBLE_BOTH,
 )
 TRADE_KILLS_PR = _feed(
     "trade_kills_pr",
@@ -415,6 +549,7 @@ TRADE_KILLS_PR = _feed(
     "rounds",
     KF_TRADE_KILLS,
     "snd_rounds",
+    eligibility=ELIGIBLE_BOTH,
 )
 THROWN_DEATHS_PR = _feed(
     "thrown_deaths_pr",
@@ -424,6 +559,7 @@ THROWN_DEATHS_PR = _feed(
     "rounds",
     KF_THROWN,
     "snd_rounds",
+    eligibility=ELIGIBLE_BOTH,
 )
 
 FEATURES_V21: dict[str, tuple[FeatureSpec, ...]] = {
@@ -432,17 +568,161 @@ FEATURES_V21: dict[str, tuple[FeatureSpec, ...]] = {
     MODE_SND: (*FEATURES_V2[MODE_SND], UNTRADED_DEATH_RATE, TRADE_KILLS_PR, THROWN_DEATHS_PR),
 }
 
+# --- 2.2.0: the columns both archives populate and no version had claimed ---
+#
+# Nothing new is fetched here. Each column below was already loaded, already
+# coverage-measured, and simply never named by a feature set. Which titles
+# actually carry them is measured as always, so the seasons named in the
+# comments are what the data said on the run that adopted them, not a matrix
+# anyone maintains.
+#
+# Three of the five columns an earlier plan listed for this version are not
+# here, and the reasons are measurements rather than judgement:
+#
+#   ctl_attack_rounds / ctl_defense_rounds  Not a player statistic. One team's
+#     attack rounds are the other's defence rounds on 974 of 974 Control maps,
+#     and 35% of maps tie exactly, so the differential encodes which side each
+#     team started on and nothing else. It reaches the fit already, as the
+#     `ctrl_rounds` denominator maprows derives from it; as a feature it would
+#     put the coin toss in the rating. It belongs with the match-context terms.
+#
+#   damage is here, but in the slaying pair. At team-differential resolution it
+#     correlates 0.82-0.94 with kills across every CDL cohort, and 0.68-0.78 on
+#     Black Ops 4. It is a better-resolved reading of the gunfight, not a
+#     quantity beyond it, and counting it as "the rest" would inflate the
+#     beyond-the-gunfight ratio with a column that is mostly kills.
+#
+#   non_traded_kills enters as a *share of the player's own kills*, never as a
+#     count. Per map it correlates 0.90-0.96 with kills — a duplicate column
+#     that ridge would split weight with. As a rate it runs 0.13-0.39 in Search
+#     & Destroy and 0.59-0.80 elsewhere, and it is the CDL-era source counting
+#     directly what the 2017-2018 kill feed reconstructs.
+
+DAMAGE = _paced(
+    "damage",
+    "Damage per 10 min",
+    "Damage per map",
+    eligibility=ELIGIBLE_BOTH,
+    slaying=True,
+)
+DAMAGE_PR = _per_round(
+    "snd_damage_pr",
+    "Damage per round",
+    _col("damage"),
+    "damage",
+    eligibility=ELIGIBLE_BOTH,
+    slaying=True,
+)
+
+# Trade economy without a kill feed: the share of a player's kills the opponent
+# did not answer inside the source's trade window. 2022 onward — the column is
+# declared and all-zero for 2020 and 2021.
+NON_TRADED_KILL_RATE = Feature(
+    key="non_traded_kill_rate",
+    label="Share of kills nobody traded back",
+    numerator=_col("non_traded_kills"),
+    denominator=_col("kills"),
+    denom_kind="kills",
+    sources=("non_traded_kills", "kills"),
+    eligibility=ELIGIBLE_BOTH,
+)
+
+# Occupancy while the hill was contested, rather than occupancy. Strictly less
+# of the scoreboard than `hill_time` — the score is time on the hill, not time
+# on a contested hill — and measured against it, a different axis rather than a
+# sharper one: the two differentials correlate 0.13-0.30. Still not clean, so
+# it is admitted to a forecast with its caveat rather than freely. 2022-2025;
+# declared and all-zero for 2020, 2021 and 2026.
+CONTESTED_HILL_TIME = _paced(
+    "contested_hill_time",
+    "Contested hill seconds per 10 min",
+    "Contested hill seconds per map",
+    eligibility=ELIGIBLE_CONDITIONAL,
+)
+
+# Accuracy, and how much of it converted. Both are CWL-only: Black Ops 4
+# declares shots and hits on five rows out of 19,120, which is under the floor.
+ACCURACY = Feature(
+    key="accuracy",
+    label="Share of shots that hit",
+    numerator=_col("hits"),
+    denominator=_col("shots"),
+    denom_kind="shots",
+    sources=("hits", "shots"),
+    eligibility=ELIGIBLE_BOTH,
+)
+
+# Retrospective only, and on the portability gate rather than the leakage one.
+# The sign rule puts it at 0.58 at best — barely off a coin flip — and its
+# direction does not hold: negative on WWII and Black Ops 4, and disagreeing with
+# itself across Infinite Warfare's three cohorts. A column that weak has nothing
+# to carry across a title seam, so a cohort may fit it and a forecast may not.
+HEADSHOT_RATE = Feature(
+    key="headshot_rate",
+    label="Headshots per kill",
+    numerator=_col("headshots"),
+    denominator=_col("kills"),
+    denom_kind="kills",
+    sources=("headshots", "kills"),
+    eligibility=ELIGIBLE_VALUE_ONLY,
+)
+
+# Kills defending a hill the team held. Retrospective only, and the reason is
+# the portability gate rather than leakage: its correlation with hill time is
+# +0.72 on Infinite Warfare, +0.44 on WWII and -0.30 on Black Ops 4. A column
+# whose sign against the same quantity flips between titles is not one quantity,
+# so a cohort may fit it and a forecast may not carry it across a title seam.
+HILL_DEFENDS = _paced(
+    "hill_defends",
+    "Hill defends per 10 min",
+    "Hill defends per map",
+    eligibility=ELIGIBLE_VALUE_ONLY,
+)
+
+FEATURES_V22: dict[str, tuple[FeatureSpec, ...]] = {
+    **FEATURES_V21,
+    MODE_HARDPOINT: (
+        *FEATURES_V21[MODE_HARDPOINT],
+        DAMAGE,
+        NON_TRADED_KILL_RATE,
+        CONTESTED_HILL_TIME,
+        HILL_DEFENDS,
+        ACCURACY,
+        HEADSHOT_RATE,
+    ),
+    MODE_SND: (
+        *FEATURES_V21[MODE_SND],
+        DAMAGE_PR,
+        NON_TRADED_KILL_RATE,
+        ACCURACY,
+        HEADSHOT_RATE,
+    ),
+    MODE_CONTROL: (
+        *FEATURES_V21[MODE_CONTROL],
+        DAMAGE,
+        NON_TRADED_KILL_RATE,
+        HEADSHOT_RATE,
+    ),
+    MODE_CTF: (*FEATURES_V21[MODE_CTF], ACCURACY, HEADSHOT_RATE),
+    MODE_UPLINK: (*FEATURES_V21[MODE_UPLINK], ACCURACY, HEADSHOT_RATE),
+}
+
 VERSIONS: dict[str, dict[str, tuple[FeatureSpec, ...]]] = {
     "1.0.0": FEATURES_V1,
     "2.0.0": FEATURES_V2,
     "2.1.0": FEATURES_V21,
+    "2.2.0": FEATURES_V22,
 }
 
 # Every version is fitted and backtested on each run; PUBLISHED is the one the
 # site shows. It is a deliberate choice recorded here rather than "whichever ran
 # last": run order must never decide what the leaderboard means. The comparison
 # artifact (ratings/comparison.py) is the evidence for the choice.
-ALL_VERSIONS: tuple[str, ...] = ("1.0.0", "2.0.0", "2.1.0")
+ALL_VERSIONS: tuple[str, ...] = ("1.0.0", "2.0.0", "2.1.0", "2.2.0")
+# 2.2.0 is fitted, backtested and compared, and is deliberately not published
+# yet: the site pins this string in web/lib/analytics.ts, so promoting a version
+# is a lockstep change across two languages and belongs with the publishing
+# work, not with the phase that recovered the columns.
 PUBLISHED_VERSION = "2.1.0"
 DEFAULT_VERSION = PUBLISHED_VERSION
 
@@ -751,7 +1031,6 @@ def bootstrap_mode_weights(
     Draws landing on a single winner are dropped: that fit is degenerate rather
     than uncertain. The same map-resampling scheme and seed as `rating_sd`.
     """
-    rng = np.random.default_rng(BOOTSTRAP_SEED)
     out: dict[tuple[int, int], WeightCI] = {}
     for key, diffs in sorted(diffs_by_cohort.items()):
         cohort = cohorts.get(key)
@@ -761,6 +1040,16 @@ def bootstrap_mode_weights(
         slaying = [f.key for f in cohort.features if f.slaying]
         x_all = np.array([g.diff for g in diffs])
         y_all = np.array([1.0 if g.a_won else 0.0 for g in diffs])
+        # Two things here were being decided by keys rather than by data. The
+        # maps arrived in the order the loader emitted them, and one generator
+        # was advanced through cohorts ordered by (season_id, mode_id) — so a
+        # cohort's interval depended on how many cohorts had been fitted before
+        # it, and a renumbered season moved intervals for cohorts whose maps
+        # never changed. Rows are ordered by their own contents, and each cohort
+        # draws from a stream seeded by its own.
+        rows = content_order([*x_all.T, y_all])
+        x_all, y_all = x_all[rows], y_all[rows]
+        rng = resample_stream(BOOTSTRAP_SEED, x_all, y_all)
         n = len(diffs)
 
         drawn: list[FloatArray] = []
@@ -854,6 +1143,19 @@ class PlayerModeAgg:
     feats: FloatArray  # aggregate profile
     numerators: FloatArray  # (maps × F), for the bootstrap
     denominators: FloatArray  # (maps × F)
+
+
+def stat_order(agg: PlayerModeAgg) -> tuple[FloatArray, FloatArray]:
+    """One player-season-mode's maps, ordered by what they contain.
+
+    Every bootstrap over a player's own maps draws positions in these two
+    arrays, and the rows arrive in whatever order the loader emitted the maps.
+    Ordering them by their statistics makes the draw a function of the numbers
+    rather than of the row ids. The aggregate profile is a column sum and does
+    not move.
+    """
+    rows = content_order([*agg.numerators.T, *agg.denominators.T])
+    return agg.numerators[rows], agg.denominators[rows]
 
 
 def aggregate_players(
@@ -1044,7 +1346,6 @@ def compute_ratings(
     this once per event and only needs the point estimate, where paying for
     ~17 discarded bootstraps would dominate its runtime.
     """
-    rng = np.random.default_rng(BOOTSTRAP_SEED)
     by_player_season: dict[tuple[int, int], list[PlayerModeAgg]] = defaultdict(list)
     for a in aggs:
         if (a.season_id, a.mode_id) in scales:
@@ -1073,13 +1374,21 @@ def compute_ratings(
             weights_m.append(a.maps)
             if not bootstrap:
                 continue
+            # This player-season-mode resamples its own maps, from its own
+            # stream. One generator advanced across players in `player_id` order
+            # made every player's interval depend on how many players were
+            # numbered ahead of them, so a reload that renumbered the table moved
+            # rating_sd for players whose maps were untouched. Rows are ordered
+            # by what the maps contain for the same reason.
+            numerators, denominators = stat_order(a)
+            rng = resample_stream(BOOTSTRAP_SEED, numerators, denominators)
             idx = rng.integers(0, a.maps, size=(BOOTSTRAP_B, a.maps))
             for b in range(BOOTSTRAP_B):
-                totals = a.denominators[idx[b]].sum(axis=0)
+                totals = denominators[idx[b]].sum(axis=0)
                 if not np.all(totals > 0):
                     boot[b, j] = s
                     continue
-                feats = np.asarray(a.numerators[idx[b]].sum(axis=0) / totals)
+                feats = np.asarray(numerators[idx[b]].sum(axis=0) / totals)
                 boot[b, j] = _shrink(_score(feats, scale, fit.weights), a.maps, scale.shrink_maps)
 
         total_maps = sum(weights_m)

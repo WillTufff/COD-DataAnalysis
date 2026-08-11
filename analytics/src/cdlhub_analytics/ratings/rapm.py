@@ -12,10 +12,18 @@ ridge-regressed on the map result. A coefficient is then that player's estimated
 contribution to the log-odds of winning a map, holding the other seven players
 constant. Nothing from the box score enters at any point.
 
-4v4 with heavy roster churn across three titles and eighteen events is close to
-the ideal case for this: 5,087 decided maps over 273 players, and rosters that
-move enough to separate teammates from each other. Close to ideal is not ideal,
-and two things have to be reported rather than assumed away.
+Heavy roster churn across ten titles is close to the ideal case for this, and
+rosters move enough to separate teammates from each other. Close to ideal is
+not ideal, and three things have to be reported rather than assumed away.
+
+**Lineup completeness.** A map only enters the design with two sides of equal,
+complete size — four a side in the 4v4 titles, five in the two that were played
+5v5 (BO4 in 2019 and MW19 in 2020). The size is read from the title rather than
+declared, so a future title that changes it needs no edit here; what is declared
+is that both sides must be full and equal. A 3v4 map is a map where the design
+matrix would claim a team fielded three players, and a coefficient fitted on it
+absorbs a missing teammate. The count dropped is published per title below,
+never silently absorbed.
 
 **Collinearity.** Four players who never play apart are one column wearing four
 names, and no amount of data separates them; ridge responds by splitting the
@@ -44,12 +52,13 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import numpy as np
 
 from ..maprows import MapRow
-from ..regress import FloatArray, fit_logistic_l2
+from ..regress import FloatArray, fit_logistic_l2, matrix_hash
 
 # The ridge strength. Deliberately not tuned against the held-out maps — that
 # would make the forecast below a selection statistic rather than a test — so it
@@ -86,51 +95,222 @@ class RapmFit:
     n_maps: int
     l2: float
     converged: bool
+    # The design this was fitted on, fingerprinted: shape, player columns and
+    # the ±1 contents.
+    design_hash: str
+    # What the lineup rule admitted and turned away, per title.
+    lineup: LineupRule
 
     def by_player(self) -> dict[int, float]:
         return {p.player_id: p.coef for p in self.players}
 
 
-def build_design(
-    rows: Sequence[MapRow],
-) -> tuple[FloatArray, FloatArray, list[int], list[int]]:
-    """(X, y, player ids by column, game ids by row).
+def side_sizes(rows: Sequence[MapRow]) -> dict[str, int]:
+    """The roster size each title was played at: its commonest full side.
 
-    One row per decided map with two distinguishable teams. The side that sorts
-    first by team id is +1 and is the side `y` refers to, matching how the map
-    holdout orients every other predictor, so a coefficient's sign means the same
-    thing here as it does there.
+    Measured rather than declared, because the record already contains the
+    answer and a table of title-to-size is one more thing to keep in step.
+    """
+    slots: dict[tuple[int, int], set[int]] = defaultdict(set)
+    title_of: dict[int, str] = {}
+    for r in rows:
+        slots[(r.game_id, r.team_id)].add(r.player_id)
+        title_of[r.game_id] = r.title
+    by_title: dict[str, Counter[int]] = defaultdict(Counter)
+    for (game_id, _team_id), players in slots.items():
+        by_title[title_of[game_id]][len(players)] += 1
+    return {title: sizes.most_common(1)[0][0] for title, sizes in by_title.items()}
+
+
+@dataclass(frozen=True)
+class LineupRule:
+    """Which maps the plus-minus design admits, and what it turned away."""
+
+    sizes: dict[str, int]
+    admitted: Counter[str]
+    dropped: Counter[str]
+
+    def payload(self) -> dict[str, Any]:
+        titles = sorted(set(self.sizes) | set(self.dropped))
+        return {
+            "rule": "two sides of equal, complete size — the size that title was played at",
+            "by_title": [
+                {
+                    "title": title,
+                    "side_size": self.sizes.get(title),
+                    "maps_admitted": self.admitted.get(title, 0),
+                    "maps_dropped": self.dropped.get(title, 0),
+                }
+                for title in titles
+            ],
+            "maps_dropped": sum(self.dropped.values()),
+        }
+
+
+@dataclass(frozen=True)
+class Identity:
+    """Who the design's columns are, and how sure the record is about it.
+
+    Every model keyed on `player_id` inherits whatever this says. A split — one
+    person under two handles — hands them two columns each fitted on half a
+    career; a merge hands two people one column, and ridge reports the average
+    as a finding. Neither shows up as a large standard error, so the count of
+    slots still in question is published next to the coefficients rather than
+    left to the identity queue nobody opens.
+
+    Substitutes stay in. They are real players whose maps really happened, and
+    dropping them would quietly change which maps the fit sees; what they
+    distort is the teammate graph, so they are counted here and read alongside
+    the concentration diagnostic. Coaches never enter at all — the design is
+    built from box scores and a coach has none — which is asserted rather than
+    assumed.
+    """
+
+    # Handles still sitting in the ops identity queue as open merge candidates.
+    unresolved_players: frozenset[int]
+    # (game_id, player_id) slots whose player was on a substitute stint on that
+    # map's date. Dated rather than career-wide: most players have stood in
+    # somewhere, and a career-wide flag would mark almost the whole record.
+    substitute_slots: frozenset[tuple[int, int]]
+    # People whose every recorded stint is a coaching one. A box score from one
+    # of them is a slot the design should never have been offered, so the count
+    # is a check that should read zero rather than a diagnostic.
+    coach_only_players: frozenset[int]
+
+    def payload(self, rows: Sequence[MapRow]) -> dict[str, Any]:
+        maps_of: dict[int, set[int]] = defaultdict(set)
+        for r in rows:
+            maps_of[r.player_id].add(r.game_id)
+        unresolved_maps: set[int] = set()
+        for pid in self.unresolved_players:
+            unresolved_maps |= maps_of.get(pid, set())
+        subbed = self.substitute_slots & {(r.game_id, r.player_id) for r in rows}
+        total = len({r.game_id for r in rows}) or 1
+        return {
+            "rule": (
+                "substitutes are fitted and flagged; coaches never enter; a slot is "
+                "unresolved while its handle is still an open merge candidate"
+            ),
+            "unresolved_players": len(self.unresolved_players),
+            "maps_with_an_unresolved_slot": len(unresolved_maps),
+            "share_of_maps_unresolved": round(len(unresolved_maps) / total, 4),
+            "substitute_slots": len(subbed),
+            "maps_with_a_substitute": len({game_id for game_id, _pid in subbed}),
+            "coach_slots": len(self.coach_only_players & set(maps_of)),
+        }
+
+
+@dataclass(frozen=True)
+class AdmittedMap:
+    """One map the lineup rule let through, with its two sides named.
+
+    The side that sorts first by team id is the `+1` side everywhere below, and
+    `home_won` refers to it — matching how the map holdout orients every other
+    predictor, so a coefficient's sign means the same thing here as it does
+    there.
+    """
+
+    game_id: int
+    series_id: int
+    season_id: int
+    title: str
+    mode_slug: str
+    played_at: date
+    home_team_id: int
+    away_team_id: int
+    home_players: tuple[int, ...]
+    away_players: tuple[int, ...]
+    home_won: bool
+    # Score margin from the `+1` side, where the record carries both scores.
+    # Kept beside the binary outcome rather than replacing it: the season-varying
+    # fit reads the margin, this fit reads the win, and both read one admission
+    # rule.
+    home_margin: float | None
+
+    @property
+    def players(self) -> tuple[int, ...]:
+        return self.home_players + self.away_players
+
+
+def admitted_maps(rows: Sequence[MapRow]) -> tuple[list[AdmittedMap], LineupRule]:
+    """The maps the plus-minus design is built from, in played order.
+
+    Separated from the design matrix because the identification pre-flight asks
+    the same question of the same maps in a different shape, and a second copy
+    of the lineup rule is a second rule.
     """
     per_game: dict[int, list[MapRow]] = defaultdict(list)
     for r in rows:
         if r.winner_team_id is not None:
             per_game[r.game_id].append(r)
 
-    usable: list[tuple[int, list[MapRow], int, int, bool]] = []
-    seen: set[int] = set()
+    sizes = side_sizes(rows)
+    admitted: Counter[str] = Counter()
+    dropped: Counter[str] = Counter()
+    usable: list[AdmittedMap] = []
     for game_id in sorted(per_game, key=lambda g: (per_game[g][0].played_at, g)):
         members = per_game[game_id]
+        title = members[0].title
         teams = sorted({m.team_id for m in members})
         if len(teams) != 2:
+            dropped[title] += 1
             continue
         a, b = teams
+        # Both sides full and equal, at the size this title was played at. The
+        # slot count is the number of distinct players, so a duplicated stat
+        # line cannot pass for a fifth man.
+        expected = sizes.get(title)
+        sides = {t: sorted({m.player_id for m in members if m.team_id == t}) for t in (a, b)}
+        if expected is None or len(sides[a]) != expected or len(sides[b]) != expected:
+            dropped[title] += 1
+            continue
         a_won = next((m.won is True for m in members if m.team_id == a), None)
         if a_won is None:
+            dropped[title] += 1
             continue
-        usable.append((game_id, members, a, b, a_won))
-        seen.update(m.player_id for m in members)
+        admitted[title] += 1
+        home_margin = next((m.margin for m in members if m.team_id == a), None)
+        usable.append(
+            AdmittedMap(
+                game_id=game_id,
+                series_id=members[0].series_id,
+                season_id=members[0].season_id,
+                title=title,
+                mode_slug=members[0].mode_slug,
+                played_at=members[0].played_at,
+                home_margin=home_margin,
+                home_team_id=a,
+                away_team_id=b,
+                home_players=tuple(sides[a]),
+                away_players=tuple(sides[b]),
+                home_won=a_won,
+            )
+        )
+    return usable, LineupRule(sizes=sizes, admitted=admitted, dropped=dropped)
 
-    players = sorted(seen)
+
+def build_design(
+    rows: Sequence[MapRow],
+) -> tuple[FloatArray, FloatArray, list[int], list[int], LineupRule]:
+    """(X, y, player ids by column, game ids by row, the lineup rule's tally).
+
+    One row per admitted map, `+1` for the first side's players and `−1` for the
+    other's.
+    """
+    usable, lineup = admitted_maps(rows)
+    players = sorted({pid for game in usable for pid in game.players})
     col = {pid: i for i, pid in enumerate(players)}
     x = np.zeros((len(usable), len(players)), dtype=float)
     y = np.zeros(len(usable), dtype=float)
     game_ids: list[int] = []
-    for i, (game_id, members, a, _b, a_won) in enumerate(usable):
-        for m in members:
-            x[i, col[m.player_id]] = 1.0 if m.team_id == a else -1.0
-        y[i] = 1.0 if a_won else 0.0
-        game_ids.append(game_id)
-    return x, y, players, game_ids
+    for i, game in enumerate(usable):
+        for pid in game.home_players:
+            x[i, col[pid]] = 1.0
+        for pid in game.away_players:
+            x[i, col[pid]] = -1.0
+        y[i] = 1.0 if game.home_won else 0.0
+        game_ids.append(game.game_id)
+    return x, y, players, game_ids, lineup
 
 
 def _teammate_concentration(rows: Sequence[MapRow]) -> dict[int, float]:
@@ -190,7 +370,7 @@ def fit(
     toward it instead of toward zero, and players it does not mention keep the
     usual zero centre. Passing None is plain RAPM.
     """
-    x, y, players, _game_ids = build_design(rows)
+    x, y, players, _game_ids, lineup = build_design(rows)
     if x.shape[0] < 50 or not players:
         return None
 
@@ -227,6 +407,8 @@ def fit(
         n_maps=x.shape[0],
         l2=l2,
         converged=result.converged,
+        design_hash=matrix_hash(x, [str(pid) for pid in players]),
+        lineup=lineup,
     )
 
 
@@ -387,8 +569,9 @@ def artifact(
     rows: Sequence[MapRow],
     ratings: dict[tuple[int, int, int | None], float] | None = None,
     top_n: int = 40,
+    identity: Identity | None = None,
 ) -> dict[str, Any]:
-    """The published RAPM artifact: coefficients, their errors, and the two
+    """The published RAPM artifact: coefficients, their errors, and the three
     diagnostics that decide how much they mean."""
     full = fit(rows)
     if full is None:
@@ -418,6 +601,9 @@ def artifact(
         "n_maps": full.n_maps,
         "n_players": len(ordered),
         "converged": full.converged,
+        "design_hash": full.design_hash,
+        "lineup": full.lineup.payload(),
+        "identity": identity.payload(rows) if identity else None,
         "leaders": [row(p) for p in ordered[:top_n]],
         "trailers": [row(p) for p in ordered[-top_n:]],
         # The two numbers that say how to read the leaderboard.

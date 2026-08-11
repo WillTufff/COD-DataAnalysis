@@ -19,9 +19,15 @@ from cdlhub_analytics.maprows import (
     MapRow,
 )
 from cdlhub_analytics.ratings.player_rating import (
+    ALL_VERSIONS,
     BOOTSTRAP_B,
+    ELIGIBILITY,
+    ELIGIBLE_BOTH,
+    ELIGIBLE_CONDITIONAL,
+    ELIGIBLE_VALUE_ONLY,
     MIN_TRAIN_GAMES,
     SHRINK_FALLBACK,
+    VERSIONS,
     Cohort,
     Feature,
     FeatureSpec,
@@ -41,6 +47,7 @@ from cdlhub_analytics.ratings.player_rating import (
     fit_mode_weights,
     resolve_features,
     rest_vs_slay,
+    skill_features,
     weights_artifact,
 )
 from cdlhub_analytics.regress import LogisticFit
@@ -81,6 +88,14 @@ def declared(spec: FeatureSpec) -> tuple[Feature, ...]:
     return (spec.timed, spec.per_map) if isinstance(spec, Paced) else (spec,)
 
 
+def _zero(_row: MapRow) -> float:
+    return 0.0
+
+
+def _one(_row: MapRow) -> float:
+    return 1.0
+
+
 def synthetic_rows(
     n_games: int = 80, seed: int = 5, skills: dict[int, float] = SKILL
 ) -> list[MapRow]:
@@ -114,6 +129,7 @@ def synthetic_rows(
                     player_id=p,
                     team_id=p // 10,
                     game_id=g,
+                    series_id=g,
                     season_id=1,
                     mode_id=1,
                     mode_slug=MODE_HARDPOINT,
@@ -416,7 +432,7 @@ def test_feed_cohort_rejects_unreconciled_maps() -> None:
     assert not cohort.accepts(rows[0])  # synthetic rows carry no feed marker
 
 
-@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.1.0"])
+@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.1.0", "2.2.0"])
 def test_every_feature_declares_its_denominator_sources(version: str) -> None:
     """A denominator column is as much a source as a numerator column: if it is
     untracked the rate cannot be formed, so coverage has to gate on it too."""
@@ -430,6 +446,55 @@ def test_every_feature_declares_its_denominator_sources(version: str) -> None:
                 assert any(s.endswith("rounds") for s in f.sources), f.key
             if f.denom_kind == "lives":
                 assert "num_lives" in f.sources, f.key
+
+
+# ------------------------------------------------- who may read which column
+#
+# The two ratings are judged on different tests and so cannot share a leakage
+# rule. These are the tests that keep that a property of the code: a column's
+# eligibility travels on the feature, and the filter that reads it is asserted
+# against every registered set rather than described in a table.
+
+
+@pytest.mark.parametrize("version", ALL_VERSIONS)
+def test_every_registered_feature_carries_an_eligibility(version: str) -> None:
+    for spec in VERSIONS[version].values():
+        for f in (f for s in spec for f in declared(s)):
+            assert f.eligibility in ELIGIBILITY, f.key
+
+
+@pytest.mark.parametrize("version", ALL_VERSIONS)
+def test_no_skill_feature_set_carries_a_value_only_column(version: str) -> None:
+    """The assertion the eligibility field exists for. `skill_features` is the
+    only door into a forecast-judged set, and nothing tagged value_only may pass
+    it — however the set was assembled, and whichever version added the column."""
+    for spec in VERSIONS[version].values():
+        features = [f for s in spec for f in declared(s)]
+        assert not [f.key for f in skill_features(features) if f.eligibility == ELIGIBLE_VALUE_ONLY]
+
+
+def test_the_win_condition_columns_are_value_only() -> None:
+    """Named individually, because these are the ones the rule exists for: a
+    column that *is* the scoreboard may be decomposed and may not be forecast."""
+    tagged = {
+        f.key: f.eligibility
+        for version in ALL_VERSIONS
+        for spec in VERSIONS[version].values()
+        for f in (f for s in spec for f in declared(s))
+    }
+    for key in ("obj_p10", "hill_time_p10", "ctf_caps_pm", "ctrl_caps_pm", "snd_bomb_pr"):
+        assert tagged[key] == ELIGIBLE_VALUE_ONLY, key
+
+
+def test_skill_features_keeps_the_conditional_tier() -> None:
+    """Conditional is admitted with its caveat, not excluded — otherwise the
+    field is a boolean and contested hill time has nowhere to sit."""
+    both, conditional, value_only = (
+        Feature("a", "a", _zero, _one, "maps", (), ELIGIBLE_BOTH),
+        Feature("b", "b", _zero, _one, "maps", (), ELIGIBLE_CONDITIONAL),
+        Feature("c", "c", _zero, _one, "maps", (), ELIGIBLE_VALUE_ONLY),
+    )
+    assert [f.key for f in skill_features([both, conditional, value_only])] == ["a", "b"]
 
 
 # ------------------------------------------------------- weight uncertainty
@@ -537,11 +602,16 @@ def test_weights_artifact_omits_the_interval_when_none_was_computed() -> None:
 # standardization, shrinkage or the bootstrap moves these; that is the point.
 # Update deliberately, never to make a failing run pass.
 GOLDEN_V1 = {
-    11: (1.141589, 0.218364),
-    12: (1.007431, 0.237894),
-    21: (0.834219, 0.177857),
-    22: (1.016761, 0.208196),
+    11: (1.141589, 0.236328),
+    12: (1.007431, 0.233148),
+    21: (0.834219, 0.211666),
+    22: (1.016761, 0.225292),
 }
+# The four ratings have never moved. The four standard deviations moved once,
+# when each player-season stopped drawing from a generator threaded through the
+# whole cohort in `player_id` order and started drawing from one seeded by their
+# own maps. Nothing about how anybody played changed; what changed is that these
+# numbers no longer depend on how many players were numbered ahead of them.
 
 
 def test_golden_ratings_do_not_drift() -> None:

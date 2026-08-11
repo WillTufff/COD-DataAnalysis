@@ -27,6 +27,8 @@ def make_map(
     flip: bool = False,
     season_id: int = 1,
     event_id: int = 1,
+    series_id: int | None = None,
+    margin: float | None = None,
 ) -> list[MapRow]:
     """One map, two two-player teams, stated as who won and who lost.
 
@@ -45,6 +47,7 @@ def make_map(
                     player_id=pid,
                     team_id=team_id,
                     game_id=game_id,
+                    series_id=series_id if series_id is not None else game_id,
                     season_id=season_id,
                     mode_id=1,
                     mode_slug="hardpoint",
@@ -56,6 +59,7 @@ def make_map(
                     values={"kills": 20.0, "deaths": 20.0},
                     team_kills=80.0,
                     team_hill_time=100.0,
+                    margin=None if margin is None else (margin if team_id == winner else -margin),
                 )
             )
     return rows
@@ -66,7 +70,7 @@ def make_map(
 
 def test_design_is_plus_and_minus_one_per_side() -> None:
     rows = make_map(1, (1, 2), (3, 4))
-    x, y, players, game_ids = rapm.build_design(rows)
+    x, y, players, game_ids, _rule = rapm.build_design(rows)
     assert players == [1, 2, 3, 4]
     assert game_ids == [1]
     # The winners hold the lower team id here, so they are the +1 side.
@@ -75,7 +79,7 @@ def test_design_is_plus_and_minus_one_per_side() -> None:
 
 
 def test_flipping_the_team_ids_flips_the_label_not_the_result() -> None:
-    x, y, _players, _g = rapm.build_design(make_map(1, (1, 2), (3, 4), flip=True))
+    x, y, _players, _g, _rule = rapm.build_design(make_map(1, (1, 2), (3, 4), flip=True))
     # Same winners, but they now sort second, so they are the -1 side and y = 0.
     assert list(x[0]) == [-1.0, -1.0, 1.0, 1.0]
     assert y[0] == 0.0
@@ -83,7 +87,7 @@ def test_flipping_the_team_ids_flips_the_label_not_the_result() -> None:
 
 def test_a_map_without_two_teams_is_dropped() -> None:
     rows = [r for r in make_map(1, (1, 2), (3, 4)) if r.team_id == 100]
-    x, _y, _players, game_ids = rapm.build_design(rows)
+    x, _y, _players, game_ids, _rule = rapm.build_design(rows)
     assert x.shape[0] == 0
     assert game_ids == []
 
@@ -91,7 +95,7 @@ def test_a_map_without_two_teams_is_dropped() -> None:
 def test_an_undecided_map_is_dropped() -> None:
     rows = make_map(1, (1, 2), (3, 4))
     stripped = [MapRow(**{**r.__dict__, "winner_team_id": None}) for r in rows]
-    x, _y, _players, _g = rapm.build_design(stripped)
+    x, _y, _players, _g, _rule = rapm.build_design(stripped)
     assert x.shape[0] == 0
 
 
@@ -366,3 +370,86 @@ def test_player_rows_satisfy_the_tables_constraints() -> None:
 
 def test_player_rows_are_empty_when_the_fit_declines() -> None:
     assert rapm.player_rows(make_map(1, (1, 2), (3, 4))) == []
+
+
+# ===== the lineup rule =====
+
+
+def _short_side(rows: list[MapRow], team_id: int) -> list[MapRow]:
+    """The same map with one player missing from a side."""
+    dropped = next(r for r in rows if r.team_id == team_id)
+    return [r for r in rows if r is not dropped]
+
+
+def test_side_size_is_read_from_the_title_not_declared() -> None:
+    rows = make_map(1, (1, 2), (3, 4)) + make_map(2, (1, 2), (5, 6))
+    assert rapm.side_sizes(rows) == {"WWII": 2}
+
+
+def test_an_unequal_map_is_dropped_and_counted() -> None:
+    rows = make_map(1, (1, 2), (3, 4)) + make_map(2, (1, 2), (5, 6))
+    rows += _short_side(make_map(3, (1, 2), (7, 8)), 200)
+    x, _y, _players, game_ids, rule = rapm.build_design(rows)
+    assert game_ids == [1, 2]
+    assert x.shape[0] == 2
+    assert rule.dropped["WWII"] == 1
+    assert rule.admitted["WWII"] == 2
+
+
+def test_a_short_map_on_both_sides_is_still_dropped() -> None:
+    """Equal sides are not enough — both have to be full."""
+    rows = make_map(1, (1, 2), (3, 4)) + make_map(2, (1, 2), (5, 6))
+    thin = _short_side(_short_side(make_map(3, (1, 2), (7, 8)), 100), 200)
+    x, _y, _players, _g, rule = rapm.build_design(rows + thin)
+    assert x.shape[0] == 2
+    assert rule.dropped["WWII"] == 1
+
+
+def test_the_rule_publishes_a_per_title_tally() -> None:
+    rows = make_map(1, (1, 2), (3, 4)) + _short_side(make_map(2, (1, 2), (5, 6)), 100)
+    _x, _y, _players, _g, rule = rapm.build_design(rows)
+    payload = rule.payload()
+    assert payload["maps_dropped"] == 1
+    assert payload["by_title"] == [
+        {"title": "WWII", "side_size": 2, "maps_admitted": 1, "maps_dropped": 1}
+    ]
+
+
+# ===== the identity rule =====
+
+
+def _identity(**kw: object) -> rapm.Identity:
+    base: dict[str, object] = {
+        "unresolved_players": frozenset(),
+        "substitute_slots": frozenset(),
+        "coach_only_players": frozenset(),
+    }
+    return rapm.Identity(**{**base, **kw})  # type: ignore[arg-type]
+
+
+def test_unresolved_handles_are_counted_by_the_maps_they_touch() -> None:
+    rows = make_map(1, (1, 2), (3, 4)) + make_map(2, (1, 2), (5, 6))
+    payload = _identity(unresolved_players=frozenset({5})).payload(rows)
+    assert payload["unresolved_players"] == 1
+    assert payload["maps_with_an_unresolved_slot"] == 1
+    assert payload["share_of_maps_unresolved"] == 0.5
+
+
+def test_a_substitute_is_flagged_on_the_map_they_played_not_the_career() -> None:
+    """A dated slot, so standing in once does not mark every map since."""
+    rows = make_map(1, (1, 2), (3, 4)) + make_map(2, (1, 2), (5, 6))
+    payload = _identity(substitute_slots=frozenset({(1, 2)})).payload(rows)
+    assert payload["substitute_slots"] == 1
+    assert payload["maps_with_a_substitute"] == 1
+
+
+def test_a_substitute_slot_outside_the_design_is_not_counted() -> None:
+    rows = make_map(1, (1, 2), (3, 4))
+    payload = _identity(substitute_slots=frozenset({(99, 2)})).payload(rows)
+    assert payload["substitute_slots"] == 0
+
+
+def test_a_coach_who_never_played_would_show_as_a_coach_slot() -> None:
+    rows = make_map(1, (1, 2), (3, 4))
+    assert _identity(coach_only_players=frozenset({7})).payload(rows)["coach_slots"] == 0
+    assert _identity(coach_only_players=frozenset({3})).payload(rows)["coach_slots"] == 1

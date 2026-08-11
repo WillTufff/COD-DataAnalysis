@@ -32,10 +32,18 @@ GAME_SEASONS = {
     "bo7": 2026,
 }
 
+# `opponenttype` is unfiltered on purpose. Awards are not a separate LPDB
+# table: event MVP, Rookie of the Year and the All-Star selections are
+# `placement` rows with opponenttype `solo` and mode `award_individual`, so the
+# `[[opponenttype::team]]` condition this pull used to carry filtered out every
+# external referent the rating work has for judging itself. `opponentplayers`
+# carries each finishing team's roster and `weight` carries Liquipedia's own
+# event-importance number; both were being fetched past and discarded.
 PLACEMENT_QUERY = (
     "pagename,tournament,series,parent,startdate,date,placement,prizemoney,"
-    "individualprizemoney,opponentname,opponenttemplate,liquipediatier,"
-    "liquipediatiertype,publishertier,game,mode,type,objectname,extradata"
+    "individualprizemoney,opponentname,opponenttype,opponentplayers,opponenttemplate,"
+    "weight,liquipediatier,liquipediatiertype,publishertier,game,mode,type,"
+    "objectname,extradata"
 )
 
 TEAM_QUERY = (
@@ -71,6 +79,15 @@ MATCH_QUERY = (
 
 PREMIER = "([[publishertier::true]] OR [[liquipediatier::1]])"
 
+# Awards are scoped by the award, not by the tier of the event that gave it.
+# Measured: 158 individual-award rows exist across the ten game codes and only
+# 108 are premier, so the premier scope alone drops `Best Hardpoint Player`,
+# `Best Control Player` and `Best SnD Player` entirely — the mode-conditional
+# referents a role model would be scored against, six rows, all of them below
+# the tier line. Widening costs no extra requests: it is one more disjunct on a
+# condition the pull already sends once per game code.
+AWARDS = "([[mode::award_individual]] OR " + PREMIER + ")"
+
 PLACEMENTS_PATH = SNAPSHOT_ROOT / "placements.json"
 TEAMS_PATH = SNAPSHOT_ROOT / "teams.json"
 TOURNAMENTS_PATH = SNAPSHOT_ROOT / "tournaments.json"
@@ -81,13 +98,18 @@ MATCHES_PATH = SNAPSHOT_ROOT / "matches.json"
 
 
 def _per_game(
-    client: LpdbClient, table: str, extra: str, query: str, order: str
+    client: LpdbClient,
+    table: str,
+    extra: str,
+    query: str,
+    order: str,
+    scope: str = PREMIER,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for game in GAME_SEASONS:
-        conditions = f"[[game::{game}]] AND {PREMIER}"
+        conditions = f"[[game::{game}]] AND {scope}"
         if extra:
-            conditions = f"[[game::{game}]] AND {extra} AND {PREMIER}"
+            conditions = f"[[game::{game}]] AND {extra} AND {scope}"
         page = client.get_all(table, conditions=conditions, query=query, order=order)
         print(f"{table} {game}: {len(page)} rows")
         rows.extend(page)
@@ -104,7 +126,7 @@ PULLS: dict[str, tuple[Path, Callable[[LpdbClient], list[dict[str, Any]]]]] = {
     "placements": (
         PLACEMENTS_PATH,
         lambda c: _per_game(
-            c, "placement", "[[opponenttype::team]]", PLACEMENT_QUERY, "date ASC, objectname ASC"
+            c, "placement", "", PLACEMENT_QUERY, "date ASC, objectname ASC", scope=AWARDS
         ),
     ),
     "teams": (TEAMS_PATH, lambda c: _whole(c, "team", TEAM_QUERY, "pagename ASC")),

@@ -25,6 +25,8 @@ from typing import Any, cast
 
 import psycopg
 
+from . import venue
+
 _DEFAULT_DSN = "postgres://cdlhub:cdlhub@localhost:54329/cdlhub"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -132,6 +134,43 @@ HARD_CHECKS: tuple[Check, ...] = (
 )
 
 SOFT_CHECKS: tuple[Check, ...] = (
+    # A map score that cannot be a map score. One row today: a 2025 Control map
+    # arriving from LPDB as -1 to -1, which is a sentinel for "unknown" wearing
+    # the type of a real number. It matters because a score is a *signed*
+    # quantity to anything reading margin, where a null is skipped and a -1 is
+    # believed. Soft rather than hard: the value is upstream and inventing a
+    # replacement locally would be worse than declaring it.
+    Check(
+        "impossible_game_score",
+        "SELECT id FROM games WHERE team1_score < 0 OR team2_score < 0",
+    ),
+    # The two ways a decided map can disagree with itself: the scoreline points
+    # one way and `winner_team_id` the other, or the scores are level and a
+    # winner is declared anyway. Today: one 2020 MW19 Search & Destroy at 3-6
+    # to the team recorded as winning it, and three ties — two 2017 Uplink maps
+    # level at regulation with a winner the archive knows, plus the -1 to -1
+    # Control map above, which the tie check catches for a second reason. The
+    # Uplink pair are not errors; the other two are, and neither is fixable from
+    # here. Every model that orients on a signed margin drops these four and
+    # publishes their game ids.
+    Check(
+        "game_winner_contradicts_score",
+        """
+        SELECT g.id FROM games g JOIN series s ON s.id = g.series_id
+        WHERE g.team1_score IS NOT NULL AND g.team2_score IS NOT NULL
+          AND g.winner_team_id IS NOT NULL
+          AND g.team1_score <> g.team2_score
+          AND ((g.team1_score > g.team2_score) <> (g.winner_team_id = s.team1_id))
+        """,
+    ),
+    Check(
+        "game_tied_with_a_declared_winner",
+        """
+        SELECT id FROM games
+        WHERE team1_score IS NOT NULL AND team1_score = team2_score
+          AND winner_team_id IS NOT NULL
+        """,
+    ),
     # The CWL archive is missing the deciding map for a handful of series
     # (verified against the raw CSVs: e.g. 2019 pro-w6-12 OpTic-Splyce has 4
     # maps at 2-2 and no game 5). Undecided series are data, not errors; they
@@ -152,6 +191,29 @@ SOFT_CHECKS: tuple[Check, ...] = (
         WHERE s.team1_score IS NOT NULL
         GROUP BY s.id
         HAVING count(g.id) <> s.team1_score + s.team2_score
+        """,
+    ),
+    # A round should appear once from each side with exactly one winner between
+    # them. Cito populates the two sides' round lists independently, so some
+    # rounds arrive one-sided and a handful arrive with neither side claiming
+    # the win. A one-sided round is still readable — `won` names the side that
+    # took it — so these are counted rather than dropped, and any model reading
+    # rounds has to decide what to do with them.
+    Check(
+        "segment_rounds_missing_a_side",
+        """
+        SELECT game_id, kind, ordinal FROM game_segments
+        WHERE kind <> 'hill'
+        GROUP BY game_id, kind, ordinal HAVING count(*) <> 2
+        """,
+    ),
+    Check(
+        "segment_rounds_without_one_winner",
+        """
+        SELECT game_id, kind, ordinal FROM game_segments
+        WHERE kind <> 'hill'
+        GROUP BY game_id, kind, ordinal
+        HAVING count(*) = 2 AND count(*) FILTER (WHERE won) <> 1
         """,
     ),
 )
@@ -178,6 +240,83 @@ ORDER BY se.year, s.data_source
 """
 
 
+# Which maps carry a within-map time axis (migration 0016). Reported per
+# (season, mode) over every map of that mode, so a season with no segments
+# shows as a zero row rather than as an absent one — the 2021-2023 hole is a
+# fact about the source and has to be visible, not interpolated. The Cito
+# breakdown is absent for BOCW, Vanguard and Modern Warfare II; there is no
+# fetch that fixes it, because the payloads carrying it are already on disk.
+SEGMENT_COVERAGE_SQL = """
+SELECT se.year, t.short_name, gm.slug AS mode,
+       count(DISTINCT g.id)                                        AS maps,
+       count(DISTINCT g.id) FILTER (WHERE sg.game_id IS NOT NULL)  AS maps_with_segments,
+       count(sg.*)                                                 AS segment_rows
+FROM seasons se
+JOIN titles t     ON t.id = se.title_id
+JOIN events e     ON e.season_id = se.id
+JOIN series s     ON s.event_id = e.id
+JOIN games g      ON g.series_id = s.id
+JOIN game_modes gm ON gm.id = g.mode_id
+LEFT JOIN game_segments sg ON sg.game_id = g.id
+GROUP BY se.year, t.short_name, gm.slug
+HAVING count(DISTINCT g.id) > 0
+ORDER BY se.year, gm.slug
+"""
+
+# How many players an age curve can be fitted on, stated here rather than
+# discovered by the phase that needs it. A birthdate is not recoverable for the
+# 79 without one: none of them carries a usable one in the LPDB player snapshot
+# under the same handle, so this is a ceiling, not a loading gap. The per-season
+# split is the part that matters — the CDL era is near-complete and the CWL era
+# is not, which is exactly where a longevity argument would be made.
+AGES_SQL = """
+SELECT se.year,
+       count(DISTINCT gps.player_id)                                       AS box_players,
+       count(DISTINCT gps.player_id) FILTER (WHERE p.birthdate IS NOT NULL) AS with_birthdate
+FROM game_player_stats gps
+JOIN players p  ON p.id = gps.player_id
+JOIN games g    ON g.id = gps.game_id
+JOIN series s   ON s.id = g.series_id
+JOIN events e   ON e.id = s.event_id
+JOIN seasons se ON se.id = e.season_id
+GROUP BY se.year ORDER BY se.year
+"""
+
+AGES_TOTALS_SQL = """
+SELECT (SELECT count(*) FROM players),
+       (SELECT count(*) FROM players WHERE birthdate IS NOT NULL),
+       (SELECT count(DISTINCT player_id) FROM game_player_stats),
+       (SELECT count(*) FROM players p WHERE p.birthdate IS NOT NULL
+          AND EXISTS (SELECT 1 FROM game_player_stats g WHERE g.player_id = p.id))
+"""
+
+# Where the venue flag came from, per event, and how many maps ride on it.
+# `is_lan` is a covariate the rating plan wants to condition on, and until this
+# report existed it mixed a derived value with two loader defaults. Reading the
+# location column instead is the trap it is published to prevent: nine of the
+# 2020 weeks kept a host city after moving online, and CDL Major 4 2022 carries
+# Brooklyn while every LPDB match under it is recorded Online.
+VENUE_SQL = """
+SELECT se.year, e.name, e.is_lan, e.location,
+       count(g.id) AS maps
+FROM events e
+LEFT JOIN seasons se ON se.id = e.season_id
+LEFT JOIN series s   ON s.event_id = e.id
+LEFT JOIN games g    ON g.series_id = s.id
+GROUP BY se.year, e.name, e.is_lan, e.location
+ORDER BY se.year, e.name
+"""
+
+# The Control and SnD round taxonomy, which is a finding in its own right: a
+# round won on ticks is a different event from one won on kills, and no
+# published Call of Duty analysis has separated them.
+WIN_TYPE_SQL = """
+SELECT kind, coalesce(win_type, '(unreported)') AS win_type, count(*) AS rounds
+FROM game_segments WHERE kind <> 'hill'
+GROUP BY kind, win_type ORDER BY kind, count(*) DESC
+"""
+
+
 _RECON_BREAKDOWN = """
 SELECT {dims},
        count(*)                                    AS player_maps,
@@ -189,6 +328,71 @@ FROM kill_feed_recon
 GROUP BY {dims}
 ORDER BY {dims}
 """
+
+
+def venue_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any]:
+    """Every event's venue flag, with the evidence class behind it.
+
+    An event whose verdict comes from a curated entry is named, and an entry
+    still marked `reviewed: false` is named again under `provisional` — those
+    are applied, so the only thing keeping them honest is being printed.
+    """
+    rules = venue.VenueRules.load()
+    events: list[dict[str, Any]] = []
+    for year, name, is_lan, location, maps in conn.execute(VENUE_SQL).fetchall():
+        curated = rules.get(cast("int | None", year), cast(str, name))
+        events.append(
+            {
+                "season": year,
+                "event": name,
+                "is_lan": is_lan,
+                "location": location,
+                "maps": maps,
+                "source": venue.SOURCE_CURATED if curated else venue.SOURCE_LPDB,
+                "reviewed": bool(curated.get("reviewed", False)) if curated else True,
+                "reason": curated.get("reason") if curated else None,
+            }
+        )
+    undecided = [e for e in events if e["is_lan"] is None]
+    provisional = [e for e in events if e["source"] == venue.SOURCE_CURATED and not e["reviewed"]]
+    return {
+        "rule": "curated verdict, else LPDB tournament type; location is never consulted",
+        "events": events,
+        "maps_lan": sum(e["maps"] for e in events if e["is_lan"] is True),
+        "maps_online": sum(e["maps"] for e in events if e["is_lan"] is False),
+        "maps_undecided": sum(e["maps"] for e in undecided),
+        "undecided": [
+            {"season": e["season"], "event": e["event"], "maps": e["maps"]} for e in undecided
+        ],
+        "provisional": [
+            {"season": e["season"], "event": e["event"], "reason": e["reason"]} for e in provisional
+        ],
+        # Events branded with a venue that were not played on one. The count is
+        # the reason `location` is not a LAN proxy, so it is published rather
+        # than treated as a discrepancy to reconcile.
+        "branded_but_online": [
+            {"season": e["season"], "event": e["event"], "location": e["location"]}
+            for e in events
+            if e["is_lan"] is False and e["location"]
+        ],
+    }
+
+
+def venue_lines(payload: dict[str, Any]) -> list[str]:
+    lines = [
+        f"rule: {payload['rule']}",
+        f"maps: {payload['maps_lan']:,} LAN, {payload['maps_online']:,} online, "
+        f"{payload['maps_undecided']:,} undecided",
+    ]
+    for entry in payload["undecided"]:
+        lines.append(f"undecided  {entry['season']} {entry['event']} ({entry['maps']} maps)")
+    for entry in payload["provisional"]:
+        lines.append(f"provisional {entry['season']} {entry['event']}: {entry['reason']}")
+    for entry in payload["branded_but_online"]:
+        lines.append(
+            f"branded but online  {entry['season']} {entry['event']} [{entry['location']}]"
+        )
+    return lines
 
 
 def _breakdown(conn: psycopg.Connection[tuple[object, ...]], dims: str) -> list[dict[str, Any]]:
@@ -345,6 +549,47 @@ def run(dsn: str, reports: Path = REPORTS_DIR) -> int:
         for row in report:
             print("  " + json.dumps(row, default=str))
         result["coverage"] = report
+
+        print("== ages ceiling ==")
+        totals = conn.execute(AGES_TOTALS_SQL).fetchone()
+        assert totals is not None
+        by_season = [
+            {"season": year, "box_players": box, "with_birthdate": known}
+            for year, box, known in conn.execute(AGES_SQL).fetchall()
+        ]
+        ages = {
+            "players": totals[0],
+            "players_with_birthdate": totals[1],
+            "box_score_players": totals[2],
+            "box_score_players_with_birthdate": totals[3],
+            "by_season": by_season,
+        }
+        result["ages"] = ages
+        print(
+            f"  age curves can be fitted on {ages['box_score_players_with_birthdate']} of "
+            f"{ages['box_score_players']} players with box-score rows "
+            f"({ages['players_with_birthdate']} of {ages['players']} players overall)"
+        )
+        for row in by_season:
+            print("  " + json.dumps(row, default=str))
+
+        print("== venue derivation ==")
+        result["venue"] = venue_payload(conn)
+        for line in venue_lines(result["venue"]):
+            print("  " + line)
+
+        print("== within-map segment coverage ==")
+        seg = conn.execute(SEGMENT_COVERAGE_SQL)
+        seg_cols = [d.name for d in seg.description or []]
+        segments = [dict(zip(seg_cols, r, strict=True)) for r in seg.fetchall()]
+        for row in segments:
+            print("  " + json.dumps(row, default=str))
+        win = conn.execute(WIN_TYPE_SQL)
+        win_cols = [d.name for d in win.description or []]
+        win_types = [dict(zip(win_cols, r, strict=True)) for r in win.fetchall()]
+        for row in win_types:
+            print("  " + json.dumps(row, default=str))
+        result["segment_coverage"] = {"by_season_mode": segments, "win_types": win_types}
 
         print("== kill-feed reconciliation ==")
         payload = reconciliation_payload(conn)

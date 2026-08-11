@@ -407,6 +407,14 @@ def build_basis(grid: Grid, name: str, modes: tuple[int, ...]) -> Basis:
         for i in range(len(grid.subjects))
         if bool(present[i, cols].all()) and not math.isnan(float(grid.rating[i]))
     ]
+    # Ordered by what each player-season measured rather than by the id it was
+    # loaded under. Three things downstream draw by row position — the parallel
+    # analysis permutes columns, k-means++ seeds on rows, and the stability
+    # bootstrap resamples them — so with rows in `player_id` order the retained
+    # component count and the cluster stability were partly a function of the
+    # loader's numbering. Subjects, matrix and rating all read through `row_idx`,
+    # so they permute together and a score stays with its player.
+    rows.sort(key=lambda i: (*grid.values[i, cols].tolist(), float(grid.rating[i])))
     return Basis(name, cols, rows, grid)
 
 

@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Curated LAN/online verdicts, keyed '<season year>:<event name>'. These win",
+    "over LPDB's tournament type, so an entry here is a statement that the",
+    "source is absent or wrong. Each carries a reason and a reviewed flag; the",
+    "quality report lists every entry still marked reviewed=false, and those",
+    "are applied but published as provisional."
+  ],
+  "events": {
+    "2018:CWL Dallas 2017": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL Global Pro League open event, played at the named venue; Liquipedia has no tournament page under this event's pagename, so the archive importer's assertion is the only evidence"
+    },
+    "2018:CWL New Orleans 2018": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2018:CWL Atlanta 2018": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2018:CWL Birmingham 2018": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2018:CWL Seattle 2018": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2018:CWL Anaheim 2018": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2019:CWL Fort Worth 2019": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2019:CWL London 2019": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    },
+    "2019:CWL Anaheim 2019": {
+      "is_lan": true,
+      "reviewed": false,
+      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
+    }
+  }
+}

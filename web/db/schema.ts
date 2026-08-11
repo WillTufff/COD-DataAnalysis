@@ -1,5 +1,6 @@
 // Drizzle mirror of db/migrations/*.sql — the SQL files are the source of
 // truth; keep this file in sync when adding migrations.
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -15,6 +16,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ===== Reference =====
@@ -430,9 +432,17 @@ export const playerStyleSeason = pgTable("player_style_season", {
   pctl: real("pctl").notNull(),
 });
 
-// One RAPM coefficient per player per rating run, over every decided map in
-// the archive. See 0013 — `se` is not optional decoration here, it is larger
-// than the coefficient spread for most of the table.
+// RAPM coefficients. See 0013 — `se` is not optional decoration here, it is
+// larger than the coefficient spread for most of the table.
+//
+// Since 0017 the table holds two shapes at once. A career row is one per player
+// per rating run, with a null `season_id`. A season row belongs to the
+// season-varying fit, lands under that model's own run, and there are several
+// per player: one per season per `scope`, where an era-resolution coefficient
+// is filed against every season it covers. So (run_id, player_id) is no longer
+// unique and no longer the key — two partial unique indexes cover the halves
+// separately, and a reader must say which half it wants. `getPlayerRapm` asks
+// for the rating run, which by construction holds only career rows.
 export const playerRapm = pgTable(
   "player_rapm",
   {
@@ -446,6 +456,24 @@ export const playerRapm = pgTable(
     coef: real("coef").notNull(),
     se: real("se").notNull(),
     teammateConcentration: real("teammate_concentration").notNull(),
+    // Null on a career row, which is what tells the two halves apart.
+    seasonId: integer("season_id").references(() => seasons.id),
+    // 'career' | 'smoothed' | 'filtered'. Only 'filtered' may be read forward:
+    // the smoothed fit's penalty is two-sided and has seen the next season.
+    scope: text("scope").notNull(),
+    // 'career' | 'era' | 'season' — what one coefficient actually covers.
+    resolution: text("resolution").notNull(),
+    // Share of the column's prior variance surviving into the posterior. Read
+    // against k/(k+1) — 0.80 at 4v4 — never against a flat threshold. Null on
+    // career rows, which predate the statistic.
+    penaltyShare: real("penalty_share"),
   },
-  (t) => [primaryKey({ columns: [t.runId, t.playerId] })],
+  (t) => [
+    uniqueIndex("player_rapm_career_key")
+      .on(t.runId, t.playerId)
+      .where(sql`season_id IS NULL`),
+    uniqueIndex("player_rapm_season_key")
+      .on(t.runId, t.scope, t.playerId, t.seasonId)
+      .where(sql`season_id IS NOT NULL`),
+  ],
 );

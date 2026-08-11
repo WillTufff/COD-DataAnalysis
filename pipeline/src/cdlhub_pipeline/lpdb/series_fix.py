@@ -1,6 +1,8 @@
-"""Repair Cito series results using LPDB /match (match2) map-level data.
+"""Reconcile local series against LPDB /match (match2) data, both eras.
 
-Three fixes, all driven by the Cito load report and idempotent per run:
+Three fixes for the Cito era, all driven by the Cito load report and idempotent
+per run, plus one link for the CWL era (`link_cwl_series`) that repairs nothing
+and exists to disagree:
 
 1. Backfill the four quarantined 2020 OGLA-vs-RØKKR series (Cito files both
    sides under the same slug, so orientation is unrecoverable there). LPDB
@@ -15,15 +17,20 @@ Three fixes, all driven by the Cito load report and idempotent per run:
 3. Cross-check the score-only cdl-catalog fixtures (numeric source_uid, no
    games) and create their game rows from LPDB map data.
 
+4. Link 2017-2019 series to their LPDB match rows, backfilling `best_of` —
+   null on every CWL series here, populated on all 1,230 of LPDB's — and
+   publishing a score reconciliation. Until this ran, every CWL number the
+   project publishes rested on the Activision archive alone.
+
 A cito reload nulls/loses these fixes, so rerun `lpdb load` after any
-`cito load`. Disagreements between the Cito series score and LPDB are
-reported, never resolved silently.
+`cito load`. Disagreements between the local series score and LPDB are
+reported, never resolved silently, in either era.
 """
 
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import UTC, date, datetime
 from typing import Any, cast
 
@@ -65,6 +72,24 @@ def _utc_date(row: dict[str, Any]) -> date | None:
     return datetime.fromisoformat(raw).date()
 
 
+def _disagreement_kind(archive: tuple[int, int], lpdb: list[int]) -> str:
+    """What kind of disagreement this is, which is most of the diagnosis.
+
+    The archive reporting fewer maps than LPDB is the shape already known from
+    the raw CSVs — a series whose deciding map was never written. A different
+    winner is the one that matters, and 2-2 against 3-2 is the same missing map
+    showing up as an undecided series rather than as a short one.
+    """
+    if (archive[0] > archive[1]) != (lpdb[0] > lpdb[1]):
+        return "different winner"
+    total_archive, total_lpdb = sum(archive), sum(lpdb)
+    if total_archive < total_lpdb:
+        return "archive has fewer maps"
+    if total_archive > total_lpdb:
+        return "archive has more maps"
+    return "same total, different split"
+
+
 class SeriesFixer:
     def __init__(self, conn: psycopg.Connection[tuple[object, ...]], loader: LpdbLoader):
         self.conn = conn
@@ -80,6 +105,13 @@ class SeriesFixer:
             "dates_corrected": [],
             "unmatched": [],
             "inconsistent_lpdb_maps": [],
+            # The CWL era's second source (link_cwl_series), reported the same
+            # way the modern era's reconciliation already is.
+            "cwl_score_agreements": 0,
+            "cwl_score_disagreements": [],
+            "cwl_score_unscored": 0,
+            "cwl_unmatched_by_event": {},
+            "cwl_disagreement_kinds": {},
         }
         # (frozenset of lowercased canonical team names) -> [match records]
         self._index: dict[frozenset[str], list[dict[str, Any]]] = defaultdict(list)
@@ -536,6 +568,19 @@ class SeriesFixer:
         self.conn.execute(
             "DELETE FROM games WHERE data_source = %s AND source_uid LIKE 'lpdb:%%'", (SOURCE,)
         )
+        # A walk-forward team rating names the series it was computed at, so a
+        # fitted run pins the very rows this reload replaces and the delete
+        # below fails against the foreign key. The ratings for a reloaded series
+        # are stale by definition and `run_all` refits them, so they go first —
+        # without this, `lpdb load` can only run on a database no model has been
+        # fitted against, which is not a state the ops app ever leaves it in.
+        cur = self.conn.execute(
+            "DELETE FROM team_ratings WHERE series_id IN "
+            "(SELECT id FROM series WHERE data_source = %s)",
+            (SOURCE,),
+        )
+        if cur.rowcount:
+            self.counts["stale_team_ratings_cleared"] += cur.rowcount
         self.conn.execute("DELETE FROM series WHERE data_source = %s", (SOURCE,))
         self.backfill_quarantined()
         self.check_nulled()
@@ -550,3 +595,120 @@ class SeriesFixer:
         self.report["unmatched"] = [
             u for u in self.report["unmatched"] if not str(u.get("cito", "")).isdigit()
         ]
+        self.link_cwl_series()
+
+    # ----- CWL era: a second source for a record that has one -----
+
+    CWL_SERIES_SQL = """
+    SELECT s.id, e.name, se.year, t1.name, t2.name, s.played_at::date,
+           s.team1_score, s.team2_score, s.best_of
+    FROM series s
+    JOIN events e   ON e.id = s.event_id
+    JOIN seasons se ON se.id = e.season_id
+    JOIN teams t1   ON t1.id = s.team1_id
+    JOIN teams t2   ON t2.id = s.team2_id
+    WHERE se.league = 'CWL'
+    ORDER BY s.played_at, s.id
+    """
+
+    def link_cwl_series(self) -> None:
+        """Match 2017-2019 series to LPDB match rows, and say where they disagree.
+
+        Every CWL number the project publishes rests on the Activision archive
+        alone. LPDB is an independent record of the same series: it carries
+        `bestof` on all 1,230 of its CWL match rows against `best_of` being null
+        on every CWL series here, and its scores are a second opinion the
+        archive has never had to agree with.
+
+        LPDB's CWL match coverage is Pro League and Championship only — it has
+        no rows at all for the open events (Anaheim, Atlanta, Birmingham,
+        Dallas, New Orleans, Seattle, Fort Worth, London). Those series are
+        reported unmatched by event, so the shape of the gap is visible rather
+        than reading as a matching failure.
+
+        Disagreements are reported, never resolved: the archive stays
+        authoritative and LPDB stays the check on it.
+        """
+        rows = self.conn.execute(self.CWL_SERIES_SQL).fetchall()
+        if not rows:
+            return
+        # Cleared first so a run converges after an alias edit rather than
+        # keeping whichever match a previous run happened to reach.
+        self.conn.execute(
+            "UPDATE series SET liquipedia_match_id = NULL WHERE id IN "
+            "(SELECT s.id FROM series s JOIN events e ON e.id = s.event_id "
+            " JOIN seasons se ON se.id = e.season_id WHERE se.league = 'CWL')"
+        )
+        unmatched: Counter[str] = Counter()
+        kinds: Counter[str] = Counter()
+        for row in rows:
+            series_id = cast(int, row[0])
+            event, year = cast(str, row[1]), cast(int, row[2])
+            name1, name2 = cast(str, row[3]), cast(str, row[4])
+            played = cast(date, row[5])
+            local = (cast("int | None", row[6]), cast("int | None", row[7]))
+            best_of = cast("int | None", row[8])
+
+            match = self._pick_cwl_match(self.find(name1, name2, played), name1, local)
+            if match is None:
+                unmatched[f"{year} {event}"] += 1
+                continue
+
+            self._set_match_id(series_id, cast(str, match["match2id"]))
+            self.counts["cwl_series_linked"] += 1
+            if best_of is None and match.get("bestof"):
+                self.conn.execute(
+                    "UPDATE series SET best_of = %s WHERE id = %s AND best_of IS NULL",
+                    (match["bestof"], series_id),
+                )
+                self.counts["cwl_best_of_filled"] += 1
+
+            theirs = self._cwl_scores(match, name1)
+            if None in local or theirs is None:
+                self.report["cwl_score_unscored"] += 1
+            elif tuple(theirs) == local:
+                self.report["cwl_score_agreements"] += 1
+            else:
+                kind = _disagreement_kind(cast(tuple[int, int], local), theirs)
+                kinds[kind] += 1
+                self.report["cwl_score_disagreements"].append(
+                    {
+                        "series_id": series_id,
+                        "event": f"{year} {event}",
+                        "teams": f"{name1} vs {name2}",
+                        "date": str(played),
+                        "archive": f"{local[0]}-{local[1]}",
+                        "lpdb": f"{theirs[0]}-{theirs[1]}",
+                        "kind": kind,
+                        "match2id": match["match2id"],
+                    }
+                )
+        self.report["cwl_unmatched_by_event"] = dict(sorted(unmatched.items()))
+        self.report["cwl_disagreement_kinds"] = dict(sorted(kinds.items()))
+
+    def _cwl_scores(self, match: dict[str, Any], local_team1: str) -> list[int] | None:
+        """The LPDB match's scores, oriented to the local series' team order."""
+        names = [str(n).lower() for n in match["names"]]
+        scores = cast(list[int], match["scores"])
+        try:
+            first = names.index(local_team1.lower())
+        except ValueError:
+            return None
+        return scores if first == 0 else [scores[1], scores[0]]
+
+    def _pick_cwl_match(
+        self,
+        candidates: list[dict[str, Any]],
+        local_team1: str,
+        local: tuple[int | None, int | None],
+    ) -> dict[str, Any] | None:
+        """One match, or none. Two teams can meet twice on the same day, so a
+        tie is broken by the score and left unmatched if that does not settle
+        it — a wrong link is worse than a missing one for a source whose whole
+        job is to disagree."""
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates or None in local:
+            return None
+        agreeing = [m for m in candidates if self._cwl_scores(m, local_team1) == list(local)]
+        return agreeing[0] if len(agreeing) == 1 else None

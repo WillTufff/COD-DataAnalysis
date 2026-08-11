@@ -265,6 +265,33 @@ class CitoLoader:
             game_id = cast(int, grow[0])
             self.counts["games"] += 1
 
+            # Segments are rewritten whole rather than upserted: a map whose
+            # breakdown shrinks between pulls must not keep the rows it lost.
+            self.conn.execute("DELETE FROM game_segments WHERE game_id = %s", (game_id,))
+            for seg in g.segments:
+                seg_team = slug_team.get(seg.team_slug)
+                if seg_team is None:
+                    continue
+                self.conn.execute(
+                    """
+                    INSERT INTO game_segments
+                      (game_id, team_id, kind, ordinal, score, won, win_type, data_source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (game_id, team_id, kind, ordinal) DO NOTHING
+                    """,
+                    (
+                        game_id,
+                        seg_team,
+                        seg.kind,
+                        seg.ordinal,
+                        seg.score,
+                        seg.won,
+                        seg.win_type,
+                        SOURCE,
+                    ),
+                )
+                self.counts["game_segments"] += 1
+
             per_player: dict[int, Any] = {}
             for ln in g.lines:
                 pid = player_ids[self.aliases.player(ln.player).lower()]
