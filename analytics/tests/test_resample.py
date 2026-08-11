@@ -61,6 +61,33 @@ def test_a_stream_is_the_same_for_the_same_contents_and_not_for_others() -> None
     )
 
 
+def test_a_stream_does_not_move_when_the_last_bit_of_the_data_does() -> None:
+    """The failure this guards is not hypothetical: `normal(loc, scale)` scales
+    its draws with a fused multiply-add on arm64 and without one on x86_64, so
+    the same seed builds data one ulp apart on a laptop and in CI. A seed read
+    from exact float bytes turned that into an unrelated set of draws and an
+    interval that moved by its own sampling spread."""
+    rng = np.random.default_rng(12)
+    exact = rng.standard_normal(200) * 3.0 + 20.0
+    nudged = np.nextafter(exact, np.inf)
+    assert not np.array_equal(exact, nudged)
+
+    draws = resample.stream(3, exact).integers(0, 500, 40)
+    assert list(resample.stream(3, nudged).integers(0, 500, 40)) == list(draws)
+
+
+def test_a_stream_still_moves_when_the_data_genuinely_does() -> None:
+    """Coarsening the seed must not blind it. A change any estimator could see
+    has to reach the draws, or two different groups share a bootstrap."""
+    base = np.random.default_rng(13).standard_normal(200)
+    shifted = base.copy()
+    shifted[7] += 1e-4
+
+    assert list(resample.stream(3, base).integers(0, 500, 40)) != list(
+        resample.stream(3, shifted).integers(0, 500, 40)
+    )
+
+
 def test_a_stream_does_not_move_when_a_neighbouring_group_appears() -> None:
     """The property a single threaded generator cannot have."""
     mine = np.arange(6.0)

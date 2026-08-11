@@ -109,6 +109,18 @@ def synthetic_rows(
     against every other. Two teams reduce to the fixed matchup this started as.
     """
     rng = np.random.default_rng(seed)
+
+    def normal(mean: float, sd: float) -> float:
+        """`rng.normal(mean, sd)`, scaled here rather than inside numpy.
+
+        numpy scales a standard draw with a fused multiply-add on arm64 and
+        without one on x86_64, so `normal` returns values one ulp apart on a
+        laptop and in CI off the same seed. The draw itself is bit-identical on
+        both; only the scaling differs, so doing it here makes the fixture the
+        same bytes everywhere.
+        """
+        return mean + sd * float(rng.standard_normal())
+
     rows: list[MapRow] = []
     day0 = date(2018, 1, 1)
     roster: dict[int, list[int]] = defaultdict(list)
@@ -118,10 +130,10 @@ def synthetic_rows(
     for g in range(n_games):
         home, away = schedule[g % len(schedule)]
         playing = roster[home] + roster[away]
-        kills = {p: max(0.0, rng.normal(skills[p], 3.0)) for p in playing}
-        deaths = {p: max(0.0, rng.normal(20.0, 3.0)) for p in playing}
+        kills = {p: max(0.0, normal(skills[p], 3.0)) for p in playing}
+        deaths = {p: max(0.0, normal(20.0, 3.0)) for p in playing}
         latent = sum((kills[p] - deaths[p]) * (1.0 if p // 10 == home else -1.0) for p in playing)
-        home_won = bool(latent + rng.normal(0.0, 2.0) > 0.0)
+        home_won = bool(latent + normal(0.0, 2.0) > 0.0)
         event_id = 1 if g < n_games // 2 else 2
         for p in playing:
             rows.append(
@@ -141,8 +153,8 @@ def synthetic_rows(
                     values={
                         "kills": kills[p],
                         "deaths": deaths[p],
-                        "assists": max(0.0, rng.normal(5.0, 1.0)),
-                        "hill_time": max(0.0, rng.normal(10.0, 3.0)),
+                        "assists": max(0.0, normal(5.0, 1.0)),
+                        "hill_time": max(0.0, normal(10.0, 3.0)),
                     },
                     team_kills=0.0,
                     team_hill_time=0.0,
@@ -602,16 +614,26 @@ def test_weights_artifact_omits_the_interval_when_none_was_computed() -> None:
 # standardization, shrinkage or the bootstrap moves these; that is the point.
 # Update deliberately, never to make a failing run pass.
 GOLDEN_V1 = {
-    11: (1.141589, 0.236328),
-    12: (1.007431, 0.233148),
-    21: (0.834219, 0.211666),
-    22: (1.016761, 0.225292),
+    11: (1.141589, 0.212711),
+    12: (1.007431, 0.223219),
+    21: (0.834219, 0.188761),
+    22: (1.016761, 0.192098),
 }
-# The four ratings have never moved. The four standard deviations moved once,
-# when each player-season stopped drawing from a generator threaded through the
-# whole cohort in `player_id` order and started drawing from one seeded by their
-# own maps. Nothing about how anybody played changed; what changed is that these
-# numbers no longer depend on how many players were numbered ahead of them.
+# The four ratings have never moved. The four standard deviations have moved
+# twice, both times because the bootstrap changed which draws it takes and never
+# because anybody played differently.
+#
+# The first time, each player-season stopped drawing from a generator threaded
+# through the whole cohort in `player_id` order and started drawing from one
+# seeded by their own maps, so these numbers no longer depend on how many
+# players were numbered ahead of them.
+#
+# The second time, that per-player seed stopped being a hash of exact float
+# bytes (see `resample.KEEP_MANTISSA_BITS`). It had been reading a group's last
+# mantissa bits, which differ between a laptop and CI over nothing but a fused
+# multiply-add, so the same data seeded two unrelated bootstraps and this test
+# passed on one machine and failed on the other while `rating` matched to 1e-6
+# on both. These four now agree across architectures to ~1e-16.
 
 
 def test_golden_ratings_do_not_drift() -> None:

@@ -57,6 +57,36 @@ def order(columns: Sequence[Sequence[float] | NDArray[np.float64]]) -> IntArray:
     return np.asarray(np.lexsort(keys), dtype=np.int64)
 
 
+# Mantissa bits kept when hashing a stream's contents, of float64's 52. What is
+# dropped is roughly the last eight decimal digits of each value.
+#
+# A seed read from the full 52 bits is a hash of exact bytes, so a last-bit
+# difference in the data produces an unrelated digest, an unrelated set of draws,
+# and an interval that moves by its own sampling spread. Last-bit differences are
+# not hypothetical: `Generator.normal(loc, scale)` scales its draws with a fused
+# multiply-add on arm64 and without one on x86_64, so the same seed gives values
+# one ulp apart on the two architectures, and every number computed from them
+# inherits that. The point estimate absorbs it — it is a smooth function of the
+# data and moves by ~1e-16 — while the interval around it jumps, which is the
+# signature this constant exists to remove.
+#
+# Truncating to a bit boundary is exact integer arithmetic on the float's own
+# representation, so it introduces no rounding of its own. Two values still land
+# on opposite sides of a boundary if they straddle one, but that now takes a
+# specific alignment rather than any perturbation at all: a one-ulp difference
+# crosses a boundary with probability 2**-(52 - KEEP) rather than certainty.
+KEEP_MANTISSA_BITS = 28
+
+
+def _coarse(part: object) -> NDArray[np.float64]:
+    """`part` as float64 with the low mantissa bits cleared."""
+    values = np.ascontiguousarray(part, dtype=np.float64)
+    dropped = np.uint64(52 - KEEP_MANTISSA_BITS)
+    mask = ~((np.uint64(1) << dropped) - np.uint64(1))
+    truncated: NDArray[np.float64] = (values.view(np.uint64) & mask).view(np.float64)
+    return truncated.reshape(values.shape)
+
+
 def stream(seed: int, *content: object) -> np.random.Generator:
     """A generator for one group, seeded from that group's own contents.
 
@@ -67,11 +97,13 @@ def stream(seed: int, *content: object) -> np.random.Generator:
     reorder the groups, drop one, add one, and the rest are untouched.
 
     `content` is anything array-like the group is made of. It is hashed as
-    float64 contents, so the digest does not move with a dtype or a stride.
+    float64 contents, so the digest does not move with a dtype or a stride —
+    and at reduced precision, so it does not move with a last-bit difference
+    either. See `_coarse`.
     """
     digest = 0
     for part in content:
-        digest ^= int(matrix_hash(np.asarray(part, dtype=float)), 16)
+        digest ^= int(matrix_hash(_coarse(part)), 16)
     # Two 64-bit words rather than one: `default_rng` takes the whole sequence
     # into the seed, so the run's seed stays legible in the stream's identity.
     return np.random.default_rng([seed, digest % (2**64)])
