@@ -1153,6 +1153,10 @@ def build_artifacts(
     observed = {k: v[take] for k, v in observed.items()}
     expected = {b: {k: v[take] for k, v in cols.items()} for b, cols in expected.items()}
 
+    # Five columns into one seed. `stream` combines them with an exclusive or,
+    # so two identical indicators cancel — a cohort with neither sweeps nor
+    # reverse sweeps seeds as though both columns were absent. That costs the
+    # seed some discrimination and nothing else; see `resample.stream`.
     rng = resample_stream(BOOTSTRAP_SEED, *(observed[k] for k in EVENTS))
     idx = rng.integers(0, len(usable), size=(BOOTSTRAP_B, len(usable)))
 

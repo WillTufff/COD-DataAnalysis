@@ -100,6 +100,24 @@ def stream(seed: int, *content: object) -> np.random.Generator:
     float64 contents, so the digest does not move with a dtype or a stride —
     and at reduced precision, so it does not move with a last-bit difference
     either. See `_coarse`.
+
+    Pass distinct parts. The parts are combined with an exclusive or, which is
+    blind to their order and annihilates any pair of them that is identical:
+    `stream(s, x, x)` seeds as if no content had been given at all. Nothing
+    published reaches that today — the two-part callers pass arrays that cannot
+    be equal to each other — but the caller with room for it is `seriesdyn`,
+    which folds in five 0/1 indicator columns over the same series, and a cohort
+    narrow enough to produce two all-zero indicators would cancel them against
+    each other.
+
+    What that costs is discrimination rather than correctness: the draws stay
+    uniform, the bootstrap stays valid, and the seed stays a function of the
+    contents and the run's seed alone, so the surrogate-key independence this
+    module exists for is not at stake. Two groups that ought to hold separate
+    streams would share one. Combining the parts in sequence instead would close
+    it, at the price of moving every published interval a second time to fix
+    something that has never produced a wrong number — the exact unexplained
+    movement described at the top of this file. Left as is, deliberately.
     """
     digest = 0
     for part in content:
