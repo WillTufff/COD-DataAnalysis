@@ -27,6 +27,7 @@ from .ratings import (
     holdout,
     leakage,
     maplevel,
+    opponent,
     player_rating,
     preflight,
     rapm,
@@ -787,6 +788,71 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             print(f"season_rapm run {ss_run}: {season_art['reason']}")
+
+        # What the box score owed to who was across from it. The plus-minus
+        # already conditions on opposition, so nothing here touches it; what is
+        # adjusted is the per-map rate every published per-player statistic is
+        # built from. Placed after glicko2 because the cheapest rung reads that
+        # rating, and the ladder above it reads nothing but the lineups.
+        progress.stage("opponent_adjust")
+        seasons_by_id, modes_by_id = player_rating.label_context(conn)
+        events_by_id = {
+            cast(int, r[0]): cast(str, r[1])
+            for r in conn.execute("SELECT id, name FROM events").fetchall()
+        }
+        panels = opponent.build_panels(
+            usable_rows,
+            player_rating.build_cohorts(
+                usable_rows, rating_coverage, player_rating.PUBLISHED_VERSION
+            ),
+            opponent.load_ratings(conn),
+        )
+        opponent_art = opponent.artifact(panels, seasons_by_id, modes_by_id, events_by_id)
+        oa_run = open_run(
+            conn,
+            opponent.MODEL,
+            opponent.VERSION,
+            {
+                "feature_set_version": player_rating.PUBLISHED_VERSION,
+                "adopted_rung": opponent_art["stop_rule"]["adopted"],
+                **opponent_art["params"],
+                "bootstrap_seed": opponent.BOOTSTRAP_SEED,
+                "bootstrap_b": opponent.BOOTSTRAP_B,
+            },
+            through,
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (oa_run, "opponent_adjustment", json.dumps(opponent_art)),
+        )
+        adopted = opponent_art["stop_rule"]["adopted"]
+        print(
+            f"opponent_adjust run {oa_run}: {len(opponent_art['by_cohort'])} cohort-features "
+            f"over {len(panels)} cohorts; adopted {adopted}"
+        )
+        for rung, stats in opponent_art["ladder"].items():
+            print(
+                f"  {rung}: median leaderboard move {stats['mean_abs_dz_median']} sd, "
+                f"placebo ratio {stats['placebo_ratio_median']}, reliability gain "
+                f"{stats['reliability_gain_median']} "
+                f"({stats['reliability_gain_positive']}/{stats['reliability_measured']} up)"
+            )
+        blind = opponent_art["coverage"]
+        print(
+            f"  the team rating is blind on {blind['blind_share']:.1%} of lines "
+            f"({blind['opponent_at_prior']} still at the 1500 prior, "
+            f"{blind['opponent_missing']} unrated)"
+        )
+        control = opponent_art["controls"]["positive"]
+        print(
+            f"  positive control recovers a planted opponent effect at "
+            f"r={control['correlation']}, slope {control['slope']}"
+        )
+        for era_name, stats in opponent_art["schedule"].get("by_era", {}).items():
+            print(
+                f"  {era_name}: mean opposition worth {stats['mean_delta_z']} sd per line, "
+                f"95th percentile |{stats['p95_abs_delta_z']}|"
+            )
 
         # What a series is, as opposed to what its teams are: the value of a 1-0
         # lead, how often a race to three sweeps or goes the distance, and

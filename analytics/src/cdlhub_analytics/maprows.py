@@ -187,7 +187,11 @@ SELECT gps.player_id, gps.team_id, g.id AS game_id, se.id AS season_id,
        -- every interval in the rating stack resamples.
        CASE WHEN gps.team_id = s.team1_id THEN g.team1_score - g.team2_score
             WHEN gps.team_id = s.team2_id THEN g.team2_score - g.team1_score
-       END AS margin
+       END AS margin,
+       -- The map's natural key. `games.id` and `series.id` are assigned by the
+       -- loader and renumber on any reload that deletes and recreates rows, so
+       -- anything a resample orders or seeds on reads this instead.
+       s.source_uid || '#' || g.ordinal::text AS map_key
 FROM game_player_stats gps
 JOIN games g       ON g.id = gps.game_id
 JOIN series s      ON s.id = g.series_id
@@ -227,6 +231,10 @@ class MapRow:
     # scores. None on the 27 maps that carry neither; a plus-minus fitted on
     # margin says so rather than reading a missing score as a draw.
     margin: float | None = None
+    # <source_uid>#<ordinal>, the map's natural key. None where the series
+    # carries no source_uid. Anything ordered or seeded by a map reads this
+    # rather than `game_id`, which the loader renumbers.
+    map_key: str | None = None
 
     @property
     def won(self) -> bool | None:
@@ -355,6 +363,7 @@ def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
                 team_hill_time=float(cast(int, r[extras_at + 2]) or 0),
                 weapon=weapon,
                 margin=None if margin is None else float(margin),
+                map_key=cast("str | None", r[extras_at + 6]),
             )
         )
     return out

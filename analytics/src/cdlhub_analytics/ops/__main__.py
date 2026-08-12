@@ -65,6 +65,7 @@ JOBS: list[dict[str, Any]] = [
             "map_elo",
             "preflight",
             "season_rapm",
+            "opponent_adjust",
             "series_dynamics",
             "player_style",
             "insights",
@@ -80,7 +81,16 @@ JOBS: list[dict[str, Any]] = [
         # penalty search is a few dozen Cholesky factorizations of a
         # thousand-column matrix, and the split-half reliability refits every
         # cell twice.
-        "est_seconds": 515,
+        #
+        # Re-measured end to end on 2026-08-11 against a full run: 494 seconds,
+        # of which `opponent_adjust` is 237 — the largest single stage. Its
+        # ladder is ten seconds over 106 cohort-features and the rest is the two
+        # controls, a placebo refitting eight shuffled schedules per rung and a
+        # series bootstrap of two hundred draws over the headline columns. The
+        # rest of the pipeline came in at 257 against the 515 declared here
+        # before, so the figure is taken from the measurement rather than by
+        # adding the new stage to a stale total.
+        "est_seconds": 500,
     },
     {
         "id": "metric_diff",

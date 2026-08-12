@@ -227,6 +227,24 @@ def _em(x: FloatArray, v: FloatArray, tau2_init: float) -> tuple[float, float, i
     return (mu, tau2, iterations, converged)
 
 
+def empirical_bayes(x: FloatArray, v: FloatArray) -> tuple[float, float, FloatArray]:
+    """(μ, τ², posterior means) for observations with known sampling variances.
+
+    The same two-level normal-normal model the composite rating is published as,
+    exposed for callers that already have their own x and v rather than a cohort
+    of `PlayerModeAgg`. Returns τ² at zero where the observations are no more
+    spread than their own noise, which shrinks every one of them to μ — the
+    honest answer for a population that cannot be told apart.
+    """
+    if len(x) < 2:
+        return (float(x.mean()) if len(x) else 0.0, 0.0, np.array(x, dtype=float))
+    spread = float(np.var(x, ddof=1))
+    start = max(spread - float(np.mean(v)), TAU2_START_FLOOR * spread)
+    mu, tau2, _iterations, _converged = _em(x, v, start)
+    shrinkage = tau2 / (tau2 + v)
+    return (mu, tau2, mu + shrinkage * (x - mu))
+
+
 def _fallback(x: FloatArray, maps: FloatArray, reason: str, n_replicated: int) -> CohortModel:
     """The old constant, restated as variance components.
 

@@ -21,7 +21,15 @@ import numpy as np
 
 from . import roundwp, seriesdyn, style
 from .metricdiff import evalpop
-from .ratings import holdout, maplevel, player_rating, significance, simleague, statespace
+from .ratings import (
+    holdout,
+    maplevel,
+    opponent,
+    player_rating,
+    significance,
+    simleague,
+    statespace,
+)
 from .regress import matrix_hash
 
 __all__ = ["SEEDS", "block", "environment", "lock_sha256", "matrix_hash"]
@@ -42,6 +50,7 @@ SEEDS: dict[str, int] = {
     "style": style.SEED,
     "simleague": simleague.SEED,
     "statespace": statespace.BOOTSTRAP_SEED,
+    "opponent": opponent.PLACEBO_SEED,
 }
 
 

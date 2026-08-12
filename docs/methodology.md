@@ -1972,6 +1972,154 @@ So: this is a time axis the record supports at the resolution measured for it, r
 inseparable from a teammate. It is published with its standard error and its penalty share
 on every row, and it is not a ranking of the players on a roster.
 
+### Opponent adjustment: what the box score owed to who was across from it
+
+Until now nothing in the published stack corrected a stat line for the strength of the
+opposition that produced it. A player's cohort z-score treated a line farmed against the
+bottom of an open bracket identically to one earned against the eventual champion, which is
+the first thing anyone says about K/D and the most-cited omission in the game's own analyst
+community.
+
+**What is adjusted, and what is not.** The plus-minus already conditions on opposition — the
+opposing four *are* the −1 columns of its design — so nothing here touches it, and reading
+this section as "the plus-minus was opponent-adjusted" would double-count the correction.
+What is adjusted is the **box score**: the per-map rates every published per-player statistic
+is built from.
+
+The unit is the (numerator, denominator) pair rather than the rate, because the metric layer
+and the rating both sum numerators and denominators across maps and divide once. So one
+observation is a player-map's numerator over its denominator, weighted by that denominator,
+and an adjusted season value is Σ adjusted numerator / Σ denominator. Exposure weighting falls
+out of that rather than being bolted on: a map that ended early carries less of the fit.
+
+#### Four rungs, and the rule for stopping
+
+Rather than pick an implementation, the ladder is fitted and the leaderboard movement reported
+at each rung, in cohort standard deviations. 116 cohort-features over 28 cohorts:
+
+| Rung | What it conditions on | Median move | Placebo ratio | Reliability vs raw |
+|---|---|---|---|---|
+| `team_rating` | the opposing **team's** walk-forward Glicko-2 | 0.012 | — | +0.0001 |
+| `lineup_fe` | the opposing **lineup**, as fixed effects | 0.097 | 1.52 | **−0.0058** |
+| `pooled_context` | the same, pooled, with teammates entering | 0.046 | 1.69 | +0.0037 |
+| `shrunk` | empirical-Bayes shrinkage of the season values | 0.125 | — | — |
+
+Three criteria, declared before anything was fitted. A rung has to **move** the leaderboard
+against the rung below it by at least 0.01 cohort standard deviations; what it moves has to
+stand clear of its own **placebo**, which permutes which lineup each line faced and refits, at
+a ratio of at least 1.5; and it must not leave the statistic less **repeatable**, measured as
+split-half reliability on whole series against the unadjusted number.
+
+**The ladder is not monotone, and the rule does not assume it is.** The two-way rung moves the
+most and comes out *less* repeatable than the raw number — it overshoots, fitting schedule
+noise — and the pooled rung above it repairs exactly that at a better placebo ratio. A
+climb-until-failure rule would have stopped at the cheap rung and discarded the one that works,
+so each rung is judged on its own and the adopted one is the highest that clears all three.
+
+#### The cheap rung is blind where the disparity is largest
+
+Residualizing on a team rating needs the team to have a rating. **8.4% of lines face an
+opponent still sitting on Glicko-2's 1500 prior** — a team that has played nothing the rating
+could have learned from — and a further 300 face a team the rating never reached. That is not
+spread evenly: it is **100% of the 2017 season**, whose only event opens the archive, plus
+3,355 lines of 2019 and 1,600 of 2018.
+
+So the rung the plan proposed as the cheap baseline has nothing to say about precisely the
+era where the competitive spread is widest. The rungs above it estimate opponent quality from
+the lineups themselves and do not have this problem: the CWL era's median correction at the pooled
+rung is roughly nine times what the team rung finds there.
+
+#### Two facts about identification, stated rather than discovered
+
+*The coefficients are not identified; the correction is.* Every row carries one own-player
+column and four opponent columns, so adding a constant to every own effect and subtracting a
+quarter of it from every opponent effect leaves every fitted value unchanged — the same
+minimum-norm shift the plus-minus has, one level down. Measured on a typical cohort, **31 of
+115 columns carry no separable direction at all**. The correction subtracts the opponent
+contribution *centred on its cohort*, and a uniform shift moves every line's contribution by
+the same constant, so it cancels. Coefficients are published under an explicit sum-to-zero
+convention; the correction is invariant to it.
+
+*Kills are zero-sum, so the two blocks are estimated from the same events.* A kill one player
+takes is a death another takes, which makes the correction circular: a player's own lines help
+estimate the opponent effects that player is then adjusted for. The opponent block is therefore
+**cross-fitted over five folds cut on whole series**, so every line is adjusted by effects
+fitted without its own fold. The gap between the in-sample and cross-fitted corrections is
+published per cohort and is not small — for the 2018 Hardpoint slaying columns it is roughly
+half the correction's own spread.
+
+Leave-one-series-out was the first design and is not usable on this record: with 31 columns
+already unidentified, removing a single series unidentifies more, the exact downdate divides
+by a singular matrix, and the correction inflates by a factor of forty. That is a property of
+the schedule, not of the arithmetic — the downdate itself is exact and is tested against
+explicit refits.
+
+#### The controls
+
+**Placebo.** Permuting which lineup each line faced and refitting leaves a correction 1.52×
+smaller than the real one at the two-way rung and 1.69× smaller at the pooled rung. Both clear
+the declared threshold, and neither clears it by much: a real share of the raw two-way
+correction is the design fitting a schedule that carries no information. This is the single
+most important number in the section, because without it the two-way rung's much larger
+movement reads as a much larger finding.
+
+**Positive control.** A synthetic league with known per-player offensive and defensive effects
+and a randomly paired schedule: the rung recovers the planted opponent effect at *r* = 0.993
+with a slope of 1.00. The machinery is correct, and the limits on real data are the schedule's
+rather than the estimator's.
+
+**Shape.** Three assumptions the cheap rung makes were tested rather than asserted. Against a
+four-bin step function of the same rating the straight line loses nothing (weighted residual
+ratio 1.001 at the median, 1.007 at worst), so linearity holds. Map duration adds nothing the
+denominator has not already absorbed. And the slope does not differ between players above and
+below their cohort's median — median |t| of 0.77 — so one additive correction is the right
+object rather than a role- or level-dependent one.
+
+**Connectivity.** Every one of the 28 cohorts' opponent graphs is a single connected component
+with no bridges, so no correction anywhere in this section compares two players the schedule
+never linked. A null, and worth stating: it was a live risk in the open brackets.
+
+#### The size of the correction
+
+Per line, opposition is worth a great deal: its standard deviation is **0.500 cohort standard
+deviations in the CDL era and 0.497 in the CWL era**, and the 95th percentile is above a full
+standard deviation in both. A map against the top of the table and a map against the bottom
+are genuinely different maps, and every bootstrap interval — 200 draws resampling whole
+series, over the headline slaying columns of every cohort — excludes the 0.01 threshold. The
+correction is real and it is measurable.
+
+**Over a season it very nearly cancels.** Averaged across a player's schedule the mean
+correction is **−0.00003 sd for the CDL era and +0.00062 sd for the CWL era**: zero to three
+decimal places on both sides of the seam. Schedules are close enough to balanced that
+opposition strength averages out of a season total almost exactly.
+
+#### Was any CWL-era open-bracket reputation built on soft fields?
+
+The gate for this phase names that question, and the answer is **no**.
+
+Rather than take an event's label, the amount the adjustment removes from a line *is* what the
+opposition was worth on it, so averaging that over an event measures softness directly. Over
+every event with at least 200 lines, the largest average is **0.114 cohort standard
+deviations** — and the softest fields are not the CWL open brackets at all. They are CDL
+events: `CDL Major 1 Qualifiers` at −0.114, `CDL Major 4` at +0.112, `CDL Major 1` at +0.109.
+The highest-ranking CWL entry is `CWL Pro League 2018 Relegation` at +0.095, which is a
+relegation bracket rather than an open one.
+
+At the player level the same holds. The most schedule-affected player-season in the archive is
+worth **0.25 cohort standard deviations**, over 107 lines, and the rest of that list sits near
+0.18. Several entries are four players from one roster carrying an identical schedule, which
+is what a team-level effect looks like from the player side.
+
+So the widely-assumed asymmetry is not in this record. Open brackets do contain lopsided maps
+— that shows up clearly in the per-line spread — but a player's *season* is not meaningfully
+inflated by them, because nobody plays enough of a season against the bottom of a bracket for
+it to survive averaging. Published as a null, which is what it is.
+
+**What this does not license.** The correction is not promoted into the published per-player
+statistics here; the site continues to show unadjusted numbers, and changing that is a
+lockstep change across two languages that belongs with the publishing work. What is stored is
+the ladder, its controls and its verdict, as a versioned run.
+
 ## Tier 2b: Series dynamics (shipped)
 
 A Call of Duty series is a race to three maps, and much of what gets said about one is a

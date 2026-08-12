@@ -455,3 +455,82 @@ def test_the_style_basis_is_the_same_cloud_whatever_order_it_is_loaded_in() -> N
         s.player_id: backward.components.scores[i, 0] for i, s in enumerate(backward.basis.subjects)
     }
     assert all(math.isclose(mine[p], theirs[p], abs_tol=1e-9) for p in mine)
+
+
+# --------------------------------------------------- the opponent adjustment
+
+
+def _opponent_panel(*, offset: int) -> Any:
+    """A small cohort whose loader-assigned ids are shifted by `offset`.
+
+    The map keys and every number are identical between two calls; only the
+    surrogate ids move, which is exactly what a reload does.
+    """
+    from cdlhub_analytics.ratings import opponent as op
+
+    lines = []
+    rng = np.random.default_rng(4)
+    for game in range(60):
+        picked = rng.permutation(16)[:8]
+        left, right = picked[:4], picked[4:]
+        for own, other in ((left, right), (right, left)):
+            for player in own:
+                value = float(10.0 + player - other.sum() / 8.0 + rng.normal(0, 1))
+                lines.append(
+                    op.Line(
+                        player_id=int(player),
+                        team_id=0 if own is left else 1,
+                        game_id=game + offset,
+                        series_id=game // 3 + offset,
+                        event_id=offset,
+                        season_id=0,
+                        mode_id=0,
+                        duration_s=600.0,
+                        # The natural key does not move with the offset.
+                        map_key=f"evt-{game // 3:03d}#{game % 3 + 1}",
+                        opponents=tuple(sorted(int(p) for p in other)),
+                        teammates=tuple(sorted(int(p) for p in own if p != player)),
+                        opp_rating=1500.0 + float(other.sum()),
+                        values={"stat": (value, 1.0)},
+                    )
+                )
+    return op.Panel(
+        season_id=0,
+        mode_id=0,
+        mode_slug="synthetic",
+        title="synthetic",
+        side=4,
+        lines=tuple(lines),
+        features=(),
+    )
+
+
+def test_the_placebo_does_not_move_when_the_loader_renumbers() -> None:
+    from cdlhub_analytics.ratings import opponent as op
+
+    results = []
+    for offset in (0, 9_000):
+        panel = _opponent_panel(offset=offset)
+        columns = op.build_columns(panel, teammates=False)
+        results.append(op.placebo(panel, "stat", columns, op.design(panel, columns), draws=4))
+    assert results[0] == results[1]
+
+
+def test_the_correction_interval_does_not_move_when_the_loader_renumbers() -> None:
+    from cdlhub_analytics.ratings import opponent as op
+
+    results = []
+    for offset in (0, 12_345):
+        panel = _opponent_panel(offset=offset)
+        columns = op.build_columns(panel, teammates=False)
+        results.append(
+            op.bootstrap_correction(panel, "stat", columns, op.design(panel, columns), draws=25)
+        )
+    assert results[0] == results[1]
+
+
+def test_the_split_halves_do_not_move_when_the_loader_renumbers() -> None:
+    from cdlhub_analytics.ratings import opponent as op
+
+    halves = [op.split_halves(_opponent_panel(offset=offset)) for offset in (0, 777)]
+    assert halves[0] == halves[1]
