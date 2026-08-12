@@ -66,6 +66,8 @@ JOBS: list[dict[str, Any]] = [
             "preflight",
             "season_rapm",
             "opponent_adjust",
+            "openskill",
+            "evaluate",
             "series_dynamics",
             "player_style",
             "insights",
@@ -90,7 +92,14 @@ JOBS: list[dict[str, Any]] = [
         # rest of the pipeline came in at 257 against the 515 declared here
         # before, so the figure is taken from the measurement rather than by
         # adding the new stage to a stale total.
-        "est_seconds": 500,
+        #
+        # Re-measured again on 2026-08-11 with `openskill` and `evaluate` added:
+        # 959 seconds end to end, so the two of them are 465 by difference — the
+        # largest addition the pipeline has taken. `evaluate` carries most of it:
+        # the primary test bootstraps 2,000 draws twice, clustered and not, and
+        # the placebo suite refits the plus-minus eight times on shuffled sides
+        # and once more on a planted duplicate column.
+        "est_seconds": 960,
     },
     {
         "id": "metric_diff",

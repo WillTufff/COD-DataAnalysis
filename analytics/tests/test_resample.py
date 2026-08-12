@@ -534,3 +534,88 @@ def test_the_split_halves_do_not_move_when_the_loader_renumbers() -> None:
 
     halves = [op.split_halves(_opponent_panel(offset=offset)) for offset in (0, 777)]
     assert halves[0] == halves[1]
+
+
+# ----------------------------------------------- the evaluation harness (PE)
+
+
+def _eval_panel(offset: int = 0, n: int = 240) -> list[Any]:
+    """Transitions for two-per-player clusters, with the player ids shifted."""
+    from cdlhub_analytics.ratings.evaluate import Observation
+
+    rng = np.random.default_rng(3)
+    out = []
+    for i in range(n):
+        kd = float(rng.standard_normal())
+        out.append(
+            Observation(
+                player_id=offset + 1 + i // 2,
+                season_a=1,
+                season_b=2,
+                title_a="WWII",
+                year_a=2018,
+                composite=0.4 * kd + float(rng.standard_normal()),
+                kd=kd,
+                skill=0.2 * kd + float(rng.standard_normal()),
+                kd_next=0.6 * kd + 0.8 * float(rng.standard_normal()),
+                composite_next=kd,
+                moved_team=False,
+                rookie=True,
+                events_a=frozenset({1}),
+            )
+        )
+    return out
+
+
+def test_the_persistence_clusters_do_not_move_when_players_are_renumbered() -> None:
+    from cdlhub_analytics.ratings import evaluate as ev
+
+    results = [
+        ev._persistence_stats(ev._ordered(_eval_panel(offset=offset)), by_cluster=True)
+        for offset in (0, 5_000)
+    ]
+    assert results[0] == results[1]
+
+
+def test_the_persistence_clusters_do_not_move_when_the_rows_arrive_reordered() -> None:
+    from cdlhub_analytics.ratings import evaluate as ev
+
+    panel = _eval_panel()
+    shuffled = [panel[i] for i in np.random.default_rng(11).permutation(len(panel))]
+    before = ev._persistence_stats(ev._ordered(panel), by_cluster=True)
+    after = ev._persistence_stats(ev._ordered(shuffled), by_cluster=True)
+    assert before == after
+
+
+def test_the_openskill_pass_does_not_move_when_the_games_are_renumbered() -> None:
+    """The walk-forward is ordered by `map_key`, never by the loader's game id."""
+    from cdlhub_analytics.maprows import MapRow as Row
+    from cdlhub_analytics.ratings import skillbase
+
+    rows: list[Row] = []
+    for g in range(120):
+        winner = 100 if g % 3 else 200
+        for team_id, members in ((100, (1, 2, 3, 4)), (200, (5, 6, 7, 8))):
+            for pid in members:
+                rows.append(
+                    Row(
+                        player_id=pid,
+                        team_id=team_id,
+                        game_id=g + 1,
+                        series_id=g + 1,
+                        season_id=1,
+                        mode_id=1,
+                        mode_slug="hardpoint",
+                        title="WWII",
+                        event_id=1,
+                        played_at=date(2018, 1, 1) + timedelta(days=g),
+                        duration_s=600.0,
+                        winner_team_id=winner,
+                        values={"kills": 20.0, "deaths": 20.0},
+                        team_kills=80.0,
+                        team_hill_time=100.0,
+                        map_key=f"s{g + 1:04d}#1",
+                    )
+                )
+    shifted = [Row(**{**r.__dict__, "game_id": r.game_id + 9_000}) for r in rows]
+    assert skillbase.fit_walk_forward(rows).final == skillbase.fit_walk_forward(shifted).final

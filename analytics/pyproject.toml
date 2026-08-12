@@ -15,6 +15,11 @@ dependencies = [
     # censored margin is defined by, and the simplex the two penalties are tuned
     # on. Used only through ratings/numerics.py.
     "scipy>=1.18.0",
+    # PE: the Plackett-Luce online player rating the persistence gate is declared
+    # against — a baseline that knows who was on the server and nothing else.
+    # MIT. Ships py.typed, so it needs no mypy override; used only through
+    # ratings/skillbase.py.
+    "openskill>=6.2.0",
 ]
 
 [dependency-groups]

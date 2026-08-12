@@ -22,6 +22,7 @@ import numpy as np
 from . import roundwp, seriesdyn, style
 from .metricdiff import evalpop
 from .ratings import (
+    evalspec,
     holdout,
     maplevel,
     opponent,
@@ -51,6 +52,7 @@ SEEDS: dict[str, int] = {
     "simleague": simleague.SEED,
     "statespace": statespace.BOOTSTRAP_SEED,
     "opponent": opponent.PLACEBO_SEED,
+    "evalspec": evalspec.BOOTSTRAP_SEED,
 }
 
 

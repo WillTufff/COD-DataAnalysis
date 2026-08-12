@@ -56,6 +56,22 @@ def test_a_list_of_identified_elements_is_keyed_by_identity_not_position() -> No
     assert "art/rows/key=kills/v" in before
 
 
+def test_two_elements_alike_in_one_key_field_are_kept_apart_by_the_others() -> None:
+    entries = dict(
+        snapshot.flatten(
+            {
+                "rows": [
+                    {"model": "player_rating", "artifact": "rating_persistence", "v": 1.0},
+                    {"model": "player_rating", "artifact": "roster_forecast", "v": 2.0},
+                ]
+            },
+            "art",
+        )
+    )
+    assert entries["art/rows/model=player_rating+artifact=rating_persistence/v"] == 1.0
+    assert entries["art/rows/model=player_rating+artifact=roster_forecast/v"] == 2.0
+
+
 def test_a_list_of_bare_values_is_keyed_by_position_and_reports_its_length() -> None:
     entries = dict(snapshot.flatten({"lo_hi": [0.1, 0.9]}, "art"))
     assert entries == {"art/lo_hi/len": 2.0, "art/lo_hi/0": 0.1, "art/lo_hi/1": 0.9}

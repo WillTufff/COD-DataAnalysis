@@ -22,6 +22,8 @@ from .metricdiff import run as metricdiff
 from .ratings import (
     admission,
     comparison,
+    evalspec,
+    evaluate,
     fit,
     hierarchical,
     holdout,
@@ -33,6 +35,7 @@ from .ratings import (
     rapm,
     significance,
     simleague,
+    skillbase,
     statespace,
     sweep,
     winprob,
@@ -854,6 +857,110 @@ def main(argv: list[str] | None = None) -> int:
                 f"95th percentile |{stats['p95_abs_delta_z']}|"
             )
 
+        # The baseline the persistence gate is declared against: an online
+        # player rating that knows who was on the server and nothing else. It
+        # runs here as a stage with its own run, artifact and backtest row
+        # rather than as a script, because a baseline in a hard gate that
+        # cannot be reproduced makes the gate unenforceable.
+        progress.stage("openskill")
+        os_fit = skillbase.fit_walk_forward(usable_rows)
+        os_run = open_run(
+            conn,
+            skillbase.MODEL,
+            skillbase.VERSION,
+            {
+                "mu": skillbase.MU,
+                "sigma": skillbase.SIGMA,
+                "min_maps_season": skillbase.MIN_MAPS_SEASON,
+                "model": "plackett_luce",
+            },
+            through,
+        )
+        player_names = {
+            cast(int, r[0]): cast(str, r[1])
+            for r in conn.execute("SELECT id, handle FROM players").fetchall()
+        }
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (os_run, "openskill_baseline", json.dumps(skillbase.artifact(os_fit, player_names))),
+        )
+        os_report = backtest.evaluate(list(os_fit.predictions.values()))
+        backtest.write(conn, os_run, os_report)
+        print(
+            f"openskill run {os_run}: {os_fit.n_maps} maps, {os_fit.n_players} players, "
+            f"{len(os_fit.season_skill)} published player-seasons; map-level walk-forward "
+            f"brier {os_report.brier:.5f}, accuracy {os_report.accuracy:.4f}"
+        )
+
+        # The harness that scores all of it, and the one part of this pipeline
+        # that was built before the thing it judges. Its own gate comes first:
+        # an independent recomputation of the published persistence test, which
+        # nothing below is read until it matches.
+        progress.stage("evaluate")
+        eval_arts = evaluate.artifacts(
+            conn,
+            pr_run,
+            era_run,
+            ss_run,
+            usable_rows,
+            os_fit,
+            persist,
+            forecast,
+            admitted_games,
+        )
+        ev_run = open_run(
+            conn,
+            evalspec.MODEL,
+            evalspec.VERSION,
+            {
+                "manifest_sha256": evalspec.sha256(),
+                "primary_test": evalspec.PRIMARY.name,
+                "scope_permitted_forward": evalspec.SCOPE,
+                "bootstrap_b": evalspec.BOOTSTRAP_B,
+                "bootstrap_seed": evalspec.BOOTSTRAP_SEED,
+                "openskill_run_id": os_run,
+                "season_rapm_run_id": ss_run,
+                "rating_run_id": pr_run,
+                "era_run_id": era_run,
+            },
+            through,
+        )
+        for name, payload in eval_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (ev_run, name, json.dumps(payload)),
+            )
+        repro = eval_arts["evaluation_reproduction"]
+        print(
+            f"evaluate run {ev_run}: reproduction "
+            + ("recovers" if repro["reproduces"] else "FAILS to recover")
+            + f" the published persistence test ({repro['n_mismatched']} of "
+            f"{len(repro['recomputed'])} cells off); {repro['n_page_mismatched']} of "
+            f"{len(repro['against_the_page'])} published figures disagree with /methodology"
+        )
+        print(f"  {evaluate.headline(eval_arts)}")
+        power = eval_arts["evaluation_primary"].get("power", {})
+        if power:
+            unit = eval_arts["evaluation_primary"]["resampling"]["unit"]
+            print(
+                f"  detectable, after a design effect of {power['design_effect']} from "
+                f"clustering on the {unit}: "
+                + ", ".join(
+                    f"{name} {block['mde80_clustered']} (from {block['mde80_independent']} "
+                    f"at agreement {block['predictor_agreement']})"
+                    for name, block in power["by_predictor"].items()
+                )
+            )
+        pla = eval_arts["evaluation_placebo"]
+        print(
+            f"  placebos: {pla['n_run']} run, {pla['n_failed']} failed; "
+            + ", ".join(
+                f"{name} {'ok' if block.get('passes') else 'FAILED'}"
+                for name, block in pla["placebos"].items()
+                if block.get("available")
+            )
+        )
+
         # What a series is, as opposed to what its teams are: the value of a 1-0
         # lead, how often a race to three sweeps or goes the distance, and
         # whether any of it is memory rather than the two teams being further
@@ -982,6 +1089,8 @@ def main(argv: list[str] | None = None) -> int:
                 "player_rating": list(rating_runs.values()),
                 "rapm_preflight": [pc_run],
                 statespace.MODEL: [ss_run],
+                skillbase.MODEL: [os_run],
+                evalspec.MODEL: [ev_run],
                 "winprob": [wp_run],
                 maplevel.MODEL: [map_run],
                 seriesdyn.MODEL: [sd_run],

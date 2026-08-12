@@ -56,6 +56,7 @@ LIST_KEYS = (
     "basis",
     "axis",
     "model",
+    "artifact",
     "spec",
     "term",
     "stat",

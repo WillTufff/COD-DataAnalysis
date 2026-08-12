@@ -34,7 +34,7 @@ from . import metrics, seriesdyn, style
 from .db import connect
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
-from .ratings import maplevel, player_rating, statespace
+from .ratings import evalspec, maplevel, player_rating, statespace
 from .style import marker_column
 from .writeback import latest_run_id
 
@@ -250,6 +250,65 @@ def season_rapm_rows(conn: psycopg.Connection[Any]) -> list[tuple[str, str, int,
     return [(str(r[0]), str(r[1]), int(cast(int, r[2])), float(cast(float, r[3]))) for r in rows]
 
 
+def evaluation_failures(
+    manifest: dict[str, Any],
+    repro: dict[str, Any],
+    primary: dict[str, Any],
+    secondary: dict[str, Any],
+    placebos: dict[str, Any],
+) -> list[str]:
+    """The harness, checked against the declaration it was supposed to be held to.
+
+    Five ways a gate stops being one, none of which raise on their own. The
+    manifest can be edited after the fact so the primary test becomes whichever
+    one the model passed. The harness can stop recovering the numbers already
+    published, at which point it is measuring something else. The threshold can
+    go missing, and a comparison with no declared minimum detectable effect can
+    be failed by a model that works. A forward test can read a coefficient
+    family that has already seen the season it is predicting. And a placebo can
+    start reporting structure in shuffled data while every headline number still
+    looks fine.
+    """
+    bad = []
+    if manifest.get("sha256") != manifest.get("pinned_sha256"):
+        bad.append(
+            "the evaluation manifest has changed since it was pinned: a test declared after "
+            "the fact is not a test declared in advance"
+        )
+    if not repro.get("reproduces"):
+        off = [c["what"] for c in repro.get("recomputed", []) if not c["matches"]]
+        bad.append(
+            f"the harness does not recover the published persistence test ({', '.join(off)})"
+        )
+    for check in repro.get("against_the_page", []):
+        if not check["matches"]:
+            bad.append(
+                f"published figure drifted from /methodology — {check['what']}: "
+                f"run {check['run']}, page {check['page']}"
+            )
+    if not primary.get("available"):
+        bad.append(f"the primary test did not run: {primary.get('reason')}")
+    else:
+        computed = primary.get("power", {}).get("by_predictor", {})
+        missing = [n for n, b in computed.items() if b.get("mde80_clustered") is None]
+        if not computed or missing:
+            bad.append(
+                "the primary test published no minimum detectable effect for "
+                + (", ".join(missing) if missing else "any predictor")
+            )
+
+    read = secondary.get("season_plusminus_persistence", {}).get("scope_read")
+    if read != statespace.FILTERED:
+        bad.append(
+            f"a forward test read {read!r} coefficients, and only "
+            f"{statespace.FILTERED!r} has not seen the season it predicts"
+        )
+    for name, block in placebos.get("placebos", {}).items():
+        if block.get("available") and not block.get("passes"):
+            bad.append(f"placebo '{name}' found structure in data that has none")
+    return bad
+
+
 def harness_failures(report: dict[str, Any], models: set[str]) -> list[str]:
     """A run set with no diff report is a release nobody measured.
 
@@ -361,6 +420,16 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             "season plus-minus",
             season_rapm_failures(
                 artifact(conn, statespace.MODEL, "rapm_season"), season_rapm_rows(conn)
+            ),
+        ),
+        (
+            "evaluation harness",
+            evaluation_failures(
+                artifact(conn, evalspec.MODEL, "evaluation_manifest"),
+                artifact(conn, evalspec.MODEL, "evaluation_reproduction"),
+                artifact(conn, evalspec.MODEL, "evaluation_primary"),
+                artifact(conn, evalspec.MODEL, "evaluation_secondary"),
+                artifact(conn, evalspec.MODEL, "evaluation_placebo"),
             ),
         ),
         (

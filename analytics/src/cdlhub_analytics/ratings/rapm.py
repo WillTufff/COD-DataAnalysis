@@ -339,7 +339,7 @@ def _teammate_concentration(rows: Sequence[MapRow]) -> dict[int, float]:
     return out
 
 
-def _standard_errors(x: FloatArray, p: FloatArray, l2: float) -> FloatArray:
+def standard_errors(x: FloatArray, p: FloatArray, l2: float) -> FloatArray:
     """Per-coefficient SE from the penalized Hessian.
 
     The covariance of a ridge fit is (X'WX + λI)^-1, and its diagonal is what a
@@ -385,7 +385,7 @@ def fit(
     # Fitted probabilities at the solution, for the Hessian the SEs come from.
     logit = result.intercept + x @ coefs
     p = 1.0 / (1.0 + np.exp(-np.clip(logit, -35.0, 35.0)))
-    ses = _standard_errors(x, p, l2)
+    ses = standard_errors(x, p, l2)
 
     maps_played = Counter(r.player_id for r in rows if r.winner_team_id is not None)
     concentration = _teammate_concentration(rows)

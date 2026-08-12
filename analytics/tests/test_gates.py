@@ -15,6 +15,7 @@ from cdlhub_analytics.gates import (
     PUBLISHED_BASES,
     basis_failures,
     cohort_failures,
+    evaluation_failures,
     mode_naming_failures,
     rotation_failures,
     season_rapm_failures,
@@ -230,3 +231,101 @@ def test_an_era_coefficient_that_differs_between_its_seasons_fails() -> None:
     rows[1] = ("smoothed", "era", 1, 0.05)
     bad = season_rapm_failures(_season_payload(), rows)
     assert bad and "separate estimates" in bad[0]
+
+
+# --------------------------------------------------------- evaluation harness
+
+
+def _manifest(**over: object) -> dict[str, Any]:
+    return {"sha256": "abc", "pinned_sha256": "abc", **over}
+
+
+def _repro(**over: object) -> dict[str, Any]:
+    return {
+        "reproduces": True,
+        "recomputed": [{"what": "cells.kd->kd.r", "matches": True}],
+        "against_the_page": [
+            {"what": "persistence transitions", "run": 561, "page": 561, "matches": True}
+        ],
+        **over,
+    }
+
+
+def _primary(**over: object) -> dict[str, Any]:
+    return {
+        "available": True,
+        "power": {"by_predictor": {"composite": {"mde80_clustered": 0.09}}},
+        **over,
+    }
+
+
+def _secondary(scope: str = "filtered") -> dict[str, Any]:
+    return {"season_plusminus_persistence": {"scope_read": scope}}
+
+
+def _placebos(passes: bool = True) -> dict[str, Any]:
+    return {"placebos": {"shuffled_sides": {"available": True, "passes": passes}}}
+
+
+def test_a_harness_held_to_its_declaration_passes() -> None:
+    assert evaluation_failures(_manifest(), _repro(), _primary(), _secondary(), _placebos()) == []
+
+
+def test_a_manifest_edited_after_the_fact_fails() -> None:
+    """A test declared after the model is not a test declared in advance."""
+    bad = evaluation_failures(
+        _manifest(sha256="moved"), _repro(), _primary(), _secondary(), _placebos()
+    )
+    assert bad and "pinned" in bad[0]
+
+
+def test_a_harness_that_cannot_recover_the_published_numbers_fails() -> None:
+    bad = evaluation_failures(
+        _manifest(),
+        _repro(reproduces=False, recomputed=[{"what": "contrasts.kd.delta_r", "matches": False}]),
+        _primary(),
+        _secondary(),
+        _placebos(),
+    )
+    assert bad and "contrasts.kd.delta_r" in bad[0]
+
+
+def test_a_published_figure_that_drifted_from_the_page_fails() -> None:
+    """The defect this gate was written for: the page said 541, the run said 561."""
+    bad = evaluation_failures(
+        _manifest(),
+        _repro(
+            against_the_page=[
+                {"what": "persistence transitions", "run": 561, "page": 541, "matches": False}
+            ]
+        ),
+        _primary(),
+        _secondary(),
+        _placebos(),
+    )
+    assert bad and "541" in bad[0]
+
+
+def test_a_primary_test_with_no_declared_threshold_fails() -> None:
+    bad = evaluation_failures(
+        _manifest(),
+        _repro(),
+        _primary(power={"by_predictor": {"composite": {"mde80_clustered": None}}}),
+        _secondary(),
+        _placebos(),
+    )
+    assert bad and "minimum detectable effect" in bad[0]
+
+
+def test_a_forward_test_reading_the_smoothed_family_fails() -> None:
+    bad = evaluation_failures(
+        _manifest(), _repro(), _primary(), _secondary(scope="smoothed"), _placebos()
+    )
+    assert bad and "smoothed" in bad[0]
+
+
+def test_a_placebo_finding_structure_in_shuffled_data_fails() -> None:
+    bad = evaluation_failures(
+        _manifest(), _repro(), _primary(), _secondary(), _placebos(passes=False)
+    )
+    assert bad and "shuffled_sides" in bad[0]

@@ -1037,13 +1037,13 @@ re-estimation rather than a re-ranking.
 new estimator and the old one are both run through the roster forecast in
 [two tests the rating can fail](#two-tests-the-rating-can-fail): identical maps,
 identical weights, identical prefixes, differing only in the step being tested. The
-posterior wins by −0.00041 of Brier [−0.00090, +0.00001] over 9,030 maps, and that
-interval now touches zero. On the CWL archive alone the same contrast excluded it, at
-−0.00112 [−0.00220, −0.00010]; the honest reading of the larger sample is that the two
-estimators are indistinguishable out of sample, not that the posterior wins by a little.
-Pick rates are a coin flip apart, 56.1% against 56.2%. The case for the change rests on
-the specification and the intervals, and the forecast says it costs nothing — which is
-still what it had to say, and is now all it says.
+posterior wins by −0.00095 of Brier [−0.00180, −0.00010] over 9,257 maps, an interval that
+excludes zero and a gap that sits under the 0.00126 this sample can resolve. On the CWL
+archive alone the same contrast was −0.00112 [−0.00220, −0.00010]. The honest reading is
+that the posterior does not cost anything out of sample and may be worth a little, at a
+size this many maps would usually miss. Pick rates are a coin flip apart, 56.6% against
+56.6%. The case for the change rests on the specification and the intervals, and the
+forecast says it costs nothing — which is what it had to say.
 
 (μ, τ²) are fitted by EM — closed form per step, monotone in the marginal likelihood,
 and unable to take τ² negative, which was the old moment estimator's one failure mode.
@@ -1545,87 +1545,93 @@ eight maps on each side, season *N* predicts season *N+1*. Two predictors — th
 rating and the era-adjusted K/D z — against two targets, the same pair one season later.
 The 2×2 is deliberate: predicting next season's rating flatters the rating, predicting
 next season's K/D flatters K/D, so the off-diagonal is where the question actually lives.
-541 transitions across nine season boundaries, from 96 (IW → WWII) down to 39 (BOCW → VG),
+561 transitions across nine season boundaries, from 100 (IW → WWII) down to 41 (BOCW → VG),
 Pearson *r* with a 2,000-draw bootstrap over players.
 
 | Predictor (season *N*) | → next rating | → next K/D z |
 |---|---|---|
-| Composite rating | 0.32 [0.24, 0.41] | 0.30 [0.22, 0.38] |
-| Era-adjusted K/D z | 0.31 [0.23, 0.38] | **0.56** [0.50, 0.63] |
+| Composite rating | 0.47 [0.40, 0.53] | 0.34 [0.26, 0.41] |
+| Era-adjusted K/D z | 0.41 [0.34, 0.48] | **0.56** [0.50, 0.62] |
 
 The contrasts are paired — the same resampled players scoring both predictors, because
 comparing two intervals that happen to overlap answers nothing. Predicting next season's
-K/D, Δ*r* = −0.26 [−0.34, −0.18], which excludes zero: **K/D z predicts a player's future
+K/D, Δ*r* = −0.23 [−0.29, −0.16], which excludes zero: **K/D z predicts a player's future
 K/D better than the composite rating built on top of it, decisively.** That is the same
-verdict this test returned on the CWL archive, at the same effect size, on two and a half
-times the sample.
+verdict this test returned on the CWL archive and on every population since, in the same
+direction and at a similar size.
 
 The other column has moved, and the earlier version of this page overstated it. On 216
 CWL-era transitions the rating also lost at predicting *its own next value*, by Δ*r* =
 −0.08 with an interval spanning zero, and the summary here read "raw K/D z is the better
-predictor in both columns". On 541 transitions the sign reverses: Δ*r* = +0.02
-[−0.07, +0.10], still spanning zero. The correct statement is the one that was true of
+predictor in both columns". On 561 transitions the sign reverses: Δ*r* = +0.06
+[−0.01, +0.13], still spanning zero. The correct statement is the one that was true of
 both samples — the two predictors are indistinguishable at forecasting next season's
 rating — and "better in both columns" was reading a point estimate inside its own
 interval. Only the K/D column separates, and it separates in the direction that is bad
 news for the rating.
 
+**These figures moved, and for two years nothing was checking that this page still matched
+the run.** Until [the evaluation harness](#the-evaluation-harness-what-a-rating-has-to-beat-declared-in-advance)
+below was built, this section carried 541
+transitions and Δ*r* = −0.26 from a run that predates the identity merges, the plus-minus
+lineup rule and the fourth feature set — while the pre-flight section further down this
+same page already quoted the current 561. Every verdict here survived the refresh; the
+magnitudes did not, and the largest single move is the rating predicting its own next
+value, 0.32 to 0.47. The numbers on this page are now pinned in the harness and a run
+that disagrees with them fails the release gate.
+
 **Does a roster predict future map wins?** Walk-forward by event within each season: at
 every event the whole rating pipeline is refit on maps from earlier events only, each
 team's players are averaged into a roster strength for that map's mode, and the
 differential becomes a win probability through a logistic also fit on those earlier maps.
-Nothing from the event being scored enters. 9,030 maps survive on which every predictor
-has an opinion; 1,796 are skipped for having no history and 761 for having no identifiable
+Nothing from the event being scored enters. 9,257 maps survive on which every predictor
+has an opinion; 1,796 are skipped for having no history and 534 for having no identifiable
 roster.
 
 | Predictor | Brier | Log loss | Accuracy | vs. coin flip |
 |---|---|---|---|---|
-| **RAPM, rating-centered** | **0.24517** | 0.6932 | 59.1% [58.1, 60.2] | **−0.0048** [−0.0086, −0.0009] |
-| RAPM | 0.24592 | 0.6943 | 59.0% [58.0, 60.1] | **−0.0041** [−0.0079, −0.0001] |
-| Roster composite rating | 0.24701 | 0.6889 | 56.1% [55.1, 57.1] | **−0.0030** [−0.0055, −0.0004] |
-| Same rating, z-and-shrink | 0.24742 | 0.6899 | 56.2% [55.2, 57.2] | −0.0026 [−0.0051, 0.0000] |
-| Glicko-2 team rating | 0.25085 | 0.7103 | **59.6%** [58.6, 60.6] | +0.0009 [−0.0033, +0.0053] |
-| Roster K/D | 0.25148 | 0.7024 | 56.6% [55.6, 57.6] | +0.0015 [−0.0015, +0.0044] |
+| **RAPM** | **0.24609** | 0.6946 | 59.0% [57.9, 60.0] | **−0.0039** [−0.0077, −0.0002] |
+| RAPM, rating-centered | 0.24675 | 0.6968 | 59.2% [58.3, 60.2] | −0.0033 [−0.0069, +0.0004] |
+| Roster composite rating | 0.24780 | 0.6916 | 56.6% [55.6, 57.6] | −0.0022 [−0.0052, +0.0009] |
+| Same rating, z-and-shrink | 0.24875 | 0.6946 | 56.6% [55.6, 57.6] | −0.0013 [−0.0043, +0.0018] |
+| Glicko-2 team rating | 0.25076 | 0.7099 | **59.6%** [58.6, 60.6] | +0.0008 [−0.0035, +0.0049] |
+| Roster K/D | 0.25156 | 0.7032 | 56.5% [55.6, 57.5] | +0.0016 [−0.0015, +0.0046] |
 | Coin flip at 0.5 | 0.25000 | 0.6931 | — | — |
 
-**Three of these now beat the coin flip on an interval that excludes zero, and on the CWL
-archive alone none did.** That is the most substantive change on this page. The rating's
-gap against always guessing 0.5 is −0.0030 [−0.0055, −0.0004], where on 3,760 CWL maps it
-was −0.0019 with an interval spanning zero and the correct reading was "indistinguishable
-from no model at all". It is no longer that.
+**One of these beats the coin flip on an interval that excludes zero — plain RAPM, at
+−0.0039 [−0.0077, −0.0002].** An earlier version of this page reported three, on a
+smaller population; on the current one the composite rating's own gap is −0.0022
+[−0.0052, +0.0009] and spans zero, which is the reading the CWL archive gave before it and
+the more conservative of the two.
 
-The qualifier survives, and it is the same one as everywhere else here: none of the three
-clears its own 80%-power threshold. The rating's −0.0030 sits under the 0.0037 that 9,030
-maps can resolve, RAPM's −0.0041 under 0.0054, and the blend's −0.0048 under 0.0053. Every
-one of them is a gap the interval catches and the power criterion says would usually be
-missed, which is the shape of an effect that is real and small. "Roster strength forecasts
-map wins slightly better than a coin flip" is what this table now supports. "By enough to
-be worth acting on" is not.
+The qualifier is the same one as everywhere else here: the gap that resolves does not clear
+its own 80%-power threshold. RAPM's −0.0039 sits under the 0.0053 that 9,257 maps can
+resolve. That is the shape of an effect that is real and small. "Roster strength forecasts
+map wins slightly better than a coin flip" is what this table supports. "By enough to be
+worth acting on" is not.
 
 One contrast does clear both tests, and it is the one that most directly answers what the
-composite rating is for: **against roster K/D, the rating wins by −0.0045
-[−0.0067, −0.0021], against a threshold of 0.0035.** On the CWL archive that contrast was
+composite rating is for: **against roster K/D, the rating wins by −0.0038
+[−0.0058, −0.0017], against a threshold of 0.0029.** On the CWL archive that contrast was
 −0.0034 [−0.0072, +0.0003] and unresolved. The rating built on top of the box score does
 forecast map wins better than the box score's own headline number — which is notable
 precisely because [the persistence test above](#two-tests-the-rating-can-fail) says the
 opposite about forecasting a *player*.
 
-Against Glicko-2 the rating is −0.0039 [−0.0078, 0.0000], with the upper bound landing
-exactly on zero; treat that as unresolved.
+Against Glicko-2 the rating is −0.0030 [−0.0067, +0.0008]; unresolved.
 
 The fourth row is the same rating estimated the old way, and it is here because
 [the rating is a posterior](#the-rating-is-a-posterior) needed a test rather than an
-argument. Paired on identical maps the posterior wins by −0.00041 [−0.00090, +0.00001],
-which now spans zero where on the CWL archive it did not, and the pick rates are a
-coin-flip apart. Read as "the better-specified estimator does not cost anything out of
-sample", which is the most this test could have established either way — and is now the
-most it does.
+argument. Paired on identical maps the posterior wins by −0.00095 [−0.00180, −0.00010],
+which excludes zero and still sits under the 0.00126 this sample can resolve, and the pick
+rates are a coin-flip apart. Read as "the better-specified estimator does not cost anything
+out of sample", which is the most this test could have established either way.
 
-The blend is the best row in the table, which reverses its earlier verdict; that is
-discussed under [plus-minus](#plus-minus-value-in-wins-without-the-box-score) below.
+The blend is no longer the best row in the table; that reversal is discussed under
+[plus-minus](#plus-minus-value-in-wins-without-the-box-score) below.
 
 Brier and accuracy still disagree, and reporting either alone would mislead, so both are
-published. Every predictor picks the winner more often than chance — the rating's 56.1%
+published. Every predictor picks the winner more often than chance — the rating's 56.6%
 interval clears 50% comfortably — so roster strength carries directional signal. What it
 carries much less of is a usable probability: the fitted logistic finds so little to work
 with that its output barely leaves 0.5, which is what a Brier just under the floor with an
@@ -1667,27 +1673,29 @@ collapses from 0.57 to 0.10 and the ordering's correlation with the lightest fit
 0.56. Nothing here tunes that penalty against the held-out maps — that would turn the
 forecast above into a selection statistic rather than a test.
 
-**The blend, and its verdict has reversed.** A natural extension is to use the box-score
+**The blend, and its verdict has reversed twice.** A natural extension is to use the box-score
 rating as an informative prior on RAPM, which is a one-line change to what the penalty
 shrinks toward: instead of zero, each player's coefficient is pulled toward their composite
 rating converted into map-win logits, at an exchange rate estimated on the training maps
 rather than assumed. The blended coefficients correlate 0.993 with plain RAPM. On the CWL
 archive the blend was *worse* on Brier (0.24601 against 0.24467) and better on accuracy,
-and this page reported a mixed result and declined to adopt it. On the full record it is
-better on both: Brier 0.24517 against 0.24592, accuracy 59.1% against 59.0%. It is the best
-Brier in the forecast table.
+and this page reported a mixed result and declined to adopt it. On an earlier cut of the
+full record it was better on both, and this page said so. On the current one it is mixed
+again: Brier 0.24675 against plain RAPM's 0.24609, accuracy 59.2% against 59.0%.
 
-That is still not enough to adopt it. The two arms are 0.0008 of Brier apart on predictors
-that correlate at 0.993, which is well inside what this sample can resolve, and a
-0.1-point accuracy difference is nothing. The supportable statement is that the blend is no
-longer measurably worse — not that it is better. The published RAPM stays the plain fit,
-because "shrink toward the box score" is the assumption this whole section exists to avoid
-making, and nothing in these numbers forces it.
+**A verdict that has moved three times on samples this close together is the finding.** The
+two arms are 0.0007 of Brier apart on predictors that correlate at 0.993, which is well
+inside what this sample can resolve — the paired contrast is +0.0011 [−0.0022, +0.0041]
+against a threshold of 0.0047 — and a 0.2-point accuracy difference is nothing. The
+supportable statement is that these two are indistinguishable out of sample and that the
+sign of the difference is not stable to a change of population. The published RAPM stays
+the plain fit, because "shrink toward the box score" is the assumption this whole section
+exists to avoid making, and nothing in these numbers forces it.
 
 **What RAPM is actually measuring.** At a median teammate concentration of 0.70, a player's
 coefficient is still substantially their lineup's. That explains the shape of
 the table above: RAPM's accuracy (59.0%) lands much closer to Glicko-2's team rating (59.6%)
-than to the box-score rating's (56.1%), and it does so while never being told which team is
+than to the box-score rating's (56.6%), and it does so while never being told which team is
 playing. It behaves like a team rating expressed one player at a time. That makes it the
 best available answer to "does player-level information forecast map wins" and simultaneously
 a warning against reading its leaderboard as a ranking of individuals.
@@ -1702,27 +1710,27 @@ about three parts in a thousand of Brier. The composite rating remains primarily
 correlated with winning maps in that season and mode, and the leakage section above says
 plainly why its map backtest scores as high as it does.
 
-What no longer holds is the flat statement that it forecasts nothing. On the CWL archive
-every predictor's gap over the coin flip spanned zero and the correct summary was "not a
-forecasting tool". On the full record the rating, RAPM and the blend all beat the coin flip
-on intervals that exclude zero, and the rating beats roster K/D by a margin clearing both
-its interval and its power threshold. The site still does not present the composite rating
-as a forecasting tool, and should not: the effects are a few thousandths of Brier, none of
-the coin-flip gaps clears its own power threshold, and a measure that predicts a player's
-own next season worse than raw K/D does has not earned that framing. But "indistinguishable
-from no model at all" was the 2017-2019 result and is no longer this one.
+What no longer holds is the flat statement that it forecasts nothing — though less of it
+survives than an earlier version of this page claimed. On the CWL archive every predictor's
+gap over the coin flip spanned zero and the correct summary was "not a forecasting tool".
+On the current record only plain RAPM's gap excludes zero; the composite rating's own does
+not. What does still hold, on an interval and a power threshold, is that the rating beats
+roster K/D at forecasting map wins. The site does not present the composite rating as a
+forecasting tool, and should not: the effects are a few thousandths of Brier, the one gap
+that resolves does not clear its own power threshold, and a measure that predicts a
+player's own next season worse than raw K/D does has not earned that framing.
 
 Two directions were named here as ways to change the verdict, and both have now been
 tried. The round-level model in Tier 1d works as a model of a round, but
 the player value derived from it — win probability added per kill — turns out to be kill
 rate in another unit, and the part that is not kill rate does not reproduce across a
-player's own games. Plus-minus does better: RAPM posts the second-best Brier in the table
-and a clearly above-chance pick rate without touching the box score, and its gap over the
-coin flip now excludes zero, though it still does not clear what 9,030 maps can resolve.
-Its coefficients remain entangled with lineups, if less so than before.
+player's own games. Plus-minus does better: RAPM posts the best Brier in the table and a
+clearly above-chance pick rate without touching the box score, and its gap over the coin
+flip excludes zero, though it does not clear what 9,257 maps can resolve. Its coefficients
+remain entangled with lineups, if less so than before.
 
 Player-level information does appear to forecast map wins slightly better than the
-composite rating does, and RAPM against the rating directly is +0.0011 [−0.0025, +0.0046] —
+composite rating does, and RAPM against the rating directly is +0.0017 [−0.0015, +0.0049] —
 better on the point estimate, unresolved on the interval, as it was. Neither result
 promotes anything into the published rating.
 
@@ -2119,6 +2127,112 @@ it to survive averaging. Published as a null, which is what it is.
 statistics here; the site continues to show unadjusted numbers, and changing that is a
 lockstep change across two languages that belongs with the publishing work. What is stored is
 the ladder, its controls and its verdict, as a versioned run.
+
+### The evaluation harness: what a rating has to beat, declared in advance
+
+Everything above this point was scored by code written after the model it scores. That is the
+normal order and it is the wrong one: a harness written afterwards is written by whoever wants
+the model to pass, and every choice inside it — which test is the headline, which resampling
+unit, which comparison gets an interval — can be made once the answers are already visible.
+The next planned change to the rating is a large one, so the harness for it was built first,
+against nothing, and committed before there was a model to run through it.
+
+**The declaration is hashed.** One primary test, a labelled secondary set, the metric, the
+resampling unit per family, the bootstrap seed, and the one coefficient family a forward test
+is allowed to read. The manifest's SHA-256 is pinned in the source; a run whose manifest does
+not hash to the pin fails the release gate. Adding a predictor, relaxing a unit or swapping the
+primary test for one the model passed all move that hash, which is the difference between
+declaring a test and describing one afterwards.
+
+**The primary test is next-season persistence on the baseline's own ground** — season *N*'s
+rating against season *N+1*'s era-adjusted K/D z, the off-diagonal cell of
+[the 2×2 above](#two-tests-the-rating-can-fail). One test, chosen because a fifteen-test suite
+with no declared primary is a licence to pick a winner afterwards. Everything else the harness
+computes is labelled secondary in the stored payload and published without significance claims.
+
+| Predictor, season *N* | *r* with next K/D z | Δ*r* vs. K/D z | Detectable at |
+|---|---|---|---|
+| Era-adjusted K/D z (baseline) | 0.564 [0.475, 0.637] | — | — |
+| Composite rating | 0.335 [0.222, 0.435] | **−0.229** [−0.308, −0.155] | 0.110 |
+| `openskill` player rating | 0.040 [−0.060, 0.139] | **−0.524** [−0.634, −0.408] | 0.135 |
+
+Both gaps exclude zero and both exceed what this record can detect — in the losing direction.
+561 transitions over 189 players, and none of them dropped for want of a predictor.
+
+**The threshold is computed, not chosen.** A gate declared below the smallest effect the record
+can resolve can be failed by a model that works, so each predictor gets its own floor from the
+[pre-flight's](#can-the-plus-minus-have-a-time-axis) closed form at the measured sample size,
+the measured baseline correlation and that predictor's measured agreement with the baseline —
+0.09 for the composite, which agrees with K/D z at 0.572, and 0.11 for `openskill`, which
+agrees at 0.235. Then both are widened by the design effect the clustering costs, measured at
+**1.225** rather than assumed.
+
+**The resampling unit is the series everywhere except here, and the exception is stated rather
+than fudged.** Maps inside a series share a lineup, a day, a patch and an opponent, so anything
+keyed by a map or a series resamples whole series. A persistence observation is not keyed by
+either: it is a player-season transition assembled from tens of series, and no series contains
+a whole one. The smallest cluster that does is the player, which is what the primary test draws
+on. It is strictly coarser than the per-observation draw the published test uses, and the
+1.225 design effect above is exactly the price of the coarser draw — measured by running both
+and dividing.
+
+**A rating that never sees the box score is the adversary.** `openskill` (Weng-Lin /
+Plackett-Luce) is the obvious thing to do with a record of 4v4 map results and nothing else,
+and unlike the published Glicko-2 it rates *players*, so it can enter the persistence test at
+all. It runs as a pipeline stage with its own run, artifacts and backtest row, because a
+baseline in a hard gate that cannot be reproduced makes the gate unenforceable. Nothing about
+it is tuned — library defaults, on the same eight-map qualification floor the era adjustment
+uses: 11,609 maps, 340 players, 943 published player-seasons. Walk-forward it picks the map
+winner 59.1% of the time and posts a Brier of **0.26416**, worse than always guessing 0.5. It
+is the sharpest instance of the disagreement [the forecast table](#does-it-actually-predict-better)
+already shows — a predictor can rank teams well and still be worse than useless as a
+probability — and its persistence *r* of 0.04 says that knowing only who won tells you almost
+nothing about who a player will be next season.
+
+**The scope rule is the single most important line in the harness.** The season plus-minus
+stores two coefficient families, and the smoothed one at season *t* has already seen *t+1*,
+because the random-walk penalty is two-sided. A forward test that reads it is scored against a
+target containing its own answer. The manifest names `filtered` as the only family a forward
+test may read, the harness routes its read through the estimator's own check rather than
+reimplementing it, and that check raises rather than warns. It is exercised on real
+coefficients every run instead of lying dormant: the filtered season plus-minus reaches *r* =
+0.291 against next season's K/D z over 553 cells, against the baseline's 0.572.
+
+**Negative controls, three of them, run against the plus-minus every run.**
+
+| Placebo | What it should say | What it says |
+|---|---|---|
+| Shuffled sides | intervals cover zero at about 95% | 97.4% mean coverage over 8 shuffles, minimum 96.5% |
+| Permuted seasons | persistence collapses | mean *r* −0.001 against the real 0.335, largest \|*r*\| 0.070 |
+| Duplicated player | the copy is caught | a 341st column, rank unmoved at 270, deficiency 70 → 71 |
+
+The venue permutation the plan also asks for is **declared and not run**, and says so in the
+payload: no model in this stack estimates a venue effect yet, so there is nothing for the
+permutation to falsify. It arrives with the phase that fits one. The placebos prove the
+machinery finds nothing where there is nothing; they are not sufficient alone, because a
+maximally shrunk estimator passes every one of them, so the pre-flight's positive control —
+which plants a known effect and asks for it back — is reported beside them rather than instead
+of them.
+
+**The secondary set, reported without verdicts.** Leave-one-title-out moves the composite's
+persistence between 0.317 and 0.355 across the six titles, so no single title is carrying it.
+Leave-one-event-out moves the baseline's map Brier between 0.26312 and 0.26498 over 94 events.
+Persistence is higher for players who stayed on their roster (0.346) than for those who moved
+(0.308), and higher after a player's first qualified season (0.373) than during it (0.318) —
+and `openskill` inverts that last one, at 0.206 for first seasons against 0.017 later, which is
+what a rating that mostly measures a team looks like when the team is all it has ever seen. The
+roster forecast is well calibrated in the CDL era, at a 0.0004 gap between predicted and
+observed win rate over 6,522 maps, and over-predicts on the CWL archive by 0.0134 over 5,087.
+None of these get an interval and none of them can promote anything.
+
+**The gate is that the harness recovers what is already published before it scores anything
+new.** Eleven cells of the persistence test, recomputed by a second implementation rather than
+by calling the code being reproduced, plus nine figures read straight off this page. It failed
+that gate the first time it ran, and it was this page that was wrong: the validation section
+above had been carrying a run from before the identity merges, the plus-minus lineup rule and
+the fourth feature set, while its own pre-flight section quoted the current numbers. Both now
+agree, and a run that disagrees with either fails the release gate rather than printing a
+number nobody compares.
 
 ## Tier 2b: Series dynamics (shipped)
 
