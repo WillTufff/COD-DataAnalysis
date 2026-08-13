@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Calibration } from "@/components/charts/Calibration";
+import { EstimateForest } from "@/components/charts/EstimateForest";
+import { LadderMovement } from "@/components/charts/LadderMovement";
+import { SpreadVsError } from "@/components/charts/SpreadVsError";
 import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
 import {
   formatYearSpan,
@@ -18,6 +21,7 @@ import {
   getRatingPosterior,
   getRatingShrinkage,
   getRapm,
+  getRapmPreflight,
   RAPM_CONCENTRATION_LIMIT,
   getRosterForecast,
   getRoundWinProb,
@@ -27,12 +31,32 @@ import {
   getSeriesDynamics,
   getSignBaseline,
   getWinprobArtifact,
+  PUBLISHED_RATING_VERSION,
+  getEvaluationManifest,
+  getEvaluationPlacebo,
+  getEvaluationPopulation,
+  getEvaluationPrimary,
+  getEvaluationReproduction,
+  getEvaluationSecondary,
+  getOpenskillBaseline,
+  getOpponentAdjustment,
+  getSeasonRapm,
+  getSkillPower,
+  getSkillPrior,
+  getSkillSeasons,
+  latestEvaluationRun,
+  latestOpenskillRun,
+  latestOpponentAdjustRun,
+  latestRapmPreflightRun,
   latestRatingRun,
   latestRun,
+  latestSeasonRapmRun,
+  latestSkillRun,
   type PaceCell,
   getModeCatalog,
 } from "@/lib/analytics";
 import { kindLabel } from "@/lib/insightKinds";
+import { RATINGS, primacyReason } from "@/lib/primacy";
 import { modeLabel } from "@/lib/modes";
 
 // The archive is frozen and the models only change on a rerun, so this page is
@@ -262,6 +286,66 @@ export default async function MethodologyPage() {
     ),
   );
   const mapElo = await getMapElo();
+  // The phases fitted after the career rating. Each opened its own run, so none
+  // of this is reachable from ratingRun.
+  const [
+    preflightRun,
+    seasonRapmRun,
+    opponentRun,
+    openskillRun,
+    skillRun,
+    evaluationRun,
+  ] = await Promise.all([
+      latestRapmPreflightRun(),
+      latestSeasonRapmRun(),
+      latestOpponentAdjustRun(),
+      latestOpenskillRun(),
+      latestSkillRun(),
+      latestEvaluationRun(),
+    ]);
+  const [
+    preflight,
+    seasonRapm,
+    opponentAdjustment,
+    openskill,
+    skillPrior,
+    skillSeasons,
+    evaluationManifest,
+    evaluationPrimary,
+    evaluationSecondary,
+    evaluationPlacebo,
+    evaluationReproduction,
+    skillPower,
+    evaluationPopulation,
+  ] = await Promise.all([
+    preflightRun ? getRapmPreflight(preflightRun.id) : Promise.resolve(null),
+    seasonRapmRun ? getSeasonRapm(seasonRapmRun.id) : Promise.resolve(null),
+    opponentRun ? getOpponentAdjustment(opponentRun.id) : Promise.resolve(null),
+    openskillRun ? getOpenskillBaseline(openskillRun.id) : Promise.resolve(null),
+    skillRun ? getSkillPrior(skillRun.id) : Promise.resolve(null),
+    skillRun ? getSkillSeasons(skillRun.id) : Promise.resolve([]),
+    evaluationRun
+      ? getEvaluationManifest(evaluationRun.id)
+      : Promise.resolve(null),
+    evaluationRun
+      ? getEvaluationPrimary(evaluationRun.id)
+      : Promise.resolve(null),
+    evaluationRun
+      ? getEvaluationSecondary(evaluationRun.id)
+      : Promise.resolve(null),
+    evaluationRun
+      ? getEvaluationPlacebo(evaluationRun.id)
+      : Promise.resolve(null),
+    evaluationRun
+      ? getEvaluationReproduction(evaluationRun.id)
+      : Promise.resolve(null),
+    evaluationRun ? getSkillPower(evaluationRun.id) : Promise.resolve(null),
+    getEvaluationPopulation(),
+  ]);
+  const skillYears = skillSeasons.map((s) => s.year);
+  // The secondary test SKILL is good at, kept separate because the primary is
+  // the one it lost and a page that shows only one of them is arguing.
+  const priorTarget = evaluationSecondary?.prior_target_persistence ?? null;
   const [
     ratingCards,
     modeWeights,
@@ -338,6 +422,18 @@ export default async function MethodologyPage() {
       comparison.overall[comparison.published].brier /
         comparison.overall[comparison.baseline].brier
     : null;
+  // Versions fitted after the published one, with how each scores against it on
+  // the same maps. Read off the artifact, so a promotion empties this list.
+  const deferredVersions = comparison
+    ? comparison.versions
+        .slice(comparison.versions.indexOf(comparison.published) + 1)
+        .map((v) => ({
+          version: v,
+          brierVsPublished:
+            comparison.overall[v].brier -
+            comparison.overall[comparison.published].brier,
+        }))
+    : [];
   // The range the slaying columns alone reach, read off the artifact rather
   // than written into the sentence — the whole point of the table is that these
   // numbers move when the model does.
@@ -1272,6 +1368,85 @@ export default async function MethodologyPage() {
         );
       })()}
 
+      <section id="primacy" className="mt-12">
+        <h2 className="font-display text-2xl font-semibold uppercase">
+          Which rating is the rating
+        </h2>
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+          <p>
+            This site publishes three player ratings. They are not three
+            attempts at one number: each names a different object, is judged by
+            a different test, and has a different known failure. The rule below
+            is which one a page leads with, and it is stated here because
+            leaving it implicit would let whichever board renders first become
+            the answer by accident.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-4 font-normal">Rating</th>
+                  <th className="py-2 pr-4 font-normal">Answers</th>
+                  <th className="py-2 pr-4 font-normal">Judged by</th>
+                  <th className="py-2 font-normal">Known failure</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(["skill", "value", "decomposition"] as const).map((id) => {
+                  const r = RATINGS[id];
+                  return (
+                    <tr key={id} className="border-b border-hairline/60 align-top">
+                      <td className="py-2 pr-4 font-medium">
+                        <a href={r.href} className="underline">
+                          {r.name}
+                        </a>
+                      </td>
+                      <td className="py-2 pr-4">{r.question}</td>
+                      <td className="py-2 pr-4 text-ink-muted">{r.judge}</td>
+                      <td className="py-2 text-ink-muted">{r.failure}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p>
+            <strong className="text-ink">The demotion, stated plainly.</strong>{" "}
+            The composite season rating — feature set v
+            {PUBLISHED_RATING_VERSION}, described in the section below — used to
+            be the rating this site led with. It is not any more. It answers
+            &ldquo;what was that season worth&rdquo;, which is a question about
+            a season already played, and readers were using it for &ldquo;who is
+            good now&rdquo;, which it was never fitted to answer. It has not
+            changed, it has not been withdrawn, and every number it produced is
+            still on this site. It has been moved behind the rating that claims
+            the forward question.
+          </p>
+          {skillSeasons.length > 0 && (
+            <p>
+              <strong className="text-ink">The rule degrades by era.</strong>{" "}
+              SKILL exists for {skillSeasons[0].year}–
+              {skillSeasons[skillSeasons.length - 1].year} and for no season
+              before that.{" "}
+              {primacyReason(skillSeasons[0].year - 1, new Set(skillYears))} So
+              a CWL-era player page leads with the season rating, and says so
+              rather than showing an empty panel where SKILL would be.
+            </p>
+          )}
+          <p>
+            And the rating now in front is the one that lost its own test. SKILL
+            was declared on next-season persistence before it was fitted, and it
+            scored below raw K/D z on that test; the numbers are in the{" "}
+            <a href="#skill" className="underline">
+              SKILL section
+            </a>
+            , next to the rating rather than only here. It leads because it is
+            the only one of the three that answers the forward question, not
+            because it answers it well.
+          </p>
+        </div>
+      </section>
+
       <section id="player-rating" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Open player rating
@@ -1571,13 +1746,15 @@ export default async function MethodologyPage() {
               Does adding intangibles help?
             </h3>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-secondary">
-              Three feature sets, scored walk-forward on the{" "}
-              {comparison.common_maps.toLocaleString()} maps every one of them
-              predicts — versions have different data requirements, and comparing
-              raw totals would let a version look better by quietly predicting an
-              easier subset. v{comparison.baseline} is the original box-score
-              model; v2.0.0 adds the measured per-mode metric features; v2.1.0
-              adds kill-feed trades where a reconciled feed exists.
+              {comparison.versions.length} feature sets, scored walk-forward on
+              the {comparison.common_maps.toLocaleString()} maps every one of
+              them predicts — versions have different data requirements, and
+              comparing raw totals would let a version look better by quietly
+              predicting an easier subset. v{comparison.baseline} is the original
+              box-score model; v2.0.0 adds the measured per-mode metric features;
+              v2.1.0 adds kill-feed trades where a reconciled feed exists; v2.2.0
+              claims the damage, accuracy and non-traded-kill columns both
+              archives already populate.
               {brierGain !== null && (
                 <>
                   {" "}
@@ -1632,6 +1809,25 @@ export default async function MethodologyPage() {
                 </tbody>
               </table>
             </div>
+
+            {deferredVersions.length > 0 && (
+              <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-secondary">
+                {deferredVersions.map((d) => (
+                  <span key={d.version}>
+                    v{d.version} is fitted and not published: it scores{" "}
+                    {d.brierVsPublished > 0 ? "+" : ""}
+                    {d.brierVsPublished.toFixed(4)} Brier against v
+                    {comparison.published} on these same maps.{" "}
+                  </span>
+                ))}
+                A version is not demoted for that alone — this table rewards
+                columns that already know the result, and the newer columns are
+                the less leaky ones. It stays unpublished because promoting a
+                version changes what every leaderboard on this site means, and a
+                feature set does not earn that by losing the one test it was
+                given.
+              </p>
+            )}
 
             <h4 className="mt-6 eyebrow text-ink-secondary">By cohort</h4>
             <p className="mt-2 max-w-3xl text-xs text-ink-muted">
@@ -2158,6 +2354,573 @@ export default async function MethodologyPage() {
           </div>
         )}
       </section>
+
+
+      {seasonRapm && seasonRapm.available && (
+        <section id="season-rapm" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Season plus-minus
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              The career plus-minus above gives a player one number for the whole
+              archive. This one gives them one per time cell: {seasonRapm.what}.
+            </p>
+            <p>
+              The cell is the finding. A season-resolution coefficient needs
+              enough lineup variety inside the season to separate a player from
+              the four they play beside, and the CWL years do not have it — so
+              those seasons are fitted as one era-wide cell:{" "}
+              {seasonRapm.graphs
+                .filter((g) => g.resolution === "era")
+                .map((g) => g.cell)
+                .join(", ")}
+              . One coefficient stands for every season inside it, so a page
+              showing a CWL player a &ldquo;2018 plus-minus&rdquo; would be
+              showing them a three-season average with a season&rsquo;s label on
+              it.
+            </p>
+            {preflight && (
+              <div className="border border-hairline bg-surface p-4">
+                <h3 className="font-display text-lg font-semibold uppercase">
+                  The pre-flight that set the cell
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
+                  {preflight.what}. Measured before the model was fitted, and
+                  binding on it: {preflight.reason}.
+                </p>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full max-w-2xl text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-hairline text-xs text-ink-muted">
+                        <th className="py-2 pr-4 font-normal">Era</th>
+                        <th className="py-2 pr-4 text-right font-normal">
+                          Rank share
+                        </th>
+                        <th className="py-2 pr-4 text-right font-normal">
+                          Effective lineups
+                        </th>
+                        <th className="py-2 pr-4 text-right font-normal">
+                          Recovery within team
+                        </th>
+                        <th className="py-2 font-normal">Branch</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preflight.by_era.map((e) => (
+                        <tr
+                          key={e.league}
+                          className="border-b border-hairline/60"
+                        >
+                          <td className="py-1.5 pr-4">{e.league}</td>
+                          <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                            {e.rank_share.toFixed(4)}
+                          </td>
+                          <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                            {e.median_effective_lineups.toFixed(2)}
+                          </td>
+                          <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                            {e.recovery_within_team.toFixed(4)}
+                          </td>
+                          <td className="py-1.5 font-mono text-xs text-ink-secondary">
+                            {e.branch}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 max-w-3xl text-xs leading-relaxed text-ink-muted">
+                  Against thresholds of {preflight.thresholds.rank_share} rank
+                  share, {preflight.thresholds.effective_lineups} effective
+                  lineups and {preflight.thresholds.recovery_within_team}{" "}
+                  within-team recovery, every era fails at least one — and the
+                  CWL era fails all of them, recovering nothing at all within a
+                  roster. The phase as specified was stopped by its own
+                  pre-flight; what ships is the resolution each era can carry,
+                  not the resolution that was planned.
+                </p>
+              </div>
+            )}
+            <div className="border border-hairline bg-surface p-4">
+              <SpreadVsError
+                rows={seasonRapm.by_cell.map((c) => ({
+                  label: c.cell,
+                  spread: c.coef_sd,
+                  error: c.se_median,
+                  note: `${c.player_columns} players`,
+                }))}
+                spreadLabel="spread of the cell's coefficients"
+                errorLabel="the median standard error on one of them"
+              />
+              <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                Every circle sits to the right of its square. The uncertainty on
+                one coefficient is larger than the distance between the
+                coefficients, in every cell — which is the same statement the
+                table below makes in two columns.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Cell</th>
+                    <th className="py-2 pr-4 font-normal">Resolution</th>
+                    <th className="py-2 pr-4 text-right font-normal">Players</th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Coefficient sd
+                    </th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Median se
+                    </th>
+                    <th className="py-2 text-right font-normal">
+                      Penalty-dominated
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seasonRapm.by_cell.map((c) => (
+                    <tr key={c.cell} className="border-b border-hairline/60">
+                      <td className="py-1.5 pr-4">{c.cell}</td>
+                      <td className="py-1.5 pr-4 font-mono text-xs text-ink-muted">
+                        {c.resolution}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                        {c.player_columns}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                        {c.coef_sd.toFixed(4)}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                        {c.se_median.toFixed(4)}
+                      </td>
+                      <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                        {(c.penalty_dominated_share * 100).toFixed(0)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs leading-relaxed text-ink-muted">
+              Every cell&rsquo;s median standard error is larger than the spread
+              of its own coefficients. That is the whole reading of this table:
+              the estimator does not establish that the players inside a cell
+              differ, and the last column says how much of each column is the
+              ridge penalty rather than the maps. Split-half reliability on whole
+              series is r = {seasonRapm.reliability.r.toFixed(4)} [
+              {seasonRapm.reliability.lo.toFixed(4)},{" "}
+              {seasonRapm.reliability.hi.toFixed(4)}] over{" "}
+              {seasonRapm.reliability.n_player_cells} player-cells, which is a
+              measurement that repeats about half the time.
+            </p>
+            <p>
+              <strong className="text-ink">
+                Two families are fitted; only one may be read forward.
+              </strong>{" "}
+              {seasonRapm.scopes.rule}. The smoothed family correlates{" "}
+              {seasonRapm.scopes.smoothed_vs_filtered_r.toFixed(4)} with the
+              filtered one, so the restriction costs almost nothing and removes
+              a way of scoring a rating against a season it has already seen.{" "}
+              {seasonRapm.publication.player_cells_published.toLocaleString()}{" "}
+              player-cells clear the {seasonRapm.publication.min_maps}-map
+              publication floor, written as{" "}
+              {seasonRapm.publication.rows.toLocaleString()} rows across both
+              families.
+            </p>
+            <p className="text-xs leading-relaxed text-ink-muted">
+              The response is {seasonRapm.response.published}; the fit drops{" "}
+              {seasonRapm.response.dropped_maps} maps where the margin is{" "}
+              {seasonRapm.response.dropped_reason}. Two other responses were
+              fitted and are reported rather than chosen from:{" "}
+              {seasonRapm.response.sensitivity
+                .map(
+                  (s) =>
+                    `${s.response} ranks ${s.rank_corr_with_published_response.toFixed(4)} against the published one`,
+                )
+                .join(", ")}
+              . The penalty is chosen by {seasonRapm.penalties.chosen_by}, at{" "}
+              {seasonRapm.penalties.effective_df.toFixed(1)} effective degrees of
+              freedom over {seasonRapm.columns.total} columns.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {opponentAdjustment && (
+        <section id="opponent-adjustment" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Opponent adjustment
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              What a stat line owed to who was across from it. This adjusts{" "}
+              {opponentAdjustment.adjusts} — the plus-minus already conditions on
+              opposition, since the opposing four are the −1 columns of its own
+              design, so nothing here touches it.
+            </p>
+            <p>
+              Four rungs were fitted rather than one chosen, and each is judged
+              on three criteria declared before anything was fitted: it must move
+              the leaderboard against the rung below it, what it moves must stand
+              clear of its own placebo, and it must not leave the statistic less
+              repeatable.
+            </p>
+            <div className="border border-hairline bg-surface p-4">
+              <LadderMovement
+                rungs={opponentAdjustment.stop_rule.per_rung.map((v) => ({
+                  rung: v.rung,
+                  move: v.mean_abs_dz_median,
+                  placeboRatio: v.placebo_ratio_median,
+                  reliabilityGain: v.reliability_gain_median,
+                  clears: v.clears,
+                  adopted: v.rung === opponentAdjustment.stop_rule.adopted,
+                }))}
+                threshold={opponentAdjustment.stop_rule.thresholds.mean_abs_dz}
+              />
+              <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                The dashed line is the{" "}
+                {opponentAdjustment.stop_rule.thresholds.mean_abs_dz} cohort-sd
+                movement a rung has to reach to be worth having. Movement alone
+                settles nothing: the two-way lineup rung moves further than two
+                of the three rungs that clear, and fails on repeatability. That
+                is why each rung is judged on its own rather than climbed until
+                one breaks.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Rung</th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Median move
+                    </th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Placebo ratio
+                    </th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Reliability vs raw
+                    </th>
+                    <th className="py-2 font-normal">Clears</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {opponentAdjustment.stop_rule.per_rung.map((v) => (
+                    <tr key={v.rung} className="border-b border-hairline/60">
+                      <td className="py-1.5 pr-4 font-mono text-xs">
+                        {v.rung}
+                        {v.rung === opponentAdjustment.stop_rule.adopted && (
+                          <span className="ml-2 text-accent">adopted</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                        {v.mean_abs_dz_median.toFixed(4)}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                        {v.placebo_ratio_median === null
+                          ? "—"
+                          : v.placebo_ratio_median.toFixed(2)}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                        {v.reliability_gain_median === null
+                          ? "—"
+                          : v.reliability_gain_median.toFixed(4)}
+                      </td>
+                      <td className="py-1.5 font-mono text-xs">
+                        {v.clears ? "yes" : "no"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs leading-relaxed text-ink-muted">
+              The ladder is not monotone and the rule does not assume it is: the
+              two-way lineup rung moves the most and comes out less repeatable
+              than the raw number, and the pooled rung above it repairs exactly
+              that. A climb-until-failure rule would have stopped at the cheap
+              rung and discarded the one that works.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The cheap rung is blind where the disparity is largest.
+              </strong>{" "}
+              Residualizing on a team rating needs the team to have a rating.{" "}
+              {(opponentAdjustment.coverage.blind_share * 100).toFixed(1)}% of{" "}
+              {opponentAdjustment.coverage.lines.toLocaleString()} lines face an
+              opponent still sitting on the Glicko-2 prior, and a further{" "}
+              {opponentAdjustment.coverage.opponent_missing} face a team the
+              rating never reached. That is concentrated in the CWL years, which
+              is precisely where the competitive spread is widest.
+            </p>
+            <p>
+              <strong className="text-ink">
+                Published as a null, and not promoted.
+              </strong>{" "}
+              Per line, opposition is worth about half a cohort standard
+              deviation. Averaged over a player&rsquo;s season it very nearly
+              cancels — zero to three decimal places on both sides of the
+              CWL/CDL seam — and the softest fields in the archive are CDL
+              events rather than the CWL open brackets the question was about. So
+              the correction stays out of the published per-player statistics:
+              the site continues to show unadjusted numbers, and what ships is
+              the ladder, its controls and its verdict as a versioned run.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {evaluationManifest && evaluationPrimary && (
+        <section id="evaluation" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            The evaluation harness
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              A rating that picks its own test after seeing the answer has not
+              been tested. So the test is declared first, hashed, and the hash
+              checked on every run: {evaluationManifest.primary.what}, resampled
+              by {evaluationManifest.primary.resampling_unit} at{" "}
+              {evaluationManifest.bootstrap_b.toLocaleString()} draws, with the
+              detectable-difference floor computed from the panel rather than
+              assumed. The pin{" "}
+              {evaluationManifest.matches_pin
+                ? "matches, so this is the test that was declared"
+                : "does not match: the harness changed after it was pinned"}
+              .
+            </p>
+            <div className="border border-hairline bg-surface p-4">
+              <EstimateForest
+                rows={Object.entries(evaluationPrimary.predictors).map(
+                  ([name, p]) => ({
+                    label: name,
+                    value: p.r,
+                    lo: p.lo,
+                    hi: p.hi,
+                    emphasis: name === "skill",
+                    note: evaluationPrimary.gaps[name]
+                      ? `${evaluationPrimary.gaps[name].delta_r >= 0 ? "+" : ""}${evaluationPrimary.gaps[name].delta_r.toFixed(3)}`
+                      : "baseline",
+                  }),
+                )}
+                reference={evaluationPrimary.baseline_r}
+                referenceLabel="K/D z"
+                unit="correlation with next season's K/D z"
+              />
+              <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                The dashed line is the baseline every predictor was declared
+                against. Nothing reaches it, and the right-hand column is each
+                one&rsquo;s distance from it — the rating this site leads with is
+                the row in the accent.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full max-w-2xl text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Predictor</th>
+                    <th className="py-2 pr-4 text-right font-normal">r</th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      95% interval
+                    </th>
+                    <th className="py-2 text-right font-normal">
+                      vs K/D z, against the floor
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(evaluationPrimary.predictors).map(
+                    ([name, p]) => {
+                      const gap = evaluationPrimary.gaps[name];
+                      return (
+                        <tr key={name} className="border-b border-hairline/60">
+                          <td className="py-1.5 pr-4 font-mono text-xs">
+                            {name}
+                          </td>
+                          <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                            {p.r.toFixed(4)}
+                          </td>
+                          <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                            {p.lo.toFixed(4)} to {p.hi.toFixed(4)}
+                          </td>
+                          <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                            {gap
+                              ? `${gap.delta_r >= 0 ? "+" : ""}${gap.delta_r.toFixed(4)} (floor ${gap.mde80.toFixed(4)})`
+                              : "baseline"}
+                          </td>
+                        </tr>
+                      );
+                    },
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs leading-relaxed text-ink-muted">
+              {evaluationPrimary.n} transitions over{" "}
+              {evaluationPrimary.resampling.clusters} resampling clusters, drawn
+              from a panel of {evaluationPrimary.n_panel} —{" "}
+              {evaluationPrimary.panel}. Nothing on this table beats K/D z, and
+              the two ratings built to are further below it than the floor the
+              test could have missed by. That is a result, not a missing result.
+            </p>
+            {openskill && (
+              <p>
+                <strong className="text-ink">The baseline.</strong>{" "}
+                {openskill.what}. It is a {openskill.model} rating over{" "}
+                {openskill.n_maps.toLocaleString()} four-on-four map results at
+                library defaults, tuned against nothing, covering{" "}
+                {openskill.n_player_seasons_published} player-seasons. It knows
+                who was on the server and nothing else, and it exists so that a
+                rating cannot claim a win over an absent opponent.
+              </p>
+            )}
+            {evaluationPlacebo && (
+              <p className="text-xs leading-relaxed text-ink-muted">
+                <strong className="text-ink">The placebos.</strong>{" "}
+                {evaluationPlacebo.n_run} run,{" "}
+                {evaluationPlacebo.n_failed} failed —{" "}
+                {Object.entries(evaluationPlacebo.placebos)
+                  .map(([k, v]) => `${k} ${v.passes ? "passes" : "fails"}`)
+                  .join(", ")}
+                . A pass here means the machinery finds nothing where there is
+                nothing to find, which is the only reason to believe it when it
+                finds something.
+              </p>
+            )}
+            {evaluationReproduction && (
+              <p className="text-xs leading-relaxed text-ink-muted">
+                <strong className="text-ink">Reproduction.</strong> The harness
+                recomputes {evaluationReproduction.recomputed.length} published
+                numbers from the runs that wrote them and{" "}
+                {evaluationReproduction.against_the_page.length}{" "}
+                numbers written
+                into this page&rsquo;s prose, at a tolerance of{" "}
+                {evaluationReproduction.tolerance}.{" "}
+                {evaluationReproduction.n_mismatched +
+                  evaluationReproduction.n_page_mismatched ===
+                0
+                  ? "All of them match."
+                  : `${evaluationReproduction.n_mismatched} run numbers and ${evaluationReproduction.n_page_mismatched} page numbers do not match.`}
+              </p>
+            )}
+            {evaluationPopulation && (
+              <p className="text-xs leading-relaxed text-ink-muted">
+                <strong className="text-ink">The population is frozen.</strong>{" "}
+                {evaluationPopulation.n_maps.toLocaleString()} maps, cut{" "}
+                {evaluationPopulation.cut}, hashed and stored so a later
+                ingestion cannot quietly change what the test was scored on.{" "}
+                {evaluationPopulation.matches
+                  ? "The database still matches it."
+                  : `The database has diverged: ${evaluationPopulation.n_added} added, ${evaluationPopulation.n_removed} removed.`}
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {skillPrior && (
+        <section id="skill" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            SKILL
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              The composite rating is fitted against map outcome, so a column
+              that <em>names</em> the result earns weight for naming it. SKILL
+              asks the inverted question: the target is the season plus-minus at{" "}
+              {skillPrior.target.scope} scope, the box score is the predictor,
+              and a column earns weight only if the profile it belongs to
+              preceded a player who moved the margin. The fit is walk-forward by
+              season over {skillPrior.design.n_columns}{" "}
+              columns; the prediction
+              is blended with the season&rsquo;s own coefficient by inverse
+              variance, and that posterior is SKILL.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The most important number here is about the target, not the
+                model.
+              </strong>{" "}
+              Empirical Bayes returns a between-player variance of{" "}
+              {skillPrior.weights.tau2.toExponential(1)} against a mean
+              observation variance of{" "}
+              {skillPrior.target_signal.mean_obs_var.toFixed(4)}. Taken at face
+              value with its own uncertainty, the season plus-minus does not
+              establish that these players differ — so the blend has nothing to
+              defend, and{" "}
+              {(skillPrior.blend.mean_weight_prior * 100).toFixed(0)}% of the
+              posterior&rsquo;s weight falls on the prior. {skillPrior.statement}
+              .
+            </p>
+            <p>
+              <strong className="text-ink">
+                It lost the gate it was declared on.
+              </strong>{" "}
+              {evaluationPrimary?.gaps.skill && (
+                <>
+                  Against next season&rsquo;s K/D z, SKILL scores r ={" "}
+                  {evaluationPrimary.predictors.skill.r.toFixed(4)} where raw K/D
+                  z scores {evaluationPrimary.baseline_r.toFixed(4)}: a gap of{" "}
+                  {evaluationPrimary.gaps.skill.delta_r.toFixed(4)} [
+                  {evaluationPrimary.gaps.skill.lo.toFixed(4)},{" "}
+                  {evaluationPrimary.gaps.skill.hi.toFixed(4)}] over{" "}
+                  {evaluationPrimary.n} transitions against a floor of{" "}
+                  {evaluationPrimary.gaps.skill.mde80.toFixed(4)}. The loss is
+                  larger than the floor, so this is a measured failure rather
+                  than an inconclusive test.{" "}
+                </>
+              )}
+              K/D z remains the recommended forecaster, and that sentence appears
+              next to the rating on{" "}
+              <Link className="underline" href="/players">
+                /players
+              </Link>{" "}
+              rather than only here.
+            </p>
+            {priorTarget && (
+              <p>
+                <strong className="text-ink">What it is good at.</strong>{" "}
+                Against the quantity it was actually fitted for —{" "}
+                {priorTarget.what} — SKILL reaches r ={" "}
+                {priorTarget.predictors.skill?.toFixed(4)}{" "}
+                against the composite
+                rating&rsquo;s {priorTarget.predictors.composite?.toFixed(4)}{" "}
+                and K/D z&rsquo;s {priorTarget.predictors.kd_z?.toFixed(4)}, over{" "}
+                {priorTarget.n} transitions. No significance is claimed on that
+                comparison. A rating can be the best available answer to its own
+                question and still be the wrong thing to forecast a player with,
+                and publishing only the half that flatters it is the omission
+                this harness exists to prevent.
+              </p>
+            )}
+            {skillPower && skillPower.available && (
+              <p className="text-xs leading-relaxed text-ink-muted">
+                <strong className="text-ink">
+                  How much of this is the panel.
+                </strong>{" "}
+                {skillPower.statement} The panel is {skillPower.n_panel}{" "}
+                transitions over {skillPower.clusters} clusters, at a design
+                effect of {skillPower.design_effect.toFixed(2)}; the gap would
+                have to close by {skillPower.distance_to_clear.toFixed(4)} before
+                the test could call it.
+              </p>
+            )}
+            {skillSeasons.length > 0 && (
+              <p className="text-xs leading-relaxed text-ink-muted">
+                <strong className="text-ink">Coverage.</strong> SKILL is
+                published for{" "}
+                {skillSeasons
+                  .map((s) => `${s.year} (${s.players})`)
+                  .join(", ")}{" "}
+                and for no season before that. The absence is structural: the
+                first season has nothing before it to train the prior on, and the
+                CWL years carry no season-resolution coefficient to blend with.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       <section id="winprob" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">

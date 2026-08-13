@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
+  doublePrecision,
   integer,
   jsonb,
   numeric,
@@ -476,4 +477,36 @@ export const playerRapm = pgTable(
       .on(t.runId, t.scope, t.playerId, t.seasonId)
       .where(sql`season_id IS NOT NULL`),
   ],
+);
+
+export const playerSkill = pgTable(
+  "player_skill",
+  {
+    runId: integer("run_id")
+      .notNull()
+      .references(() => modelRuns.id),
+    playerId: integer("player_id")
+      .notNull()
+      .references(() => players.id),
+    seasonId: integer("season_id")
+      .notNull()
+      .references(() => seasons.id),
+    // What the box score expected of this player-season, fitted on seasons
+    // strictly before it.
+    priorMean: doublePrecision("prior_mean").notNull(),
+    priorSd: doublePrecision("prior_sd").notNull(),
+    // The filtered plus-minus the prior is blended with, copied from
+    // player_rapm so the blend can be checked without a join to another run.
+    coef: doublePrecision("coef").notNull(),
+    se: doublePrecision("se").notNull(),
+    skill: doublePrecision("skill").notNull(),
+    skillSd: doublePrecision("skill_sd").notNull(),
+    // Share of the posterior precision the prior supplied.
+    weightPrior: doublePrecision("weight_prior").notNull(),
+    // Always 'filtered'; a check constraint refuses the smoothed family.
+    scope: text("scope").notNull(),
+    // The ladder arm that published the rating: ridge, random_forest, lightgbm.
+    model: text("model").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.playerId, t.seasonId] })],
 );

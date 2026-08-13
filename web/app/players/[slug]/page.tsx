@@ -18,6 +18,7 @@ import {
 } from "@/components/charts/StyleAxes";
 import { RoundShareBar } from "@/components/charts/RoundShareBar";
 import { RatingIntervals, overlaps } from "@/components/charts/RatingInterval";
+import { SkillBlend } from "@/components/charts/SkillBlend";
 import { PctlBar } from "@/components/PctlBar";
 import { Tabs } from "@/components/Tabs";
 import {
@@ -30,23 +31,28 @@ import {
   getPlayerMetrics,
   getPlayerRapm,
   getPlayerRatingSeasons,
+  getPlayerSkill,
   getPlayerSpans,
   getPlayerStints,
   getPlayerStyle,
   getPlayerStyleArtifact,
+  getSkillSeasons,
   latestRatingRun,
   latestRun,
+  latestSkillRun,
   teamSlug,
   type MetricCatalog,
   type PlayerMetricValue,
   type PlayerRapm,
   type PlayerRatings,
+  type PlayerSkillSeason,
   type PlayerStyle,
   type PlayerStylePoint,
   type SeasonAdjusted,
   getModeCatalog,
 } from "@/lib/analytics";
 import { kindLabel } from "@/lib/insightKinds";
+import { RATINGS, primacyReason } from "@/lib/primacy";
 import { type ModeCatalog, modeLabel, modeRank } from "@/lib/modes";
 
 // The archive is frozen and the models only change on a rerun, so this page is
@@ -922,6 +928,121 @@ function RapmSection({ rapm }: { rapm: PlayerRapm }) {
   );
 }
 
+// SKILL, and the two quantities it is made of. The row is only arguable with
+// all three shown: the prior is what the box score expected, the coefficient is
+// what the maps said, and the weight is which of them the rating listened to.
+function SkillSection({
+  skill,
+  coveredYears,
+  lastYear,
+}: {
+  skill: PlayerSkillSeason[];
+  coveredYears: number[];
+  lastYear: number | null;
+}) {
+  const covered = new Set(coveredYears);
+  if (skill.length === 0) {
+    return (
+      <section data-surface="skill" data-state="absent" className="mt-10">
+        <h2 className="lower-third">
+          How good now
+          <span className="lt-note">SKILL — not published for this player</span>
+        </h2>
+        <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+          {lastYear === null
+            ? "SKILL is not published for this player."
+            : primacyReason(lastYear, covered)}{" "}
+          The rating below answers a different question — what a season was
+          worth — and it is the one this page leads with here.
+        </p>
+      </section>
+    );
+  }
+  const meanWeight =
+    skill.reduce((s, r) => s + r.weightPrior, 0) / skill.length;
+  return (
+    <section data-surface="skill" data-state="present" className="mt-10">
+      <h2 className="lower-third">
+        How good now
+        <span className="lt-note">SKILL, by season</span>
+      </h2>
+      <div className="mt-3 border border-hairline bg-surface p-4">
+        <SkillBlend
+          seasons={skill.map((r) => ({
+            label: String(r.year),
+            priorMean: r.priorMean,
+            coef: r.coef,
+            se: r.se,
+            skill: r.skill,
+            skillSd: r.skillSd,
+            weightPrior: r.weightPrior,
+          }))}
+        />
+        <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+          The wide bar is what this player&rsquo;s maps established, with its
+          own uncertainty; the upright tick is what the box score expected of
+          them. SKILL is the dot, and it lands beside the tick rather than in
+          the middle — the blend is a prior with a correction, not two opinions
+          meeting halfway.
+        </p>
+      </div>
+      <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-hairline text-xs text-ink-muted">
+              <th className="py-2 pr-4 font-normal">Season</th>
+              <th className="py-2 pr-4 text-right font-normal">
+                Box-score prior
+              </th>
+              <th className="py-2 pr-4 text-right font-normal">
+                Plus-minus ± se
+              </th>
+              <th className="py-2 pr-4 text-right font-normal">SKILL ± sd</th>
+              <th className="py-2 text-right font-normal">From the prior</th>
+            </tr>
+          </thead>
+          <tbody>
+            {skill.map((r) => (
+              <tr key={r.seasonId} className="border-b border-hairline/60">
+                <td className="py-1.5 pr-4 text-ink-secondary">
+                  {r.year} {r.title}
+                </td>
+                <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                  {r.priorMean >= 0 ? "+" : ""}
+                  {r.priorMean.toFixed(3)}
+                </td>
+                <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                  {r.coef >= 0 ? "+" : ""}
+                  {r.coef.toFixed(3)} ±{r.se.toFixed(3)}
+                </td>
+                <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                  {r.skill >= 0 ? "+" : ""}
+                  {r.skill.toFixed(3)}
+                  <span className="text-ink-muted">
+                    {" "}
+                    ±{r.skillSd.toFixed(3)}
+                  </span>
+                </td>
+                <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                  {(r.weightPrior * 100).toFixed(0)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+        {RATINGS.skill.judge}, with the prior fitted on seasons strictly before
+        the one it predicts. The last column says which side the posterior
+        listened to: it averages {(meanWeight * 100).toFixed(0)}% here, so this
+        rating is close to what the box score expected of this player rather
+        than what their maps established. Its own forward test went against it —{" "}
+        {RATINGS.skill.failure}. <a href={RATINGS.skill.href}>Methodology</a>.
+      </p>
+    </section>
+  );
+}
+
 // The composite rating, drawn with the posterior interval that belongs to it.
 // A career of two-decimal ratings invites reading a 0.03 gap as improvement;
 // with the bands drawn, most of a player's seasons turn out to be one season
@@ -995,6 +1116,9 @@ function CareerTab({
   style,
   ratings,
   rapm,
+  skill,
+  skillYears,
+  lastYear,
   allModes,
   playerInsights,
 }: {
@@ -1003,6 +1127,9 @@ function CareerTab({
   style: StyleView | null;
   ratings: PlayerRatings | null;
   rapm: PlayerRapm | null;
+  skill: PlayerSkillSeason[];
+  skillYears: number[];
+  lastYear: number | null;
   allModes: SeasonAdjusted[];
   playerInsights: { id: number; kind: string; headline: string }[];
 }) {
@@ -1024,6 +1151,12 @@ function CareerTab({
           )}
         </div>
       </section>
+
+      <SkillSection
+        skill={skill}
+        coveredYears={skillYears}
+        lastYear={lastYear}
+      />
 
       {ratings && <RatingSection ratings={ratings} />}
 
@@ -1425,13 +1558,15 @@ export default async function PlayerPage({
   const player = await getPlayerBySlug(slug.toLowerCase());
   if (!player) notFound();
 
-  const [eraRun, insightsRun, metricRun, styleRun, ratingRun] = await Promise.all([
-    latestRun("era_adjust"),
-    latestRun("insights"),
-    latestRun("metric_layer"),
-    latestRun("player_style"),
-    latestRatingRun(),
-  ]);
+  const [eraRun, insightsRun, metricRun, styleRun, ratingRun, skillRun] =
+    await Promise.all([
+      latestRun("era_adjust"),
+      latestRun("insights"),
+      latestRun("metric_layer"),
+      latestRun("player_style"),
+      latestRatingRun(),
+      latestSkillRun(),
+    ]);
   const [
     adjusted,
     spans,
@@ -1443,6 +1578,8 @@ export default async function PlayerPage({
     styleArtifact,
     ratings,
     rapm,
+    skill,
+    skillSeasons,
     modeCatalog,
   ] =
     await Promise.all([
@@ -1460,8 +1597,11 @@ export default async function PlayerPage({
       ratingRun
         ? getPlayerRapm(ratingRun.id, player.id)
         : Promise.resolve(null),
+      skillRun ? getPlayerSkill(skillRun.id, player.id) : Promise.resolve([]),
+      skillRun ? getSkillSeasons(skillRun.id) : Promise.resolve([]),
       getModeCatalog(),
     ]);
+  const skillYears = skillSeasons.map((s) => s.year);
   const metricCards = buildMetricCards(metricValues, metricCatalog, modeCatalog);
   const feedSeasons = buildFeedSeasons(metricValues, metricCatalog);
   const roundProfiles = buildRoundProfiles(metricValues, metricCatalog);
@@ -1534,6 +1674,13 @@ export default async function PlayerPage({
                   style={style}
                   ratings={ratings}
                   rapm={rapm}
+                  skill={skill}
+                  skillYears={skillYears}
+                  lastYear={
+                    allModes.length > 0
+                      ? Math.max(...allModes.map((a) => a.year))
+                      : null
+                  }
                   allModes={allModes}
                   playerInsights={playerInsights}
                 />

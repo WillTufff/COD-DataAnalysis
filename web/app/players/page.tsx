@@ -7,13 +7,21 @@ import { IntervalBar, halfWidth, overlaps } from "@/components/charts/RatingInte
 import {
   type PlayerIndexSort,
   formatLeagueSpans,
+  getEvaluationPrimary,
   getLeagueSpans,
   getRatingComparison,
   getRatingLeaderboard,
+  getSkillLeaderboard,
+  getSkillPrior,
+  getSkillSeasons,
+  latestEvaluationRun,
   latestRatingRun,
   latestRun,
+  latestSkillRun,
   queryPlayerIndex,
 } from "@/lib/analytics";
+import { RATINGS } from "@/lib/primacy";
+import { playerSlug } from "@/lib/slug";
 import {
   type SearchParams,
   one,
@@ -120,6 +128,42 @@ export default async function PlayersPage({
     .slice(1)
     .filter((r) => overlaps(r, ratingBoard[0])).length;
 
+  // SKILL leads this page where it exists, which is 2021 onward. The seasons it
+  // covers are read from its own run, so the board is empty rather than wrong
+  // if a run ever stops writing them.
+  const [skillRun, evaluationRun] = await Promise.all([
+    latestSkillRun(),
+    latestEvaluationRun(),
+  ]);
+  const skillSeasons = skillRun ? await getSkillSeasons(skillRun.id) : [];
+  const latestSkillSeason = skillSeasons[skillSeasons.length - 1] ?? null;
+  const [skillBoard, skillPrior, evaluation] = await Promise.all([
+    skillRun && latestSkillSeason
+      ? getSkillLeaderboard(skillRun.id, latestSkillSeason.seasonId)
+      : Promise.resolve([]),
+    skillRun ? getSkillPrior(skillRun.id) : Promise.resolve(null),
+    evaluationRun ? getEvaluationPrimary(evaluationRun.id) : Promise.resolve(null),
+  ]);
+  const skillGap = evaluation?.gaps.skill ?? null;
+  // One domain for every row, so the overlap down the column is the reading:
+  // a board whose top rows all reach each other is an ordering of estimates.
+  const SKILL_PAD = 0.01;
+  const skillDomain = {
+    lo:
+      Math.min(0, ...skillBoard.map((r) => r.skill - 1.96 * r.skillSd)) -
+      SKILL_PAD,
+    hi:
+      Math.max(...skillBoard.map((r) => r.skill + 1.96 * r.skillSd), 0) +
+      SKILL_PAD,
+  };
+  const skillTiedWithLeader = skillBoard
+    .slice(1)
+    .filter(
+      (r) =>
+        Math.abs(r.skill - skillBoard[0].skill) <=
+        1.96 * (r.skillSd + skillBoard[0].skillSd),
+    ).length;
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
       <p className="font-mono text-xs text-ink-muted">
@@ -192,12 +236,143 @@ export default async function PlayersPage({
         .
       </p>
 
-      {ratingBoard.length > 0 && (
-        <section className="mt-16 border-t border-hairline pt-8">
+      {skillBoard.length > 0 && latestSkillSeason && (
+        <section
+          data-surface="skill-board"
+          className="mt-16 border-t border-hairline pt-8"
+        >
           <h2 className="lower-third">
-            Player rating
-            <span className="lt-note">top seasons, 30 maps minimum</span>
+            How good now
+            <span className="lt-note">
+              SKILL, {latestSkillSeason.year} · {skillBoard.length} of{" "}
+              {latestSkillSeason.players} rated players
+            </span>
           </h2>
+          <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
+            {RATINGS.skill.question} SKILL is the answer this site leads with:{" "}
+            {RATINGS.skill.judge}. It is the only one of the three ratings that
+            is meant to point forward, and it is the one with the worst result
+            against its own test — read the paragraph under the table before
+            reading the order.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full max-w-3xl text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-3 font-normal">#</th>
+                  <th className="py-2 pr-4 font-normal">Player</th>
+                  <th className="py-2 pr-4 text-right font-normal">
+                    SKILL ± sd
+                  </th>
+                  <th className="py-2 pr-4 font-normal">95% interval</th>
+                  <th className="py-2 text-right font-normal">From the prior</th>
+                </tr>
+              </thead>
+              <tbody>
+                {skillBoard.map((r, i) => (
+                  <tr key={r.playerId} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
+                      {i + 1}
+                    </td>
+                    <td className="py-1.5 pr-4 font-medium">
+                      <Link
+                        href={`/players/${playerSlug(r.handle)}`}
+                        className="hover:text-accent hover:underline"
+                      >
+                        {r.handle}
+                      </Link>
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                      {r.skill >= 0 ? "+" : ""}
+                      {r.skill.toFixed(3)}
+                      <span className="text-ink-muted">
+                        {" "}
+                        ±{r.skillSd.toFixed(3)}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-4">
+                      <IntervalBar
+                        value={r.skill}
+                        sd={r.skillSd}
+                        lo={skillDomain.lo}
+                        hi={skillDomain.hi}
+                        mark={0}
+                        label={`${r.handle}: SKILL ${r.skill.toFixed(3)}, 95% ${(
+                          r.skill -
+                          1.96 * r.skillSd
+                        ).toFixed(3)} to ${(r.skill + 1.96 * r.skillSd).toFixed(3)}`}
+                      />
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
+                      {(r.weightPrior * 100).toFixed(0)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+            {skillPrior && (
+              <>
+                The last column is the share of the rating the box-score prior
+                supplied, and it averages{" "}
+                {(skillPrior.blend.mean_weight_prior * 100).toFixed(0)}% across
+                the {skillPrior.blend.seasons.length}{" "}
+                rated seasons. That is the
+                finding, not a footnote: the plus-minus this rating was supposed
+                to be anchored by establishes no measurable spread between
+                players, so the posterior is substantially the box score&rsquo;s
+                opinion with a small correction.{" "}
+              </>
+            )}
+            {skillGap && evaluation && (
+              <>
+                Against next season&rsquo;s K/D z — the test SKILL was declared
+                on before it was fitted — SKILL scores r ={" "}
+                {evaluation.predictors.skill.r.toFixed(4)} where raw K/D z
+                scores {evaluation.baseline_r.toFixed(4)}, a gap of{" "}
+                {skillGap.delta_r.toFixed(4)} [{skillGap.lo.toFixed(4)},{" "}
+                {skillGap.hi.toFixed(4)}] over {evaluation.n} transitions
+                against a floor of {skillGap.mde80.toFixed(4)}. It lost, and by
+                more than the test could have missed. K/D z remains the
+                recommended forecaster.{" "}
+              </>
+            )}
+            {skillBoard.length > 1 && (
+              <>
+                The interval is ±1.96 sd on a scale every row shares:{" "}
+                {skillTiedWithLeader} of the other {skillBoard.length - 1}{" "}
+                players on this board have one that reaches the top row&rsquo;s,
+                so the order is an ordering of estimates rather than a claim
+                that those players differ.{" "}
+              </>
+            )}
+            SKILL covers {skillSeasons[0]?.year}–
+            {skillSeasons[skillSeasons.length - 1]?.year} only; earlier seasons
+            have no season before them to train the prior on, so those years
+            lead with the season rating below.{" "}
+            <Link href="/methodology#skill" className="underline">
+              methodology
+            </Link>
+            .
+          </p>
+        </section>
+      )}
+
+      {ratingBoard.length > 0 && (
+        <section
+          data-surface="value-board"
+          className="mt-16 border-t border-hairline pt-8"
+        >
+          <h2 className="lower-third">
+            What a season was worth
+            <span className="lt-note">VALUE, top seasons, 30 maps minimum</span>
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
+            {RATINGS.value.question} A different question from the board above,
+            and the one this rating is good at: it describes a season that was
+            played rather than forecasting the next one.
+          </p>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>

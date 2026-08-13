@@ -1356,8 +1356,8 @@ the same nine maps also leave the four-way version comparison, which is why the 
 versions' comparison numbers move very slightly while their ratings do not move at all.
 
 **And 2.2.0 loses the map backtest, which is worth stating first rather than last.** Over the
-9,193 maps all four versions predict, Brier goes 1.0.0 0.05571, 2.0.0 0.04740, 2.1.0 0.04718,
-**2.2.0 0.04825** — a small regression, losing in 19 of 25 cohorts. Two things about that,
+9,193 maps all four versions predict, Brier goes 1.0.0 0.05572, 2.0.0 0.04741, 2.1.0 0.04720,
+**2.2.0 0.04828** — a small regression, losing in 19 of 25 cohorts. Two things about that,
 and neither is "the columns are worthless".
 
 The first is that this is the test the page above spends several paragraphs explaining should
@@ -2266,6 +2266,33 @@ above had been carrying a run from before the identity merges, the plus-minus li
 the fourth feature set, while its own pre-flight section quoted the current numbers. Both now
 agree, and a run that disagrees with either fails the release gate rather than printing a
 number nobody compares.
+
+### Which rating is the rating
+
+Three player ratings are published, and they are not three attempts at one number. Each
+names a different object, is judged by a different test, and carries a different known
+failure:
+
+| Rating | Answers | Judged by | Known failure |
+|---|---|---|---|
+| **SKILL** | how good is this player now | next-season persistence, declared before the fit | lost that test to raw K/D z, and takes 83% of its weight from the prior |
+| **VALUE** (composite, v2.1.0) | what was that season worth | the map backtest, per cohort | describes a season played; most of a career's seasons have overlapping intervals |
+| **Season plus-minus** | what won the map | split-half reliability, and a simulation of recovery | 16 of 1,010 published coefficients clear 1.96 SE |
+
+**The composite rating is no longer the rating the site leads with.** It answers "what was
+that season worth", and it was being read as "who is good now" — a question it was never
+fitted against. It has not changed, nothing it produced has been withdrawn, and every one of
+its numbers is still published. It sits behind the rating that claims the forward question.
+
+**The rule degrades by era, and has to.** SKILL exists for 2021-2026 only: an earlier season
+has no season before it to train the prior on, and the CWL years carry no season-resolution
+coefficient to blend with. A SKILL-first page for a CWL player would render nothing at all, so
+those pages lead with the composite rating and say why. This is the failure mode the era
+coverage work was about — an empty surface returns 200 and looks like a working page.
+
+And the rating now in front is the one that lost its own gate. It leads because it is the only
+one of the three that answers the forward question, not because it answers it well; the size of
+that loss is in the SKILL section below, next to the number rather than only here.
 
 ### SKILL: the box score fitted to predict wins, and what it did not fix
 

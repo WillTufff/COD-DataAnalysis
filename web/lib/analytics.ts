@@ -19,6 +19,7 @@ import {
   playerMetricSeason,
   playerRapm,
   playerSeasonAdjusted,
+  playerSkill,
   playerStyleSeason,
   rosterStints,
   seasons,
@@ -3575,4 +3576,682 @@ export async function getMapMeta(): Promise<MapSeason[]> {
     season.modes.sort((a, b) => b.games - a.games);
   }
   return out;
+}
+
+// ---------- The phases fitted after the career rating ----------
+//
+// Season plus-minus, the opponent-adjustment ladder, the openskill baseline,
+// SKILL and the pinned evaluation harness each open their own model run. None
+// of them share the rating run, so every reader below takes the run its own
+// model wrote, and a page that resolves the rating run alone reads nothing
+// here. The evaluation population is the exception: it is written onto the
+// metric-diff run, because that is the run that freezes it.
+
+async function artifactPayload<T>(
+  runId: number,
+  name: string,
+): Promise<T | null> {
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${runId} AND name = ${name}
+  `);
+  const payload = (rows as unknown as { payload: unknown }[])[0]?.payload as
+    | T
+    | undefined;
+  return payload ?? null;
+}
+
+export function latestSeasonRapmRun(): Promise<ModelRun | null> {
+  return latestRun("rapm_season");
+}
+
+export function latestOpponentAdjustRun(): Promise<ModelRun | null> {
+  return latestRun("opponent_adjust");
+}
+
+export function latestOpenskillRun(): Promise<ModelRun | null> {
+  return latestRun("openskill");
+}
+
+export function latestSkillRun(): Promise<ModelRun | null> {
+  return latestRun("skill_prior");
+}
+
+export function latestEvaluationRun(): Promise<ModelRun | null> {
+  return latestRun("evaluation");
+}
+
+// ---------- Season plus-minus ----------
+
+export type SeasonRapmCell = {
+  cell: string;
+  resolution: string;
+  player_columns: number;
+  pooled_players: number;
+  coef_sd: number;
+  se_median: number;
+  replacement_coef: number;
+  replacement_se: number;
+  penalty_dominated_share: number;
+};
+
+export type SeasonRapmGraph = {
+  cell: string;
+  maps: number;
+  resolution: string;
+  lineup_pools: number;
+  rank_ceiling: number;
+  distinct_lineups: number;
+  teammate_graph: {
+    nodes: number;
+    edges: number;
+    bridges: number;
+    components: number;
+    isolated_nodes: number;
+    algebraic_connectivity: number;
+    largest_component_share: number;
+  };
+};
+
+export type SeasonRapm = {
+  available: boolean;
+  what: string;
+  how_to_read: string;
+  n_maps: number;
+  // resolution is 'era' where one cell covers three seasons at once and
+  // 'season' where it does not. The CWL years reach only the first, which is
+  // why those seasons carry one repeated coefficient.
+  by_cell: SeasonRapmCell[];
+  graphs: SeasonRapmGraph[];
+  scopes: {
+    rule: string;
+    stored: string[];
+    career_retained_in: string;
+    smoothed_vs_filtered_r: number;
+  };
+  admission: { rule: string; min_maps: number; pooled_players: number };
+  publication: {
+    rows: number;
+    min_maps: number;
+    player_cells_published: number;
+  };
+  columns: {
+    total: number;
+    player_cells: number;
+    team_seasons: number;
+    replacement_buckets: number;
+  };
+  penalties: {
+    sigma2: number;
+    lambda0: number;
+    lambda_walk: number;
+    effective_df: number;
+    converged: boolean;
+    chosen_by: string;
+  };
+  response: {
+    published: string;
+    dropped_maps: number;
+    dropped_reason: string;
+    sensitivity: {
+      response: string;
+      n_maps: number;
+      coef_sd: number;
+      rank_corr_with_published_response: number;
+    }[];
+  };
+  reliability: {
+    available: boolean;
+    what: string;
+    unit: string;
+    r: number;
+    lo: number;
+    hi: number;
+    spearman_brown: number;
+    bootstrap_b: number;
+    n_player_cells: number;
+    by_cell: {
+      cell: string;
+      maps: number;
+      n_players: number;
+      r: number;
+      spearman_brown: number;
+    }[];
+  };
+};
+
+export function getSeasonRapm(runId: number): Promise<SeasonRapm | null> {
+  return artifactPayload<SeasonRapm>(runId, "rapm_season");
+}
+
+// Only 'filtered' may be read forward: the smoothed family's penalty is
+// two-sided and has already seen the season after the one it reports.
+export const FORWARD_RAPM_SCOPE = "filtered";
+
+export type PlayerSeasonRapm = {
+  seasonId: number;
+  year: number;
+  title: string;
+  resolution: string;
+  maps: number;
+  coef: number;
+  se: number;
+  concentration: number;
+  penaltyShare: number | null;
+  resolved: boolean;
+  entangled: boolean;
+};
+
+// One player's season coefficients from the season run. Empty where the player
+// never cleared the publication floor, which is the common case. In the CWL
+// years the resolution is 'era', so three seasons carry one estimate.
+export async function getPlayerSeasonRapm(
+  seasonRapmRunId: number,
+  playerId: number,
+  scope: string = FORWARD_RAPM_SCOPE,
+): Promise<PlayerSeasonRapm[]> {
+  const rows = await db
+    .select({
+      seasonId: playerRapm.seasonId,
+      year: seasons.year,
+      title: titles.name,
+      resolution: playerRapm.resolution,
+      maps: playerRapm.maps,
+      coef: playerRapm.coef,
+      se: playerRapm.se,
+      concentration: playerRapm.teammateConcentration,
+      penaltyShare: playerRapm.penaltyShare,
+    })
+    .from(playerRapm)
+    .innerJoin(seasons, eq(seasons.id, playerRapm.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .where(
+      and(
+        eq(playerRapm.runId, seasonRapmRunId),
+        eq(playerRapm.playerId, playerId),
+        eq(playerRapm.scope, scope),
+      ),
+    )
+    .orderBy(asc(seasons.year));
+  return rows.map((r) => ({
+    ...r,
+    seasonId: r.seasonId as number,
+    resolved: Math.abs(r.coef) > 1.96 * r.se,
+    entangled: r.concentration >= RAPM_CONCENTRATION_LIMIT,
+  }));
+}
+
+// ---------- Opponent adjustment ----------
+
+export type LadderRung = {
+  fits: number;
+  mean_abs_dz_median: number;
+  mean_abs_dz_p90: number;
+  mean_abs_dz_max: number;
+  top_n_churn_total: number;
+  placebo_ratio_median: number | null;
+  reliability_measured: number;
+  reliability_gain_median: number | null;
+  reliability_gain_positive: number;
+};
+
+export type LadderVerdict = {
+  rung: string;
+  clears: boolean;
+  clears_movement: boolean;
+  clears_placebo: boolean;
+  clears_reliability: boolean;
+  mean_abs_dz_median: number;
+  placebo_ratio_median: number | null;
+  reliability_gain_median: number | null;
+};
+
+export type OpponentAdjustment = {
+  version: string;
+  // What the ladder adjusts, which is not the plus-minus.
+  adjusts: string;
+  rungs: string[];
+  ladder: Record<string, LadderRung>;
+  stop_rule: {
+    adopted: string | null;
+    per_rung: LadderVerdict[];
+    thresholds: {
+      mean_abs_dz: number;
+      placebo_ratio: number;
+      reliability_gain: number;
+    };
+  };
+  // The share of lines whose opponent the first rung cannot see. A rung that is
+  // blind on part of the record cannot be read as an adjustment of it.
+  coverage: {
+    lines: number;
+    blind_share: number;
+    opponent_rated: number;
+    opponent_at_prior: number;
+    opponent_missing: number;
+    blind_by_season: Record<string, number>;
+  };
+};
+
+export function getOpponentAdjustment(
+  runId: number,
+): Promise<OpponentAdjustment | null> {
+  return artifactPayload<OpponentAdjustment>(runId, "opponent_adjustment");
+}
+
+// ---------- The openskill baseline ----------
+
+export type OpenskillBaseline = {
+  what: string;
+  model: string;
+  n_maps: number;
+  n_players: number;
+  n_player_seasons_published: number;
+  n_player_seasons_thin: number;
+  filtered_by_construction: string;
+  params: { mu: number; sigma: number; min_maps_season: number };
+  leaders: { player: string; mu: number; sigma: number; ordinal: number }[];
+};
+
+export function getOpenskillBaseline(
+  runId: number,
+): Promise<OpenskillBaseline | null> {
+  return artifactPayload<OpenskillBaseline>(runId, "openskill_baseline");
+}
+
+// ---------- SKILL ----------
+
+export type SkillPrior = {
+  what: string;
+  version: string;
+  feature_set_version: string;
+  // The verdict the phase reached, in one sentence, written by the model.
+  statement: string;
+  ladder: { rule: string; what: string; published_arm: string };
+  design: { n_columns: number; columns: string[] };
+  target: { n: number; players: number; scope: string; resolution: string };
+  blend: {
+    n: number;
+    what: string;
+    seasons: number[];
+    mean_weight_prior: number;
+    min_weight_prior: number;
+    max_weight_prior: number;
+    corr_with_prior: number;
+    corr_with_coef: number;
+  };
+  // tau2 near zero is the finding: the target holds no between-player variance
+  // for the blend to defend, so the weight falls on the prior.
+  weights: { tau2: number; what: string };
+  target_signal: {
+    available: boolean;
+    n: number;
+    tau: number;
+    tau2: number;
+    sd_coef: number;
+    mean_se: number;
+    mean_obs_var: number;
+    collapsed: boolean;
+    distinguishable: boolean;
+    reading: string;
+  };
+  coefficients: {
+    available: boolean;
+    arm: string;
+    lambda: number;
+    intercept: number;
+    effective_df: number;
+    by_column: { column: string; beta: number }[];
+  };
+};
+
+export function getSkillPrior(runId: number): Promise<SkillPrior | null> {
+  return artifactPayload<SkillPrior>(runId, "skill_prior");
+}
+
+export type PlayerSkillSeason = {
+  seasonId: number;
+  year: number;
+  title: string;
+  priorMean: number;
+  priorSd: number;
+  coef: number;
+  se: number;
+  skill: number;
+  skillSd: number;
+  weightPrior: number;
+  model: string;
+};
+
+// One player's SKILL by season. Empty before 2021: the first season has
+// nothing before it to train the prior on, and the CWL years carry no
+// season-resolution coefficient to blend with.
+export async function getPlayerSkill(
+  skillRunId: number,
+  playerId: number,
+): Promise<PlayerSkillSeason[]> {
+  return db
+    .select({
+      seasonId: playerSkill.seasonId,
+      year: seasons.year,
+      title: titles.name,
+      priorMean: playerSkill.priorMean,
+      priorSd: playerSkill.priorSd,
+      coef: playerSkill.coef,
+      se: playerSkill.se,
+      skill: playerSkill.skill,
+      skillSd: playerSkill.skillSd,
+      weightPrior: playerSkill.weightPrior,
+      model: playerSkill.model,
+    })
+    .from(playerSkill)
+    .innerJoin(seasons, eq(seasons.id, playerSkill.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .where(
+      and(eq(playerSkill.runId, skillRunId), eq(playerSkill.playerId, playerId)),
+    )
+    .orderBy(asc(seasons.year));
+}
+
+export type SkillLeaderRow = {
+  playerId: number;
+  handle: string;
+  seasonId: number;
+  year: number;
+  skill: number;
+  skillSd: number;
+  weightPrior: number;
+};
+
+// The SKILL leaderboard for one season. Seasons before 2021 hold no rows, and
+// a caller must render that as an absence rather than an empty leaderboard.
+export async function getSkillLeaderboard(
+  skillRunId: number,
+  seasonId: number,
+  limit = 25,
+): Promise<SkillLeaderRow[]> {
+  return db
+    .select({
+      playerId: playerSkill.playerId,
+      handle: players.handle,
+      seasonId: playerSkill.seasonId,
+      year: seasons.year,
+      skill: playerSkill.skill,
+      skillSd: playerSkill.skillSd,
+      weightPrior: playerSkill.weightPrior,
+    })
+    .from(playerSkill)
+    .innerJoin(players, eq(players.id, playerSkill.playerId))
+    .innerJoin(seasons, eq(seasons.id, playerSkill.seasonId))
+    .where(
+      and(eq(playerSkill.runId, skillRunId), eq(playerSkill.seasonId, seasonId)),
+    )
+    .orderBy(desc(playerSkill.skill))
+    .limit(limit);
+}
+
+// Which seasons SKILL covers at all, so a page can degrade to VALUE on the ones
+// it does not cover instead of rendering an empty surface.
+export async function getSkillSeasons(
+  skillRunId: number,
+): Promise<{ seasonId: number; year: number; players: number }[]> {
+  const rows = await db.execute(sql`
+    SELECT ps.season_id, s.year, count(*)::int AS players
+    FROM player_skill ps
+    JOIN seasons s ON s.id = ps.season_id
+    WHERE ps.run_id = ${skillRunId}
+    GROUP BY ps.season_id, s.year
+    ORDER BY s.year
+  `);
+  return (
+    rows as unknown as { season_id: number; year: number; players: number }[]
+  ).map((r) => ({ seasonId: r.season_id, year: r.year, players: r.players }));
+}
+
+// ---------- The pinned evaluation harness ----------
+
+export type EvaluationGap = {
+  what: string;
+  delta_r: number;
+  lo: number;
+  hi: number;
+  se: number;
+  mde80: number;
+  clears_mde: boolean;
+  excludes_zero: boolean;
+  beats_baseline: boolean;
+};
+
+export type EvaluationDeclaration = {
+  name: string;
+  role: string;
+  what: string;
+  target: string;
+  statistic: string;
+  baselines: string[];
+  predictors: string[];
+  resampling_unit: string;
+  significance_claimed: boolean;
+};
+
+export type EvaluationPrimary = {
+  available: boolean;
+  panel: string;
+  n: number;
+  n_panel: number;
+  baseline_r: number;
+  scored_predictors: string[];
+  predictors: Record<string, { r: number; lo: number; hi: number }>;
+  gaps: Record<string, EvaluationGap>;
+  predictor_agreement: Record<string, number>;
+  resampling: { b: number; unit: string; why: string; clusters: number };
+  declared: EvaluationDeclaration;
+};
+
+export type EvaluationManifest = {
+  what: string;
+  version: string;
+  sha256: string;
+  pinned_sha256: string;
+  // False means the harness changed after the pin, so every number it produced
+  // comes from a different test than the declared one.
+  matches_pin: boolean;
+  mde: string;
+  bootstrap_b: number;
+  power_alpha: number;
+  power_target: number;
+  primary: EvaluationDeclaration;
+  secondary: {
+    name: string;
+    role: string;
+    what: string;
+    target: string;
+    statistic: string;
+    resampling_unit: string;
+  }[];
+  reproduces: { model: string; artifact: string }[];
+  supersedes: { version: string; sha256: string; changed: string }[];
+};
+
+export type EvaluationPlacebo = {
+  what: string;
+  passes: boolean;
+  n_run: number;
+  n_failed: number;
+  deferred: Record<string, string>;
+  placebos: Record<
+    string,
+    { what: string; passes: boolean; available: boolean }
+  >;
+};
+
+export type EvaluationReproduction = {
+  what: string;
+  reproduces: boolean;
+  tolerance: number;
+  n_mismatched: number;
+  n_page_mismatched: number;
+  recomputed: {
+    what: string;
+    harness: number;
+    published: number;
+    matches: boolean;
+  }[];
+  against_the_page: {
+    what: string;
+    run: number | string;
+    page: number | string;
+    matches: boolean;
+  }[];
+};
+
+export type SkillPower = {
+  available: boolean;
+  what: string;
+  statement: string;
+  unit: string;
+  n_panel: number;
+  n_eligible: number;
+  clusters: number;
+  baseline_r: number;
+  design_effect: number;
+  distance_to_clear: number;
+  eligibility: string;
+  dropped: Record<string, number>;
+  floors: Record<
+    string,
+    {
+      mde80_clustered: number;
+      mde80_independent: number;
+      predictor_agreement: number;
+    }
+  >;
+};
+
+export type EvaluationPopulation = {
+  path: string;
+  rule: string;
+  cut: string;
+  sha256: string;
+  frozen: boolean;
+  frozen_at: string;
+  readable: boolean;
+  // False means the frozen population and the database have diverged, so the
+  // harness scored a different set of maps than the one it declared.
+  matches: boolean;
+  n_maps: number;
+  n_added: number;
+  n_removed: number;
+  eligible_now: number;
+  by_season: Record<string, number>;
+};
+
+export function getEvaluationManifest(
+  runId: number,
+): Promise<EvaluationManifest | null> {
+  return artifactPayload<EvaluationManifest>(runId, "evaluation_manifest");
+}
+
+export function getEvaluationPrimary(
+  runId: number,
+): Promise<EvaluationPrimary | null> {
+  return artifactPayload<EvaluationPrimary>(runId, "evaluation_primary");
+}
+
+// Seven secondary tests, none of which claims significance. Only the two the
+// page argues from are typed; the rest stay readable as unknown.
+export type EvaluationSecondary = {
+  prior_target_persistence: {
+    n: number;
+    what: string;
+    target: string;
+    resolution_read: string;
+    predictors: Record<string, number>;
+    significance_claimed: boolean;
+  };
+  season_plusminus_persistence: {
+    n: number;
+    kd_z: number;
+    rapm_filtered: number;
+    scope_read: string;
+    resolution_read: string;
+    significance_claimed: boolean;
+  };
+  [key: string]: unknown;
+};
+
+export function getEvaluationSecondary(
+  runId: number,
+): Promise<EvaluationSecondary | null> {
+  return artifactPayload<EvaluationSecondary>(runId, "evaluation_secondary");
+}
+
+export function getEvaluationPlacebo(
+  runId: number,
+): Promise<EvaluationPlacebo | null> {
+  return artifactPayload<EvaluationPlacebo>(runId, "evaluation_placebo");
+}
+
+export function getEvaluationReproduction(
+  runId: number,
+): Promise<EvaluationReproduction | null> {
+  return artifactPayload<EvaluationReproduction>(
+    runId,
+    "evaluation_reproduction",
+  );
+}
+
+export function getSkillPower(runId: number): Promise<SkillPower | null> {
+  return artifactPayload<SkillPower>(runId, "skill_power");
+}
+
+// Written onto the metric-diff run, which is the run that freezes it.
+export async function getEvaluationPopulation(): Promise<EvaluationPopulation | null> {
+  const run = await latestRun("metric_diff");
+  if (!run) return null;
+  return artifactPayload<EvaluationPopulation>(run.id, "evaluation_population");
+}
+
+// ---------- The identification pre-flight ----------
+//
+// Fitted before the season plus-minus, and the reason that model has two
+// resolutions rather than one. Its own run, again.
+
+export function latestRapmPreflightRun(): Promise<ModelRun | null> {
+  return latestRun("rapm_preflight");
+}
+
+export type RapmPreflightEra = {
+  league: string;
+  branch: string;
+  stops: boolean;
+  rank_share: number;
+  thin_lineups: boolean;
+  recovery_within_team: number;
+  median_effective_lineups: number;
+  rank_below_threshold: boolean;
+  recovery_below_threshold: boolean;
+};
+
+export type RapmPreflightVerdict = {
+  what: string;
+  branch: string;
+  reason: string;
+  by_era: RapmPreflightEra[];
+  eras_stopped: string[];
+  // True where the phase as specified would have been stopped outright, which
+  // is what the fork resolves rather than overrules.
+  stops_p1_as_specified: boolean;
+  thresholds: {
+    rank_share: number;
+    recovery_floor: number;
+    effective_lineups: number;
+    recovery_within_team: number;
+  };
+};
+
+export function getRapmPreflight(
+  runId: number,
+): Promise<RapmPreflightVerdict | null> {
+  return artifactPayload<RapmPreflightVerdict>(runId, "rapm_preflight_verdict");
 }
