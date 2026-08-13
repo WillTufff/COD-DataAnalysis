@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
@@ -517,6 +519,55 @@ def scored_modes(conn: psycopg.Connection[Any]) -> tuple[list[tuple[str, int]], 
     return [(str(r[0]), int(r[1])) for r in rows], {str(r[0]) for r in named}
 
 
+# The site's read side, as source. A page that asks for an artifact no model
+# writes renders its empty state and returns 200, so nothing in either test
+# suite sees it — the site is a separate language from the models, and the two
+# sets of names have no compiler between them. This is that compiler.
+SITE_ANALYTICS = Path(__file__).resolve().parents[3] / "web" / "lib" / "analytics.ts"
+
+_NAME_EQ = re.compile(r"name\s*=\s*'([a-z0-9_]+)'")
+_NAME_IN = re.compile(r"name\s+IN\s*\(([^)]*)\)")
+_SINGLE_QUOTED = re.compile(r"'([a-z0-9_]+)'")
+_ARTIFACT_CALL = re.compile(r'artifactPayload<[^>]*>\(\s*[A-Za-z_.]+\s*,\s*"([a-z0-9_]+)"', re.S)
+_BY_NAME = re.compile(r'byName\.get\("([a-z0-9_]+)"\)')
+_META_LIST = re.compile(r"META_ARTIFACT_NAMES\s*=\s*\[(.*?)\]", re.S)
+_DOUBLE_QUOTED = re.compile(r'"([a-z0-9_]+)"')
+
+
+def artifact_names_read(source: str) -> set[str]:
+    """Every model_artifacts.name the site asks for, read out of its source.
+
+    Four shapes reach the database: an equality in a SQL template, an IN list,
+    the artifactPayload helper, and a whole-run read picked apart by name."""
+    names = set(_NAME_EQ.findall(source))
+    for group in _NAME_IN.findall(source):
+        names.update(_SINGLE_QUOTED.findall(group))
+    names.update(_ARTIFACT_CALL.findall(source))
+    names.update(_BY_NAME.findall(source))
+    for group in _META_LIST.findall(source):
+        names.update(_DOUBLE_QUOTED.findall(group))
+    return names
+
+
+def site_source() -> str:
+    if not SITE_ANALYTICS.exists():
+        raise CannotRun(f"no site source at {SITE_ANALYTICS}")
+    return SITE_ANALYTICS.read_text()
+
+
+def written_artifact_names(conn: psycopg.Connection[Any]) -> set[str]:
+    rows = conn.execute("SELECT DISTINCT name FROM model_artifacts").fetchall()
+    if not rows:
+        raise CannotRun("no artifacts in this database")
+    return {str(row[0]) for row in rows}
+
+
+def site_read_failures(read: set[str], written: set[str]) -> list[str]:
+    """Every name the site reads has to be a name some run wrote. The reverse is
+    allowed: an artifact no page reads yet is a plan, not a defect."""
+    return [f"the site reads '{name}', which no run has written" for name in sorted(read - written)]
+
+
 def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
     """Every gate against the newest run of its model. The predicates above take
     payloads rather than a connection, so the same conditions are exercised on
@@ -562,6 +613,10 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             harness_failures(
                 artifact(conn, METRIC_DIFF_MODEL, REPORT_ARTIFACT), published_models(conn)
             ),
+        ),
+        (
+            "site reads",
+            site_read_failures(artifact_names_read(site_source()), written_artifact_names(conn)),
         ),
         (
             "evaluation population",

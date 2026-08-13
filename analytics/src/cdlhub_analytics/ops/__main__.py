@@ -175,9 +175,10 @@ JOBS: list[dict[str, Any]] = [
             "web lint",
             "web types",
             "web tests",
+            "web e2e",
         ],
         "destructive": False,
-        "est_seconds": 180,
+        "est_seconds": 210,
         "flags": [
             {"name": "--skip-web", "label": "Python only"},
             {"name": "--skip-python", "label": "Site only"},

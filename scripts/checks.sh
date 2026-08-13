@@ -16,7 +16,7 @@ root="$PWD"
 
 PYTHON_PROJECTS=(analytics pipeline)
 PYTHON_CHECKS=(lint format types tests)
-WEB_CHECKS=(lint types tests)
+WEB_CHECKS=(lint types tests e2e)
 
 # Release gates over the newest run of each model: a title with no declared
 # rotation, a rating cohort whose variance collapsed, a style basis that moved
@@ -102,6 +102,10 @@ web_check() {
     lint)  run "web $check" web "$npm_bin" run lint ;;
     types) run "web $check" web "$npm_bin" run typecheck ;;
     tests) run "web $check" web "$npm_bin" test ;;
+    # Renders the site against the local database and asserts a rating surface
+    # per era. Needs a fitted model, so it reports a skip rather than a pass
+    # when there is none — an empty page is the failure it exists to catch.
+    e2e)   run_gate "web $check" web "$npm_bin" run e2e ;;
   esac
 }
 

@@ -9,7 +9,9 @@
     "lint": "eslint",
     "db:check": "tsx scripts/db-check.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "tsx scripts/e2e-precheck.ts && playwright test",
+    "e2e:smoke": "E2E_MODE=smoke playwright test"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -19,6 +21,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

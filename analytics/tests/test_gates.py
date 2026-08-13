@@ -13,12 +13,14 @@ from typing import Any
 
 from cdlhub_analytics.gates import (
     PUBLISHED_BASES,
+    artifact_names_read,
     basis_failures,
     cohort_failures,
     evaluation_failures,
     mode_naming_failures,
     rotation_failures,
     season_rapm_failures,
+    site_read_failures,
     skill_prior_failures,
 )
 
@@ -514,3 +516,49 @@ def test_a_dropped_arm_passes_on_the_verdict_it_was_dropped_for() -> None:
         )
         == []
     )
+
+
+# ------------------------------------------------------------------ site reads
+
+SITE_SHAPES = """
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${ratingRunId} AND name = 'rating_posterior'
+  `);
+  const more = await db.execute(sql`
+    SELECT name, payload FROM model_artifacts
+    WHERE run_id = ${run.id} AND name IN ('series_dynamics', 'series_momentum')
+  `);
+  return artifactPayload<SeasonRapm>(runId, "rapm_season");
+  const mapBacktest = byName.get("map_backtest") as MapElo["mapBacktest"];
+const META_ARTIFACT_NAMES = [
+  "meta_weapons",
+  "meta_rigs",
+] as const;
+"""
+
+
+def test_every_shape_the_site_reads_an_artifact_by_is_found() -> None:
+    """Four shapes reach model_artifacts, and a parser that misses one would
+    report a clean subset while the missing read stays unchecked."""
+    assert artifact_names_read(SITE_SHAPES) == {
+        "rating_posterior",
+        "series_dynamics",
+        "series_momentum",
+        "rapm_season",
+        "map_backtest",
+        "meta_weapons",
+        "meta_rigs",
+    }
+
+
+def test_a_page_reading_an_artifact_no_run_writes_fails() -> None:
+    assert site_read_failures({"rapm_season", "skill_ghost"}, {"rapm_season"}) == [
+        "the site reads 'skill_ghost', which no run has written"
+    ]
+
+
+def test_an_artifact_no_page_reads_yet_is_not_a_failure() -> None:
+    """The gate is one-directional on purpose: writing ahead of the site is how
+    every phase here shipped, and reading ahead of the models is the defect."""
+    assert site_read_failures({"rapm_season"}, {"rapm_season", "rapm_recovery"}) == []
