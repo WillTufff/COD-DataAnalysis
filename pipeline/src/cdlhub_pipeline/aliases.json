@@ -429,7 +429,7 @@
       }
     ]
   },
-  "_comment_lpdb": "'lpdb_teams' maps LPDB opponent/team spellings to canonical team names. 'lpdb_events' maps LPDB tournament pagenames to local event names (season is derived from the LPDB game code); null marks a page reviewed and deliberately skipped — no local event models it. Challengers/King/EWC pages are skipped wholesale in code, not listed here.",
+  "_comment_lpdb": "'lpdb_teams' maps LPDB opponent/team spellings to canonical team names. 'lpdb_events' maps LPDB tournament pagenames to local event names (season is derived from the LPDB game code); null marks a page reviewed and deliberately skipped — no local event models it. Challengers/King/EWC pages are skipped wholesale in code, not listed here. The six 2018 CWL open events need an entry because name matching strips the year and Liquipedia calls them 'Open' — 'CWL Dallas Open 2018' against the archive's 'CWL Dallas 2017', which is the same December 2017 event under the two conventions.",
   "lpdb_teams": {
     "OpTic Gaming Los Angeles": "OpTic Gaming LA",
     "ENVY": "Team Envy",
@@ -547,6 +547,12 @@
     "Call_of_Duty_World_League/2017/Pro_League/Stage_1": null,
     "Call_of_Duty_World_League/2017/Pro_League/Stage_2": null,
     "Call_of_Duty_World_League/2018/Championship/Last_Chance_Qualifier": null,
+    "Call_of_Duty_World_League/2018/Dallas": "CWL Dallas 2017",
+    "Call_of_Duty_World_League/2018/New_Orleans": "CWL New Orleans 2018",
+    "Call_of_Duty_World_League/2018/Atlanta": "CWL Atlanta 2018",
+    "Call_of_Duty_World_League/2018/Birmingham": "CWL Birmingham 2018",
+    "Call_of_Duty_World_League/2018/Seattle": "CWL Seattle 2018",
+    "Call_of_Duty_World_League/2018/Anaheim": "CWL Anaheim 2018",
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/Asia_Pacific": null,
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/Europe": null,
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/North_America": null,

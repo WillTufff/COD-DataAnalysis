@@ -22,6 +22,7 @@ from .metricdiff import run as metricdiff
 from .ratings import (
     admission,
     comparison,
+    context,
     evalspec,
     evaluate,
     fit,
@@ -857,6 +858,56 @@ def main(argv: list[str] | None = None) -> int:
                 f"  {era_name}: mean opposition worth {stats['mean_delta_z']} sd per line, "
                 f"95th percentile |{stats['p95_abs_delta_z']}|"
             )
+
+        # What the box score owed to the circumstances of the map: the venue,
+        # the stage, the map itself. Placed after the opponent ladder because
+        # the opponent block sits in the same design, so a context coefficient
+        # is what survives holding the opposition fixed.
+        progress.stage("match_context")
+        match_ctx = context.load_context(conn)
+        players_by_id = {
+            cast(int, r[0]): cast(str, r[1])
+            for r in conn.execute("SELECT id, handle FROM players").fetchall()
+        }
+        context_art = context.artifact(panels, match_ctx, seasons_by_id, modes_by_id, players_by_id)
+        mc_run = open_run(
+            conn,
+            context.MODEL,
+            context.VERSION,
+            {
+                "feature_set_version": player_rating.PUBLISHED_VERSION,
+                **context_art["params"],
+            },
+            through,
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (mc_run, "match_context", json.dumps(context_art)),
+        )
+        print(
+            f"match_context run {mc_run}: {len(context_art['per_cohort'])} cohort-features "
+            f"over {len(panels)} cohorts"
+        )
+        for family, verdict in context_art["ablation"]["verdicts"].items():
+            stats = context_art["ablation"]["by_family"][family]
+            move = (stats.get("leaderboard_move") or {}).get("median")
+            delta = (stats.get("oof_rmse_delta") or {}).get("median")
+            print(
+                f"  {family}: {verdict}; median move {move} sd, "
+                f"out-of-fold RMSE {delta:+} on "
+                f"{stats.get('cohorts_improved')}/{stats.get('cohorts_measured')} cohorts"
+            )
+        venue_finding = context_art["venue_effect"]
+        print(
+            f"  per-player venue effect: {venue_finding['n_clearing_interval']} of "
+            f"{len(venue_finding['players'])} player-cohort-features clear their interval "
+            f"against the cohort's common effect, over {venue_finding['n_players']} players"
+        )
+        host_finding = context_art["host_effect"]
+        print(
+            f"  home-market effect: {host_finding['n_clearing_interval']} of "
+            f"{len(host_finding['per_cohort'])} cohort-features clear their interval"
+        )
 
         # The baseline the persistence gate is declared against: an online
         # player rating that knows who was on the server and nothing else. It

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Calibration } from "@/components/charts/Calibration";
 import { EstimateForest } from "@/components/charts/EstimateForest";
 import { LadderMovement } from "@/components/charts/LadderMovement";
+import { MovementVsError } from "@/components/charts/MovementVsError";
 import { SpreadVsError } from "@/components/charts/SpreadVsError";
 import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
 import {
@@ -39,6 +40,7 @@ import {
   getEvaluationReproduction,
   getEvaluationSecondary,
   getOpenskillBaseline,
+  getMatchContext,
   getOpponentAdjustment,
   getSeasonRapm,
   getSkillPower,
@@ -46,6 +48,7 @@ import {
   getSkillSeasons,
   latestEvaluationRun,
   latestOpenskillRun,
+  latestMatchContextRun,
   latestOpponentAdjustRun,
   latestRapmPreflightRun,
   latestRatingRun,
@@ -292,6 +295,7 @@ export default async function MethodologyPage() {
     preflightRun,
     seasonRapmRun,
     opponentRun,
+    matchContextRun,
     openskillRun,
     skillRun,
     evaluationRun,
@@ -299,6 +303,7 @@ export default async function MethodologyPage() {
       latestRapmPreflightRun(),
       latestSeasonRapmRun(),
       latestOpponentAdjustRun(),
+      latestMatchContextRun(),
       latestOpenskillRun(),
       latestSkillRun(),
       latestEvaluationRun(),
@@ -307,6 +312,7 @@ export default async function MethodologyPage() {
     preflight,
     seasonRapm,
     opponentAdjustment,
+    matchContext,
     openskill,
     skillPrior,
     skillSeasons,
@@ -321,6 +327,7 @@ export default async function MethodologyPage() {
     preflightRun ? getRapmPreflight(preflightRun.id) : Promise.resolve(null),
     seasonRapmRun ? getSeasonRapm(seasonRapmRun.id) : Promise.resolve(null),
     opponentRun ? getOpponentAdjustment(opponentRun.id) : Promise.resolve(null),
+    matchContextRun ? getMatchContext(matchContextRun.id) : Promise.resolve(null),
     openskillRun ? getOpenskillBaseline(openskillRun.id) : Promise.resolve(null),
     skillRun ? getSkillPrior(skillRun.id) : Promise.resolve(null),
     skillRun ? getSkillSeasons(skillRun.id) : Promise.resolve([]),
@@ -2666,6 +2673,178 @@ export default async function MethodologyPage() {
               the correction stays out of the published per-player statistics:
               the site continues to show unadjusted numbers, and what ships is
               the ladder, its controls and its verdict as a versioned run.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {matchContext && (
+        <section id="match-context" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Match context
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              <strong className="text-ink">The object</strong> is the same one
+              the opponent ladder adjusts — {matchContext.adjusts}. Four columns
+              describe the circumstances of a map and nothing read any of them:
+              whether it was played on a LAN stage or online, what round it was,
+              which map it was, and what the event paid. The design holds the
+              player and the opposing lineup fixed, so every coefficient here is
+              what survives that — and no further: {matchContext.claim}.
+            </p>
+            <p>
+              <strong className="text-ink">The judge</strong> was declared before
+              anything was fitted: one row per feature family, each judged on two
+              numbers. How far it moves the leaderboard, in cohort standard
+              deviations, and whether it lowers out-of-fold error on the rate it
+              claims to explain, over five folds cut on whole series. A family
+              has to lower that error on more than{" "}
+              {(matchContext.ablation.keep_share * 100).toFixed(0)}% of the
+              cohorts it was fitted on. Moving the table without predicting is
+              what a family fitting its own noise looks like, and the pair of
+              numbers is what separates the two.
+            </p>
+            <div className="border border-hairline bg-surface p-4">
+              <MovementVsError
+                families={matchContext.families
+                  .map((family) => {
+                    const stats = matchContext.ablation.by_family[family];
+                    return {
+                      family,
+                      move: stats?.leaderboard_move?.median ?? 0,
+                      errorDelta: stats?.oof_rmse_delta?.median ?? 0,
+                      improved: stats?.cohorts_improved ?? 0,
+                      measured: stats?.cohorts_measured ?? 0,
+                      kept: (
+                        matchContext.ablation.verdicts[family] ?? ""
+                      ).startsWith("kept"),
+                    };
+                  })
+                  .filter((f) => f.measured > 0)}
+              />
+              <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                The bar is how far the family moves the leaderboard; the mark to
+                its right is the change in out-of-fold error, on its own scale,
+                with a filled square where prediction improved and a hollow
+                circle where it did not. Five of the six families have a bar and
+                sit on the dashed line: they move the table and predict nothing.
+                One sits well to the left of it.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Family</th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Median move
+                    </th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Out-of-fold RMSE
+                    </th>
+                    <th className="py-2 pr-4 text-right font-normal">
+                      Cohorts improved
+                    </th>
+                    <th className="py-2 font-normal">Verdict</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchContext.families.map((family) => {
+                    const stats = matchContext.ablation.by_family[family];
+                    const verdict =
+                      matchContext.ablation.verdicts[family] ?? "not fitted";
+                    return (
+                      <tr key={family} className="border-b border-hairline/60">
+                        <td className="py-1.5 pr-4 font-mono text-xs">
+                          {family}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                          {stats?.leaderboard_move?.median === undefined
+                            ? "—"
+                            : stats.leaderboard_move.median.toFixed(4)}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {stats?.oof_rmse_delta?.median === undefined
+                            ? "—"
+                            : stats.oof_rmse_delta.median.toFixed(4)}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {stats?.cohorts_measured
+                            ? `${stats.cohorts_improved}/${stats.cohorts_measured}`
+                            : "—"}
+                        </td>
+                        <td className="py-1.5 text-xs">{verdict}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <strong className="text-ink">
+                The LAN effect, per player, is a null.
+              </strong>{" "}
+              Each player&rsquo;s LAN-minus-online deviation is pooled by
+              empirical Bayes, and the interval is placed around the cohort&rsquo;s
+              common effect rather than around zero — shrinkage pulls every
+              player toward that common value, so asking whether a player differs
+              from zero asks whether the cohort does, and answers yes for
+              everyone at once. Of{" "}
+              {matchContext.venue_effect.players.length.toLocaleString()}{" "}
+              player-cohort-features over{" "}
+              {matchContext.venue_effect.n_players} players,{" "}
+              {matchContext.venue_effect.n_clearing_interval} clear their
+              interval against that common effect. Chance alone would put about{" "}
+              {Math.round(matchContext.venue_effect.players.length / 20)} outside
+              it. The online warrior is not in this record — not that the effect
+              is small, but that the players cannot be told apart in how they
+              carry between the two venues.
+            </p>
+            <p>
+              <strong className="text-ink">The known failure</strong> is that the
+              venue term is half a stage term. Across{" "}
+              {(matchContext.coverage.by_era.CDL?.lines ?? 0).toLocaleString()}{" "}
+              Call of Duty League lines, LAN is where the Major bracket is played
+              and online is where the qualifier is: regressing the venue flag on
+              the stage classes returns an R² near one half. And the earlier era
+              has no venue contrast at all —{" "}
+              {(matchContext.coverage.by_era.CWL?.lan ?? 0).toLocaleString()} CWL
+              lines, every one of them LAN, none online. So the venue question is
+              answerable only inside the newer era, at roughly twice the variance
+              the raw split suggests, and the era and the venue cannot be told
+              apart across the seam between them at all.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The home-market effect lands as noise.
+              </strong>{" "}
+              No source carries a team&rsquo;s home city — Liquipedia records a
+              region for 457 of 458 teams and an event&rsquo;s organizer is
+              always the publisher — so the map from venue to franchise is
+              hand-curated and published with a reason and a confidence for every
+              one of its entries, neutral sites included.{" "}
+              {matchContext.host_effect.n_clearing_interval} of{" "}
+              {matchContext.host_effect.per_cohort.length} cohort-features clear
+              their interval, on a flag that is set for one team at one event, and
+              the family does not survive the ablation. What large coefficients
+              there are sit on a few dozen lines each.
+            </p>
+            <p>
+              <strong className="text-ink">
+                Map identity is the one family that earns its place.
+              </strong>{" "}
+              It is fitted as a random effect rather than as one dummy per map —
+              the rotation changes every title and several maps carry a few
+              hundred rows — and it lowers out-of-fold error on{" "}
+              {matchContext.ablation.by_family.map_identity?.cohorts_improved ??
+                0}{" "}
+              of{" "}
+              {matchContext.ablation.by_family.map_identity?.cohorts_measured ??
+                0}{" "}
+              cohorts. Hill time on one map is not hill time on another, and the
+              cohort the rating standardizes in — season by mode — averages over
+              the whole rotation.
             </p>
           </div>
         </section>

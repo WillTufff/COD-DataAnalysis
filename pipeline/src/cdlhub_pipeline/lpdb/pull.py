@@ -1,8 +1,10 @@
 """Pull LPDB tables to disk.
 
 Placements, tournaments, and matches are pulled per game code — the ten
-CWL/CDL-era codes only, which keeps CODM and pre-2017 titles out — scoped to
-the premier circuit via publishertier/liquipediatier. Teams, squad players,
+CWL/CDL-era codes only, which keeps CODM and pre-2017 titles out. Placements
+and matches are scoped to the premier circuit via publishertier/liquipediatier;
+tournaments are pulled at every tier, because that table describes events
+rather than creating them. Teams, squad players,
 transfers, and player bios are pulled whole; the loaders filter to modeled
 teams/players, so the snapshots stay complete while the DB stays scoped.
 Raw pages land in snapshots/lpdb/<table>/ via the client; consolidated row
@@ -88,6 +90,16 @@ PREMIER = "([[publishertier::true]] OR [[liquipediatier::1]])"
 # condition the pull already sends once per game code.
 AWARDS = "([[mode::award_individual]] OR " + PREMIER + ")"
 
+# The tournament table is pulled at every tier. It only ever enriches an event
+# that already exists locally — it creates none — so a wider snapshot can add a
+# description, never a row. Under the premier scope the nine CWL open events
+# were tier 2 and therefore absent, which is why their `is_lan` had to be
+# curated instead of derived. Measured against the live event list before the
+# scope changed: 144 rows become 1,358, three events gain an LPDB tournament
+# type, none lose one, none change, and no page's name becomes ambiguous
+# against a local event.
+ALL_TIERS = ""
+
 PLACEMENTS_PATH = SNAPSHOT_ROOT / "placements.json"
 TEAMS_PATH = SNAPSHOT_ROOT / "teams.json"
 TOURNAMENTS_PATH = SNAPSHOT_ROOT / "tournaments.json"
@@ -107,9 +119,8 @@ def _per_game(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for game in GAME_SEASONS:
-        conditions = f"[[game::{game}]] AND {scope}"
-        if extra:
-            conditions = f"[[game::{game}]] AND {extra} AND {scope}"
+        parts = [f"[[game::{game}]]", extra, scope]
+        conditions = " AND ".join(part for part in parts if part)
         page = client.get_all(table, conditions=conditions, query=query, order=order)
         print(f"{table} {game}: {len(page)} rows")
         rows.extend(page)
@@ -132,7 +143,7 @@ PULLS: dict[str, tuple[Path, Callable[[LpdbClient], list[dict[str, Any]]]]] = {
     "teams": (TEAMS_PATH, lambda c: _whole(c, "team", TEAM_QUERY, "pagename ASC")),
     "tournaments": (
         TOURNAMENTS_PATH,
-        lambda c: _per_game(c, "tournament", "", TOURNAMENT_QUERY, "pagename ASC"),
+        lambda c: _per_game(c, "tournament", "", TOURNAMENT_QUERY, "pagename ASC", scope=ALL_TIERS),
     ),
     "squadplayers": (
         SQUADPLAYERS_PATH,

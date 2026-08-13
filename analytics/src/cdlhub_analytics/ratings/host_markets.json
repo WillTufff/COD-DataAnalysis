@@ -1,0 +1,191 @@
+{
+  "_comment": [
+    "Which franchises call a LAN event's city home, keyed '<season year>:<event",
+    "name>'. Hand-curated, because no source carries it: LPDB's team.locations",
+    "holds region1 for 457 of 458 teams and a tournament's organizers field is",
+    "'Activision' for every Call of Duty League event.",
+    "",
+    "The question asked is home MARKET, not designated host. Which franchise",
+    "signed the venue lease is not in the record and a Los Angeles weekend had",
+    "two Los Angeles teams, so 'whose city is this' is answerable from the venue",
+    "and the season's franchise list while 'who hosted' is not.",
+    "",
+    "'teams' names franchises as they were branded that season, so a brand that",
+    "moved is not credited with a market it had not moved to yet. An empty list",
+    "is a neutral site and is stated rather than left out. 'confidence' is",
+    "'clear' where the venue is in the franchise's own city and 'judgement'",
+    "where it is elsewhere in the same metropolitan area; the host finding is",
+    "reported both with and without the judgement calls.",
+    "",
+    "Only the Call of Duty League is listed. The CWL era was an open circuit of",
+    "org-branded teams — FaZe, OpTic, eUnited — with no home cities at all, so",
+    "every CWL event is a neutral site by construction rather than by omission."
+  ],
+  "events": {
+    "2020:CDL Launch Weekend": {
+      "teams": ["Minnesota RØKKR"],
+      "confidence": "clear",
+      "reason": "Minneapolis Armory, the RØKKR's own city"
+    },
+    "2020:CDL Week 2: London": {
+      "teams": ["London Royal Ravens"],
+      "confidence": "clear",
+      "reason": "Copper Box Arena, London"
+    },
+    "2020:CDL Week 3: Atlanta": {
+      "teams": ["Atlanta FaZe"],
+      "confidence": "clear",
+      "reason": "Gateway Center Arena, Atlanta"
+    },
+    "2020:CDL Week 4: LA": {
+      "teams": ["Los Angeles Guerrillas", "OpTic Gaming LA"],
+      "confidence": "clear",
+      "reason": "Shrine Expo Hall; the 2020 league carried two Los Angeles franchises"
+    },
+    "2021:CDL Major 4": {
+      "teams": ["Dallas Empire"],
+      "confidence": "judgement",
+      "reason": "Arlington is the Dallas-Fort Worth metroplex; OpTic was Chicago-branded in 2021"
+    },
+    "2021:CDL Major 5": {
+      "teams": ["Dallas Empire"],
+      "confidence": "judgement",
+      "reason": "Arlington is the Dallas-Fort Worth metroplex; OpTic was Chicago-branded in 2021"
+    },
+    "2021:CDL Championship": {
+      "teams": ["Los Angeles Thieves", "Los Angeles Guerrillas"],
+      "confidence": "clear",
+      "reason": "Los Angeles, and both franchises are Los Angeles"
+    },
+    "2022:CDL Kickoff Classic": {
+      "teams": ["OpTic Texas"],
+      "confidence": "judgement",
+      "reason": "Arlington is the Dallas-Fort Worth metroplex"
+    },
+    "2022:CDL Major 1": {
+      "teams": ["OpTic Texas"],
+      "confidence": "judgement",
+      "reason": "Arlington is the Dallas-Fort Worth metroplex"
+    },
+    "2022:CDL Major 2": {
+      "teams": ["Minnesota RØKKR"],
+      "confidence": "judgement",
+      "reason": "Prior Lake is the Minneapolis-Saint Paul metropolitan area"
+    },
+    "2022:CDL Major 3": {
+      "teams": ["Toronto Ultra"],
+      "confidence": "clear",
+      "reason": "Toronto"
+    },
+    "2022:CDL Pro-Am Classic": {
+      "teams": [],
+      "confidence": "clear",
+      "reason": "Columbus has no franchise; neutral site"
+    },
+    "2022:CDL Championship": {
+      "teams": ["Los Angeles Thieves", "Los Angeles Guerrillas"],
+      "confidence": "clear",
+      "reason": "Los Angeles, and both franchises are Los Angeles"
+    },
+    "2023:CDL Major 1": {
+      "teams": [],
+      "confidence": "judgement",
+      "reason": "Raleigh, and the Royal Ravens were still London-branded in 2023; the Carolina brand starts in 2024, so no franchise held this market at the time"
+    },
+    "2023:CDL Major 2": {
+      "teams": ["Boston Breach"],
+      "confidence": "clear",
+      "reason": "Boston"
+    },
+    "2023:CDL Major 3": {
+      "teams": ["OpTic Texas"],
+      "confidence": "judgement",
+      "reason": "Arlington is the Dallas-Fort Worth metroplex"
+    },
+    "2023:CDL Major 4": {
+      "teams": [],
+      "confidence": "clear",
+      "reason": "Columbus has no franchise; neutral site"
+    },
+    "2023:CDL Major 5": {
+      "teams": ["Toronto Ultra"],
+      "confidence": "clear",
+      "reason": "Toronto"
+    },
+    "2023:CDL Championship": {
+      "teams": ["Las Vegas Legion"],
+      "confidence": "clear",
+      "reason": "Las Vegas"
+    },
+    "2024:CDL Major 1": {
+      "teams": ["Boston Breach"],
+      "confidence": "clear",
+      "reason": "Boston"
+    },
+    "2024:CDL Major 2": {
+      "teams": ["Miami Heretics"],
+      "confidence": "clear",
+      "reason": "Miami"
+    },
+    "2024:CDL Major 3": {
+      "teams": ["Toronto Ultra"],
+      "confidence": "clear",
+      "reason": "Toronto"
+    },
+    "2024:CDL Major 4": {
+      "teams": ["Los Angeles Thieves", "Los Angeles Guerrillas"],
+      "confidence": "judgement",
+      "reason": "Burbank is the Los Angeles metropolitan area"
+    },
+    "2024:CDL Championship": {
+      "teams": ["OpTic Texas"],
+      "confidence": "judgement",
+      "reason": "Allen is the Dallas-Fort Worth metroplex"
+    },
+    "2025:CDL Major 1": {
+      "teams": [],
+      "confidence": "clear",
+      "reason": "Madrid has no franchise; neutral site"
+    },
+    "2025:CDL Major 2": {
+      "teams": ["OpTic Texas"],
+      "confidence": "judgement",
+      "reason": "Allen is the Dallas-Fort Worth metroplex"
+    },
+    "2025:CDL Major 3": {
+      "teams": ["Miami Heretics"],
+      "confidence": "judgement",
+      "reason": "Boca Raton is roughly seventy kilometres from Miami, in the same South Florida market"
+    },
+    "2025:CDL Major 4": {
+      "teams": ["OpTic Texas"],
+      "confidence": "clear",
+      "reason": "Dallas"
+    },
+    "2025:CDL Championship": {
+      "teams": ["Toronto Ultra"],
+      "confidence": "judgement",
+      "reason": "Kitchener is roughly a hundred kilometres from Toronto, in southern Ontario"
+    },
+    "2026:CDL Major 1": {
+      "teams": ["OpTic Texas"],
+      "confidence": "clear",
+      "reason": "Dallas"
+    },
+    "2026:CDL Major 2": {
+      "teams": [],
+      "confidence": "clear",
+      "reason": "Birmingham, and no franchise held a United Kingdom market in 2026; neutral site"
+    },
+    "2026:CDL Major 3": {
+      "teams": [],
+      "confidence": "clear",
+      "reason": "Atlanta, and the Atlanta franchise ended after 2025; neutral site"
+    },
+    "2026:CDL Major 4": {
+      "teams": ["Paris Gentle Mates"],
+      "confidence": "clear",
+      "reason": "Nanterre is inside the Paris metropolitan area"
+    }
+  }
+}

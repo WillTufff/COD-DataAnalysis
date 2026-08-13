@@ -3839,6 +3839,114 @@ export function getOpponentAdjustment(
   return artifactPayload<OpponentAdjustment>(runId, "opponent_adjustment");
 }
 
+// ---------- Match context ----------
+//
+// The venue, the stage and the map. Every number here is an adjusted
+// association: the design holds the player and the opposing lineup fixed, so a
+// coefficient is what is left after those, and it is still not a cause.
+
+export type ContextFamilyStats = {
+  fits: number;
+  verdict?: string;
+  cohorts_improved?: number;
+  cohorts_measured?: number;
+  top_n_churn?: number;
+  leaderboard_move?: { n: number; median: number; p90: number; max: number };
+  oof_rmse_delta?: { n: number; median: number; p90: number; max: number };
+};
+
+export type ContextVenuePlayer = {
+  season: number;
+  league: string;
+  title: string;
+  mode: string;
+  feature: string;
+  player_id: number;
+  player: string;
+  raw: number | null;
+  pooled: number | null;
+  deviation: number | null;
+  common: number | null;
+  se: number | null;
+  lo: number | null;
+  hi: number | null;
+  in_cohort_sd: number | null;
+  common_in_cohort_sd: number | null;
+  lan_maps: number;
+  online_maps: number;
+  survives_opponent: number | null;
+  clears_interval: boolean;
+};
+
+export type ContextHostRow = {
+  season: number;
+  league: string;
+  mode: string;
+  feature: string;
+  coefficient: number | null;
+  se: number | null;
+  lo: number | null;
+  hi: number | null;
+  in_cohort_sd: number | null;
+  host_lines: number;
+  clears_interval: boolean;
+};
+
+export type ContextMapRow = {
+  season: number;
+  league: string;
+  mode: string;
+  feature: string;
+  map: string;
+  effect: number | null;
+};
+
+export type MatchContext = {
+  version: string;
+  adjusts: string;
+  claim: string;
+  families: string[];
+  ablation: {
+    declared_before_fitting: boolean;
+    keep_share: number;
+    by_family: Record<string, ContextFamilyStats>;
+    verdicts: Record<string, string>;
+  };
+  venue_effect: {
+    unit: string;
+    min_rows: number;
+    min_rows_per_side: number;
+    players: ContextVenuePlayer[];
+    n_clearing_interval: number;
+    n_players: number;
+  };
+  host_effect: {
+    unit: string;
+    source: string;
+    per_cohort: ContextHostRow[];
+    n_clearing_interval: number;
+  };
+  map_identity: {
+    pooling: string;
+    min_rows: number;
+    per_cohort: ContextMapRow[];
+  };
+  coverage: {
+    lines_without_context: number;
+    by_era: Record<string, Record<string, number>>;
+    by_stakes: Record<string, number>;
+  };
+  stakes: { levels: string[]; base: string };
+};
+
+export function latestMatchContextRun(): Promise<ModelRun | null> {
+  return latestRun("match_context");
+}
+
+export function getMatchContext(runId: number): Promise<MatchContext | null> {
+  return artifactPayload<MatchContext>(runId, "match_context");
+}
+
 // ---------- The openskill baseline ----------
 
 export type OpenskillBaseline = {

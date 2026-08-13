@@ -2128,6 +2128,119 @@ statistics here; the site continues to show unadjusted numbers, and changing tha
 lockstep change across two languages that belongs with the publishing work. What is stored is
 the ladder, its controls and its verdict, as a versioned run.
 
+### Match context: the venue, the stage and the map
+
+Four columns describe the circumstances of a map and, until this phase, no analytics module
+read any of them: whether the match was played on a LAN stage or online, what round of what
+bracket it was, which map it was, and what the event paid. A player's cohort z-score treated a
+qualifier map played online as the same kind of event as a grand final on a stage.
+
+**What is adjusted is the box score**, on the same terms as the opponent ladder: the plus-minus
+already conditions on who was on the server, so nothing here touches it. The design holds the
+line's own player and the opposing lineup fixed, so a coefficient below is what survives both.
+
+**Every term is an adjusted association, and none of them is a cause.** "Venue-associated
+deviation" is what the data supports. "Plays better on LAN" is not, because who attends a LAN,
+which teams qualify, and which stage is played there are all selected.
+
+#### The venue flag had to be fixed before it could be used
+
+`events.is_lan` was once two assertions wearing one column: the CWL archive importer stamped
+`true` on everything it created, and the Liquipedia loader mapped a tournament `type` it only
+sometimes had. The derivation is now stated — a curated verdict, else Liquipedia's tournament
+`type`, else undecided — and **`location` is never consulted**, because nine of the 2020
+regular-season weeks kept their host-city branding after March 2020 moved them online. A venue
+string is what an event was called, not where it was played.
+
+Nine CWL open events carried curated verdicts on the grounds that Liquipedia had no page for
+them. It does: the tournament pull was scoped to the premier circuit and all nine are tier 2.
+Pulled at every tier, each of the nine returns `Offline` with a named venue and a start date
+matching the event exactly. The curated file is now empty, and every published venue label
+derives from the source.
+
+#### What the record can be asked
+
+The two eras are not symmetric, and this bounds every claim in this section.
+
+| | LAN lines | Online lines | Undecided |
+|---|---|---|---|
+| CWL (2017–2019) | 43,766 | 0 | 0 |
+| CDL (2020–2026) | 15,904 | 32,906 | 480 |
+
+The CWL era carries **no venue contrast at all**. Every LAN/online comparison here is
+identified inside the Call of Duty League era, and era and venue are perfectly confounded
+across the seam between them.
+
+Inside that era, venue is half a stage term: LAN is where the Major bracket is played and
+online is where the qualifier is. Regressing the venue flag on the stage classes returns
+R² ≈ 0.51, leaving a residual standard deviation of 0.33 against 0.47 raw. The question is
+answerable, at roughly twice the variance the raw split suggests.
+
+#### The ablation table, declared before anything was fitted
+
+One row per feature family, each judged on two numbers: how far it moves the leaderboard, in
+cohort standard deviations, and whether it lowers out-of-fold error on the per-map rate over
+five folds cut on whole series. A family that moves the table without predicting is fitting its
+own noise. The families that did nothing are published as families that did nothing.
+
+| Family | Median move (cohort sd) | Median Δ out-of-fold RMSE | Cohorts improved | Verdict |
+|---|---|---|---|---|
+| `venue` | 0.0167 | 0.00000 | 7/36 | dropped: moves the table without predicting |
+| `stakes` | 0.0218 | +0.00025 | 17/36 | dropped: moves the table without predicting |
+| `elimination` | 0.0080 | +0.00124 | 10/36 | dropped: does nothing either way |
+| `prize_pool` | 0.0157 | 0.00000 | 16/36 | dropped: moves the table without predicting |
+| `host_team` | 0.0047 | +0.00005 | 6/36 | dropped: does nothing either way |
+| **`map_identity`** | **0.1079** | **−0.16338** | **32/36** | **kept** |
+
+`prize_pool` was predicted in advance to be event tier under another name, and it is. So are
+four of the other five.
+
+**Map identity is the one family that earns its place**, and it is fitted as a random effect
+rather than as one dummy per map: the rotation changes every title, several maps carry only a
+few hundred rows, and the aim is a statement about a map rather than about the maps that
+happened to be in one season's rotation. Each map's deviation is pooled by empirical Bayes
+against its own precision. Hill time on one map is not hill time on another, and the cohort the
+rating standardizes within — season by mode — averages over the whole rotation.
+
+#### The LAN effect, per player: a null
+
+Each player's LAN-minus-online deviation is pooled the same way. The interval is placed around
+the **cohort's common venue effect**, not around zero: shrinkage pulls every player toward that
+common value, so asking whether a player's pooled effect differs from zero asks whether the
+cohort's does, and answers yes for every player at once. The question a per-player finding can
+answer is whether this player differs from the others in the same cohort.
+
+Of **1,278 player-cohort-features over 133 players, 10 clear their 95% interval.** Chance alone
+would put about 64 outside it. A player needs eight balanced maps, at least three on each side,
+to be estimated at all.
+
+**The online warrior is not in this record.** Not "the effect is small" — the players cannot be
+told apart in how they carry between the two venues.
+
+#### The home-market effect
+
+Several Majors are played in a competing team's home market, so a home advantage is testable.
+No source carries a team's home city: Liquipedia records a region for 457 of 458 teams, and an
+event's organizer is the publisher on every league event. The map from venue to franchise is
+therefore hand-curated, and it is published with a reason and a confidence for each of its 33
+entries: 21 where the venue is in the franchise's own city and 12 elsewhere in the same
+metropolitan area. Six of the 33 are neutral sites, named as neutral rather than left out — an
+absent event and an event with no home team are different claims. Teams are named as they were
+branded that season, so a franchise that
+moved is not credited with a market before it moved there. One consequence: the 2023 Raleigh
+Major has **no** home team, because the Royal Ravens were still London-branded that year.
+
+**6 of 24 cohort-features clear their interval**, on a flag set for one team at one event, and
+the family does not survive the ablation. The large coefficients sit on a few dozen lines each.
+Reported as it landed.
+
+#### What this costs the cross-era claims
+
+Era and venue are perfectly confounded across the 2018/2020 seam, and no fit can separate them.
+The mitigating finding is that the venue effect is a null in the era where it *is* estimable, so
+the seam is a gap in what can be tested rather than a known bias of a known size. Any career
+number spanning it inherits that sentence, not a correction factor.
+
 ### The evaluation harness: what a rating has to beat, declared in advance
 
 Everything above this point was scored by code written after the model it scores. That is the

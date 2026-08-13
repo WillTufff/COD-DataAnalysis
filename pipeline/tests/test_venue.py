@@ -41,8 +41,15 @@ def test_curated_entries_are_keyed_by_season_as_well_as_name() -> None:
 
 def test_the_shipped_rules_load_and_every_entry_states_a_reason() -> None:
     rules = venue.VenueRules.load()
-    assert rules.events
     for key, entry in rules.events.items():
         assert isinstance(entry.get("is_lan"), bool), key
         assert entry.get("reason"), key
         assert "reviewed" in entry, key
+
+
+def test_no_shipped_verdict_is_unreviewed() -> None:
+    """A provisional verdict is applied, so it may not ship unnoticed."""
+    unreviewed = [
+        key for key, entry in venue.VenueRules.load().events.items() if not entry.get("reviewed")
+    ]
+    assert unreviewed == []

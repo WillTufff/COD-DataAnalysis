@@ -5,14 +5,17 @@ importer stamped `true` on every event it created, and the LPDB loader applied
 `{"Offline": True, "Online": False}` to the tournament `type` — so a tournament
 Liquipedia records as `Online/Offline` became NULL, and eleven CWL events had a
 flag nothing had ever checked. Anything reading the column as a covariate would
-have been reading, in part, a loader default.
+have been reading, in part, a loader default. Every event that carries a flag
+now carries the evidence for it, and one that carries none says so.
 
 The derivation, in precedence order:
 
 1. **A curated verdict**, from `venues.json`, which wins over everything. It
    carries a reason and a `reviewed` flag, and the quality report prints every
    unreviewed entry so provisional judgements stay visible rather than settling
-   in.
+   in. The file is currently empty: the nine CWL open events it held were
+   missing from LPDB only because the tournament pull was scoped to the premier
+   circuit, and rule 2 answers them now.
 2. **LPDB's tournament `type`** — `Offline` is LAN, `Online` is not.
 3. **Undecided**, which is what a mixed `Online/Offline` event and an event with
    no LPDB page both get. The column stays NULL and the reason is published.

@@ -88,6 +88,7 @@ test.describe("rating surfaces hold rows", () => {
       "player-rating",
       "season-rapm",
       "opponent-adjustment",
+      "match-context",
       "evaluation",
       "skill",
     ]) {
@@ -97,6 +98,23 @@ test.describe("rating surfaces hold rows", () => {
       // argues from an artifact and must show one.
       await expect(section).toContainText(/\d/);
     }
+  });
+
+  test("match context shows both eras and its ablation nulls", async ({
+    page,
+  }) => {
+    await page.goto("/methodology");
+    const section = page.locator("#match-context");
+    await expect(section).toBeVisible();
+    // The phase's whole argument is that most families did nothing, so the
+    // table has to carry the families that were dropped, not only the kept one.
+    await expect(section).toContainText("dropped");
+    await expect(section).toContainText("kept");
+    // One line per era. The CWL count is the reason the venue question is only
+    // answerable in the CDL era, and a page that shows one era hides that.
+    await expect(section).toContainText("Call of Duty League lines");
+    await expect(section).toContainText("CWL");
+    expect(await section.locator("tbody tr").count()).toBeGreaterThan(1);
   });
 
   test("/teams and /findings are not empty", async ({ page }) => {

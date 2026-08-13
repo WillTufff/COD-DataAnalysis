@@ -66,6 +66,7 @@ JOBS: list[dict[str, Any]] = [
             "preflight",
             "season_rapm",
             "opponent_adjust",
+            "match_context",
             "openskill",
             "skill_prior",
             "evaluate",

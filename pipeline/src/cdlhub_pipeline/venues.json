@@ -4,53 +4,14 @@
     "over LPDB's tournament type, so an entry here is a statement that the",
     "source is absent or wrong. Each carries a reason and a reviewed flag; the",
     "quality report lists every entry still marked reviewed=false, and those",
-    "are applied but published as provisional."
+    "are applied but published as provisional.",
+    "",
+    "Empty, and that is the target state. It once held nine CWL open events",
+    "whose reason was 'no matching LPDB tournament page'. The pages exist; the",
+    "tournament pull was scoped to the premier circuit and the nine are tier 2.",
+    "Widening that scope and aliasing the six 2018 pagenames lets rule 2 answer",
+    "all nine from LPDB's own tournament type. An entry belongs here only when",
+    "the source cannot answer at all."
   ],
-  "events": {
-    "2018:CWL Dallas 2017": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL Global Pro League open event, played at the named venue; Liquipedia has no tournament page under this event's pagename, so the archive importer's assertion is the only evidence"
-    },
-    "2018:CWL New Orleans 2018": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2018:CWL Atlanta 2018": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2018:CWL Birmingham 2018": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2018:CWL Seattle 2018": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2018:CWL Anaheim 2018": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2019:CWL Fort Worth 2019": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2019:CWL London 2019": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    },
-    "2019:CWL Anaheim 2019": {
-      "is_lan": true,
-      "reviewed": false,
-      "reason": "CWL open event at the named venue; no matching LPDB tournament page"
-    }
-  }
+  "events": {}
 }
