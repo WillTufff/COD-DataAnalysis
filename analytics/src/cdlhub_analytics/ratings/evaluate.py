@@ -45,15 +45,22 @@ from ..backtest import Prediction
 from ..maprows import MapRow
 from ..resample import order as content_order
 from ..resample import stream
-from . import evalspec, holdout, placebo, rapm, simleague, skillbase
+from . import evalspec, holdout, placebo, rapm, simleague, skillbase, statespace
 from . import player_rating as pr
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
 # The predictors of the primary test, in the order they are reported. `kd_z` is
 # the baseline every gap is taken against.
+#
+# `RETAINED` is the set the gate ran on before SKILL existed. A fourth predictor
+# narrows the shared panel — a paired bootstrap has to be paired, so every arm is
+# scored on the rows all of them cover — and the published three-way numbers
+# would have moved for no reason but that. So both blocks are computed and both
+# say what population they are on.
 BASELINE = "kd_z"
-PREDICTORS = ("composite", "openskill", BASELINE)
+PREDICTORS = ("composite", "openskill", "skill", BASELINE)
+RETAINED = ("composite", "openskill", BASELINE)
 
 # The last season of the CWL era. Only the calibration buckets read it.
 CWL_LAST_YEAR = 2019
@@ -70,6 +77,10 @@ class Observation:
     year_a: int
     composite: float
     kd: float
+    # The online baseline, and the box-score prior's posterior. Both may be
+    # missing on a row the published test still counts, and neither is allowed
+    # to shrink the population the reproduction runs on.
+    openskill: float | None
     skill: float | None
     kd_next: float
     composite_next: float
@@ -155,7 +166,8 @@ def build_panel(
     rating_run_id: int,
     era_run_id: int,
     rows: Sequence[MapRow],
-    skill: dict[tuple[int, int], float],
+    openskill: dict[tuple[int, int], float],
+    skill: dict[tuple[int, int], float] | None = None,
 ) -> list[Observation]:
     """Every consecutive qualified transition, with all four columns aligned.
 
@@ -197,7 +209,8 @@ def build_panel(
                     year_a=int(cast(int, seasons[a]["year"])),
                     composite=rating[(pid, a)][1],
                     kd=kd[(pid, a)][1],
-                    skill=skill.get((pid, a)),
+                    openskill=openskill.get((pid, a)),
+                    skill=None if skill is None else skill.get((pid, a)),
                     kd_next=kd[(pid, b)][1],
                     composite_next=rating[(pid, b)][1],
                     moved_team=modal_team.get((pid, a)) != modal_team.get((pid, b)),
@@ -214,7 +227,8 @@ def build_panel(
 def _columns(panel: Sequence[Observation]) -> dict[str, np.ndarray[Any, Any]]:
     return {
         "composite": np.array([o.composite for o in panel], dtype=float),
-        "openskill": np.array([o.skill if o.skill is not None else np.nan for o in panel]),
+        "openskill": np.array([o.openskill if o.openskill is not None else np.nan for o in panel]),
+        "skill": np.array([o.skill if o.skill is not None else np.nan for o in panel]),
         BASELINE: np.array([o.kd for o in panel], dtype=float),
         "target": np.array([o.kd_next for o in panel], dtype=float),
     }
@@ -276,23 +290,25 @@ def _draw(panel: Sequence[Observation], b: int, by_cluster: bool) -> list[np.nda
     return [np.concatenate([members[j] for j in row]) for row in picks]
 
 
-def _persistence_stats(panel: Sequence[Observation], by_cluster: bool) -> dict[str, Any]:
+def _persistence_stats(
+    panel: Sequence[Observation], by_cluster: bool, names: Sequence[str] = PREDICTORS
+) -> dict[str, Any]:
     """Every predictor's correlation with the target, and its gap to the baseline."""
     cols = _columns(panel)
-    draws: dict[str, list[float]] = {name: [] for name in PREDICTORS}
+    draws: dict[str, list[float]] = {name: [] for name in names}
     for take in _draw(panel, evalspec.BOOTSTRAP_B, by_cluster):
-        for name in PREDICTORS:
+        for name in names:
             draws[name].append(_pearson(cols[name][take], cols["target"][take]))
 
     per: dict[str, Any] = {}
-    for name in PREDICTORS:
+    for name in names:
         r = _pearson(cols[name], cols["target"])
         lo, hi = _ci(draws[name])
         per[name] = {"r": None if math.isnan(r) else round(r, 4), "lo": lo, "hi": hi}
 
     gaps: dict[str, Any] = {}
     base_r = _pearson(cols[BASELINE], cols["target"])
-    for name in PREDICTORS:
+    for name in names:
         if name == BASELINE:
             continue
         point = _pearson(cols[name], cols["target"]) - base_r
@@ -313,14 +329,15 @@ def _persistence_stats(panel: Sequence[Observation], by_cluster: bool) -> dict[s
     return {"n": len(panel), "predictors": per, "gaps": gaps}
 
 
-def primary(panel: Sequence[Observation]) -> dict[str, Any]:
-    """The one test the plan says a rating lives or dies on."""
-    scored = _ordered([o for o in panel if o.skill is not None])
-    if len(scored) < 50:
-        return {"available": False, "reason": "too few transitions carry every predictor"}
+def _gate_block(scored: Sequence[Observation], names: Sequence[str]) -> dict[str, Any]:
+    """The comparison itself, on whatever panel and predictor set it is handed.
 
-    clustered = _persistence_stats(scored, by_cluster=True)
-    naive = _persistence_stats(scored, by_cluster=False)
+    Parameterised because there are two of them: the four-way panel the gate
+    runs on, and the three-way panel the published numbers were computed on
+    before SKILL existed. One implementation, two populations, each labelled.
+    """
+    clustered = _persistence_stats(scored, by_cluster=True, names=names)
+    naive = _persistence_stats(scored, by_cluster=False, names=names)
     cols = _columns(scored)
     baseline_r = float(_pearson(cols[BASELINE], cols["target"]))
 
@@ -343,7 +360,7 @@ def primary(panel: Sequence[Observation]) -> dict[str, Any]:
     # the 0.7 the pre-flight sweeps that formula at.
     agreement = {
         name: round(float(_pearson(cols[name], cols[BASELINE])), 4)
-        for name in PREDICTORS
+        for name in names
         if name != BASELINE
     }
     power: dict[str, Any] = {
@@ -388,10 +405,8 @@ def primary(panel: Sequence[Observation]) -> dict[str, Any]:
         }
 
     return {
-        "available": True,
-        "declared": evalspec.PRIMARY.payload(),
         "n": len(scored),
-        "n_dropped_no_openskill": len(panel) - len(scored),
+        "scored_predictors": [p for p in names if p != BASELINE],
         "predictors": clustered["predictors"],
         "gaps": verdicts,
         "baseline_r": round(baseline_r, 4),
@@ -407,6 +422,75 @@ def primary(panel: Sequence[Observation]) -> dict[str, Any]:
                 "smallest cluster that does; the per-observation draw is published beside it"
             ),
         },
+    }
+
+
+def primary(panel: Sequence[Observation]) -> dict[str, Any]:
+    """The one test the plan says a rating lives or dies on.
+
+    Two blocks, because a fourth predictor cannot be added to a paired
+    comparison without narrowing it. The gate runs on the rows that carry every
+    predictor — a bootstrap that pairs nothing compares nothing — and SKILL
+    exists only where a season-resolution filtered coefficient does, which is the
+    CDL era. Scoring each predictor on its own maximal panel would let a
+    predictor win by being measured somewhere easier.
+
+    The three-way block beside it is the population the published figures were
+    computed on. It is retained unchanged so that adding a predictor does not
+    silently restate a number nobody re-derived, and each block reports its own
+    *n* and cluster count.
+    """
+    four_way = _ordered([o for o in panel if o.openskill is not None and o.skill is not None])
+    three_way = _ordered([o for o in panel if o.openskill is not None])
+    # Not yet fitted is a legitimate state — the declaration is allowed to name a
+    # predictor before the pipeline produces it — so the gate falls back to the
+    # panel it can pair, and says which one it used.
+    on_four_way = len(four_way) >= 50
+    gated: Sequence[Observation] = four_way if on_four_way else three_way
+    names: tuple[str, ...] = PREDICTORS if on_four_way else RETAINED
+    if len(gated) < 50:
+        return {"available": False, "reason": "too few transitions carry every predictor"}
+
+    # A predictor the declaration names and the pipeline does not yet produce is
+    # reported by name rather than by absence. The manifest may be extended ahead
+    # of the model — that is the door P5 declared `skill` through — and the one
+    # way that stops being honest is a declared predictor quietly never appearing
+    # in a result. The gate reads this list.
+    fitted = {name for name in names if name != BASELINE}
+    not_yet_fitted = [p for p in evalspec.PRIMARY.predictors if p not in fitted]
+
+    dropped = {
+        "composite": 0,
+        "openskill": sum(1 for o in panel if o.openskill is None),
+        "skill": sum(1 for o in panel if o.skill is None),
+    }
+    return {
+        "available": True,
+        "declared": evalspec.PRIMARY.payload(),
+        "not_yet_fitted": not_yet_fitted,
+        "panel": (
+            "every transition carrying all four predictors"
+            if on_four_way
+            else "every transition carrying the three predictors that exist"
+        ),
+        **_gate_block(gated, names),
+        "n_panel": len(panel),
+        "n_dropped_missing_a_predictor": len(panel) - len(gated),
+        "dropped_by_predictor": {
+            "what": "transitions the published test counts where this predictor has no value",
+            **dropped,
+        },
+        "retained_three_way": {
+            "what": (
+                "the same comparison on the population the published figures were computed "
+                "on, before a fourth predictor narrowed the shared panel. Retained so that "
+                "adding SKILL does not restate a number nobody re-derived"
+            ),
+            "clusters": len({o.player_id for o in three_way}),
+            **_gate_block(three_way, RETAINED),
+        }
+        if on_four_way and three_way
+        else {"what": "not computed separately: the gate is already on this panel"},
     }
 
 
@@ -493,6 +577,9 @@ def reproduction(
     panel: Sequence[Observation],
     stored_persistence: dict[str, Any],
     stored_forecast: dict[str, Any],
+    power: dict[str, Any],
+    plusminus: dict[str, Any],
+    gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The gate: recover what is already published, or score nothing new."""
     recomputed = _published_persistence(panel)
@@ -539,6 +626,84 @@ def reproduction(
             ),
         }
     )
+
+    # The figures the page prints about the panel the *next* rating is gated on.
+    # They belong here rather than in the manifest for the same reason the rest
+    # of this block does: a page figure nothing compares against drifts, and PE
+    # shipped with two screens of the same document disagreeing about the same
+    # population because nothing was comparing them.
+    skill = printed["skill_panel"]
+    for what, got, want in (
+        ("SKILL panel transitions", power.get("n_eligible"), skill["n"]),
+        ("SKILL panel players", power.get("clusters"), skill["clusters"]),
+        (
+            "SKILL panel detectable gap",
+            power.get("floors", {}).get("composite_measured", {}).get("mde80_clustered"),
+            skill["mde80_clustered"],
+        ),
+        (
+            "SKILL panel distance to clear",
+            power.get("distance_to_clear"),
+            skill["distance_to_clear"],
+        ),
+    ):
+        page.append(
+            {
+                "what": what,
+                "run": got,
+                "page": want,
+                "matches": bool(got is not None and abs(float(got) - float(want)) <= 5e-4),
+            }
+        )
+    forward = printed["plusminus_forward"]
+    for what, got, want in (
+        ("plus-minus read forward, season resolution", plusminus.get("n"), forward["n"]),
+        ("plus-minus forward r, season resolution", plusminus.get("rapm_filtered"), forward["r"]),
+        (
+            "plus-minus forward r, pooled over resolutions",
+            plusminus.get("pooled_over_resolutions", {}).get("rapm_filtered"),
+            forward["pooled_r"],
+        ),
+        (
+            "plus-minus forward r, era resolution",
+            plusminus.get("by_resolution", {}).get(statespace.ERA, {}).get("rapm_filtered"),
+            forward["era_r"],
+        ),
+    ):
+        page.append(
+            {
+                "what": what,
+                "run": got,
+                "page": want,
+                "matches": bool(got is not None and abs(float(got) - float(want)) <= 5e-4),
+            }
+        )
+
+    # And what the gate returned once the fourth predictor existed. Pinned for
+    # the same reason as the floor above it: a published verdict that nothing
+    # compares against is a verdict that drifts, and this one is the phase's
+    # headline. The panel is smaller than the floor's because SKILL is predicted
+    # from the seasons before it and the earliest season has none.
+    result = printed["skill_result"]
+    gap = (gate or {}).get("gaps", {}).get("skill", {})
+    for what, got, want in (
+        ("SKILL gate panel transitions", (gate or {}).get("n"), result["n"]),
+        (
+            "SKILL gate panel players",
+            (gate or {}).get("resampling", {}).get("clusters"),
+            result["clusters"],
+        ),
+        ("SKILL persistence gap", gap.get("delta_r"), result["delta_r"]),
+        ("SKILL detectable gap on its own panel", gap.get("mde80"), result["mde80"]),
+    ):
+        page.append(
+            {
+                "what": what,
+                "run": got,
+                "page": want,
+                "matches": bool(got is not None and abs(float(got) - float(want)) <= 5e-4),
+            }
+        )
 
     return {
         "what": (
@@ -619,7 +784,7 @@ def secondary(
     era: dict[int, str],
 ) -> dict[str, Any]:
     """The diagnostics, every one of them labelled as one."""
-    scored = _ordered([o for o in panel if o.skill is not None])
+    scored = _ordered([o for o in panel if o.openskill is not None])
 
     titles = sorted({o.title_a for o in scored})
     by_title = {title: _plain_gaps([o for o in scored if o.title_a != title]) for title in titles}
@@ -668,6 +833,191 @@ def secondary(
     }
 
 
+def prior_target_persistence(
+    panel: Sequence[Observation],
+    coefficients: dict[tuple[int, int], float],
+    resolutions: dict[tuple[int, int], str],
+) -> dict[str, Any]:
+    """SKILL read forward against the quantity it was fitted to predict.
+
+    The primary test scores every rating against next season's era-adjusted K/D
+    z, which is the baseline's own ground: a rating built to predict plus-minus
+    is being asked to beat K/D z at being K/D z. This asks the other question —
+    how well season N's rating predicts season N+1's filtered plus-minus — and it
+    was declared in the manifest before the rating existed, so it cannot be read
+    as a test found after a loss.
+
+    It does not soften the gate and claims no significance. Its use is diagnostic:
+    if SKILL fails the primary and wins here, the failure has a reason attached.
+
+    Season resolution on the *target* side, for the reason the resolution column
+    exists: an era coefficient is one estimate filed against each season it
+    covers, so reading it forward is reading a number that cannot move across the
+    transition being tested.
+    """
+    rows = [
+        (o.skill, o.composite, o.kd, coefficients[(o.player_id, o.season_b)])
+        for o in panel
+        if o.skill is not None
+        and (o.player_id, o.season_b) in coefficients
+        and resolutions.get((o.player_id, o.season_b)) == statespace.SEASON
+    ]
+    base = {
+        "significance_claimed": False,
+        "what": "season N's rating against season N+1's filtered plus-minus coefficient",
+        "target": "filtered plus-minus coefficient, season N+1",
+        "resolution_read": statespace.SEASON,
+        "n": len(rows),
+    }
+    if len(rows) < 20:
+        return {**base, "reason": "too few transitions carry a SKILL rating and a forward target"}
+    target = np.array([r[3] for r in rows], dtype=float)
+    scores = {}
+    for i, name in enumerate(("skill", "composite", BASELINE)):
+        r = _pearson(np.array([row[i] for row in rows], dtype=float), target)
+        scores[name] = None if math.isnan(r) else round(float(r), 4)
+    return {**base, "predictors": scores}
+
+
+def _floor_over(
+    eligible: Sequence[Observation], baseline_r: float, design_effect: float, agreement: float
+) -> dict[str, Any]:
+    computed = simleague.persistence_mde(len(eligible), round(baseline_r, 4), agreement)
+    floor = computed.get("mde80")
+    return {
+        "predictor_agreement": agreement,
+        "mde80_independent": floor,
+        "mde80_clustered": None if floor is None else round(float(floor) * design_effect, 4),
+    }
+
+
+def skill_power(
+    panel: Sequence[Observation], resolutions: dict[tuple[int, int], str]
+) -> dict[str, Any]:
+    """The floor P5's gate will be judged against, computed before P5 exists.
+
+    A SKILL rating can only be scored where a filtered coefficient exists, and
+    the resolution of that coefficient decides whether the row belongs in a
+    forward test at all. **A season coefficient is a season's estimate; an era
+    coefficient is one estimate filed against each of the three seasons it
+    covers**, so for a CWL player it is the same number in 2017, 2018 and 2019.
+    A rating built on it does not vary across the transition being read forward
+    for any reason the estimate supplies, and counting those rows would widen the
+    panel with observations that cannot carry the quantity under test.
+
+    So the gate panel is the season-resolution one — the CDL era, which is the
+    only era the identification pre-flight allowed a season on — and the wider,
+    era-inclusive panel is published beside it rather than used. The difference
+    is not small and it is the whole reason this is measured rather than
+    inherited: 553 rows against 264, and a floor that moves with them.
+
+    Everything here is computable without SKILL: the panel is identified by
+    coverage, the design effect by the predictors already on it, and the
+    detectable gap by the closed form at a stated agreement. Computing it now is
+    the point. A threshold read off the same run that first reports a result is
+    a threshold chosen after seeing one, and the gate that reads this artifact
+    checks the run it was written in came first.
+    """
+    scorable = [o for o in panel if o.openskill is not None]
+    eligible = _ordered(
+        [o for o in scorable if resolutions.get((o.player_id, o.season_a)) == statespace.SEASON]
+    )
+    wider = _ordered([o for o in scorable if (o.player_id, o.season_a) in resolutions])
+    dropped = {
+        "no_openskill": sum(1 for o in panel if o.openskill is None),
+        "no_filtered_coefficient": sum(
+            1 for o in panel if (o.player_id, o.season_a) not in resolutions
+        ),
+        "era_resolution_only": len(wider) - len(eligible),
+    }
+    if len(eligible) < 50:
+        return {
+            "available": False,
+            "reason": "too few transitions could carry a SKILL rating",
+            "n_panel": len(panel),
+            "n_eligible": len(eligible),
+            "dropped": dropped,
+        }
+
+    cols = _columns(eligible)
+    baseline_r = _pearson(cols[BASELINE], cols["target"])
+    clustered = _persistence_stats(eligible, by_cluster=True)
+    naive = _persistence_stats(eligible, by_cluster=False)
+    effects = [
+        clustered["gaps"][name]["se"] / naive["gaps"][name]["se"]
+        for name in clustered["gaps"]
+        if clustered["gaps"][name]["se"] and naive["gaps"][name]["se"]
+    ]
+    design_effect = float(np.median(effects)) if effects else 1.0
+
+    # A curve rather than a point, because SKILL's agreement with the baseline
+    # cannot be known before SKILL is fitted and the floor depends on it: a
+    # predictor that closely tracks K/D z is compared against it far more
+    # precisely than one that does not. The composite's measured agreement is
+    # the anchor; the two hypotheticals bracket the range a new rating could
+    # land in.
+    agreements = {
+        "composite_measured": round(float(_pearson(cols["composite"], cols[BASELINE])), 4),
+        "hypothetical_loose": 0.3,
+        "hypothetical_tight": 0.8,
+    }
+    floors = {
+        label: _floor_over(eligible, baseline_r, design_effect, corr)
+        for label, corr in agreements.items()
+    }
+
+    composite_gap = clustered["gaps"]["composite"]["delta_r"]
+    anchor = floors["composite_measured"]["mde80_clustered"]
+    distance = (
+        None
+        if composite_gap is None or anchor is None
+        else round(float(anchor) - float(composite_gap), 4)
+    )
+    clusters = len({o.player_id for o in eligible})
+    return {
+        "available": True,
+        "what": (
+            "the smallest persistence gap the SKILL-eligible panel can resolve at 80% power, "
+            "computed before any SKILL rating exists so the threshold cannot be chosen after "
+            "the result"
+        ),
+        "n_panel": len(panel),
+        "n_eligible": len(eligible),
+        "dropped": dropped,
+        "clusters": clusters,
+        "unit": evalspec.PRIMARY.unit,
+        "wider_panel": {
+            "what": (
+                "the same floor if era-resolution coefficients counted, which they do not: "
+                "one estimate filed against each season it covers cannot vary across a "
+                "transition, so these rows are reported and not used"
+            ),
+            "n": len(wider),
+            "clusters": len({o.player_id for o in wider}),
+            "floor": _floor_over(
+                wider,
+                _pearson(_columns(wider)[BASELINE], _columns(wider)["target"]),
+                design_effect,
+                agreements["composite_measured"],
+            ),
+        },
+        "eligibility": (
+            "carries every predictor of the published test and a filtered coefficient at "
+            "season resolution on the season being read forward"
+        ),
+        "baseline_r": round(baseline_r, 4),
+        "design_effect": round(design_effect, 3),
+        "floors": floors,
+        "composite_gap_here": composite_gap,
+        "distance_to_clear": distance,
+        "statement": (
+            f"on {len(eligible)} transitions over {clusters} players, a gap smaller than "
+            f"{anchor} is not resolvable; the composite sits at {composite_gap} here, so a "
+            f"SKILL rating has to move {distance} to clear the gate"
+        ),
+    }
+
+
 def forward_coefficients(
     conn: Conn, run_id: int, scope: str = evalspec.SCOPE
 ) -> dict[tuple[int, int], float]:
@@ -688,28 +1038,87 @@ def forward_coefficients(
     return {(cast(int, r[0]), cast(int, r[1])): cast(float, r[2]) for r in rows}
 
 
+def forward_resolutions(
+    conn: Conn, run_id: int, scope: str = evalspec.SCOPE
+) -> dict[tuple[int, int], str]:
+    """What each of those coefficients actually covers: a season, or a whole era.
+
+    Read alongside the coefficients rather than folded into them, because the two
+    answer different questions and only one of them is a number. A row filed
+    against 2018 at era resolution is the same estimate as the rows filed against
+    2017 and 2019, and a forward test that cannot tell them apart is reading one
+    measurement three times.
+    """
+    evalspec.assert_forward(scope)
+    rows = conn.execute(
+        "SELECT player_id, season_id, resolution FROM player_rapm"
+        " WHERE run_id = %s AND scope = %s AND season_id IS NOT NULL",
+        (run_id, scope),
+    ).fetchall()
+    return {(cast(int, r[0]), cast(int, r[1])): str(r[2]) for r in rows}
+
+
 def season_plusminus_persistence(
-    panel: Sequence[Observation], coefficients: dict[tuple[int, int], float], scope: str
+    panel: Sequence[Observation],
+    coefficients: dict[tuple[int, int], float],
+    scope: str,
+    resolutions: dict[tuple[int, int], str],
 ) -> dict[str, Any]:
-    """The filtered plus-minus read forward, and the scope it was read at."""
-    paired = [
-        (coefficients[(o.player_id, o.season_a)], o.kd_next, o.kd)
+    """The filtered plus-minus read forward, and the scope it was read at.
+
+    Split by resolution, and the split is a correction rather than a refinement.
+    The first version of this pooled every stored coefficient and reported one
+    correlation over 553 cells; 122 of those were era-resolution rows, where one
+    estimate is filed against each of the three seasons it covers, so the same
+    number entered the test up to three times per player and could not move
+    across the transition it was being read forward through. The pooled figure is
+    still reported — it is what a reader who joins the table naively will get —
+    but the season-resolution figure is the one that answers the question.
+    """
+    rows = [
+        (
+            coefficients[(o.player_id, o.season_a)],
+            o.kd_next,
+            o.kd,
+            resolutions.get((o.player_id, o.season_a), statespace.ERA),
+        )
         for o in panel
         if (o.player_id, o.season_a) in coefficients
     ]
-    if len(paired) < 20:
+    if len(rows) < 20:
         return {
             "significance_claimed": False,
             "scope_read": scope,
-            "n": len(paired),
+            "n": len(rows),
             "reason": "too few cells carry a filtered coefficient",
         }
+
+    def block(subset: list[tuple[float, float, float, str]]) -> dict[str, Any]:
+        if len(subset) < 20:
+            return {"n": len(subset), "rapm_filtered": None, BASELINE: None}
+        return {
+            "n": len(subset),
+            "rapm_filtered": round(_pearson([r[0] for r in subset], [r[1] for r in subset]), 4),
+            BASELINE: round(_pearson([r[2] for r in subset], [r[1] for r in subset]), 4),
+        }
+
+    seasonal = [r for r in rows if r[3] == statespace.SEASON]
     return {
         "significance_claimed": False,
         "scope_read": scope,
-        "n": len(paired),
-        "rapm_filtered": round(_pearson([p[0] for p in paired], [p[1] for p in paired]), 4),
-        BASELINE: round(_pearson([p[2] for p in paired], [p[1] for p in paired]), 4),
+        "resolution_read": statespace.SEASON,
+        **block(seasonal),
+        "pooled_over_resolutions": {
+            "what": (
+                "every stored coefficient, era-resolution rows included. An era coefficient is "
+                "one estimate filed against each season it covers, so these rows repeat a "
+                "number rather than supplying one per season"
+            ),
+            **block(rows),
+        },
+        "by_resolution": {
+            statespace.ERA: block([r for r in rows if r[3] == statespace.ERA]),
+        },
     }
 
 
@@ -723,25 +1132,37 @@ def artifacts(
     stored_persistence: dict[str, Any],
     stored_forecast: dict[str, Any],
     games: Sequence[rapm.AdmittedMap],
+    skill: dict[tuple[int, int], float] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Every payload the harness publishes, in the order they have to be trusted."""
-    panel = build_panel(conn, rating_run_id, era_run_id, rows, fit.season_skill)
+    panel = build_panel(conn, rating_run_id, era_run_id, rows, fit.season_skill, skill)
     ordered = _ordered(panel)
+    forward = forward_coefficients(conn, season_rapm_run_id)
+    resolutions = forward_resolutions(conn, season_rapm_run_id)
 
     secondaries = secondary(panel, fit, rows, venue_flags(conn), eras(conn))
-    secondaries["season_plusminus_persistence"] = season_plusminus_persistence(
-        panel, forward_coefficients(conn, season_rapm_run_id), evalspec.SCOPE
-    )
+    plusminus = season_plusminus_persistence(panel, forward, evalspec.SCOPE, resolutions)
+    secondaries["season_plusminus_persistence"] = plusminus
+    secondaries["prior_target_persistence"] = prior_target_persistence(panel, forward, resolutions)
+    power = skill_power(panel, resolutions)
 
+    gate = primary(panel)
     return {
         "evaluation_manifest": {
             **evalspec.manifest(),
             "sha256": evalspec.sha256(),
             "pinned_sha256": evalspec.PINNED_SHA256,
             "matches_pin": evalspec.sha256() == evalspec.PINNED_SHA256,
+            "pinned_invariants_sha256": evalspec.PINNED_INVARIANTS_SHA256,
+            "matches_invariants_pin": (
+                evalspec.invariants_sha256() == evalspec.PINNED_INVARIANTS_SHA256
+            ),
         },
-        "evaluation_reproduction": reproduction(ordered, stored_persistence, stored_forecast),
-        "evaluation_primary": primary(panel),
+        "evaluation_reproduction": reproduction(
+            ordered, stored_persistence, stored_forecast, power, plusminus, gate
+        ),
+        "evaluation_primary": gate,
+        "skill_power": power,
         "evaluation_secondary": secondaries,
         "evaluation_placebo": placebo.suite(
             games,

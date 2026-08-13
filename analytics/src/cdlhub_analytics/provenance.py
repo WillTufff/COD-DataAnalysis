@@ -27,6 +27,7 @@ from .ratings import (
     maplevel,
     opponent,
     player_rating,
+    prior,
     significance,
     simleague,
     statespace,
@@ -53,6 +54,7 @@ SEEDS: dict[str, int] = {
     "statespace": statespace.BOOTSTRAP_SEED,
     "opponent": opponent.PLACEBO_SEED,
     "evalspec": evalspec.BOOTSTRAP_SEED,
+    "prior": prior.SEED,
 }
 
 

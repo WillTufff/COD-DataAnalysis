@@ -32,6 +32,7 @@ from .ratings import (
     opponent,
     player_rating,
     preflight,
+    prior,
     rapm,
     significance,
     simleague,
@@ -892,6 +893,103 @@ def main(argv: list[str] | None = None) -> int:
             f"brier {os_report.brier:.5f}, accuracy {os_report.accuracy:.4f}"
         )
 
+        # The box score asked the question the composite never asks: not what a
+        # line is worth on the scoreboard, but whose presence preceded a moved
+        # margin. Placed between the baseline and the harness because it is the
+        # third predictor the harness scores and the floor it is judged against
+        # was computed by an earlier run of that harness.
+        progress.stage("skill_prior")
+        prior_cohorts = player_rating.build_cohorts(usable_rows, rating_coverage, prior.FEATURE_SET)
+        design = prior.build(
+            prior.load_targets(conn, ss_run, seasons_by_id),
+            prior_cohorts,
+            player_rating.aggregate_players(usable_rows, prior_cohorts),
+        )
+        prior_w, tau2 = prior.weights(design)
+        signal = prior.target_signal(design)
+        arms = prior.ladder(design, prior_w)
+        published_arm = arms["published_arm"]
+        # Refitted at the full draw count once the arm is chosen. The ladder
+        # compares at a reduced one so three arms cost what one would; the
+        # intervals that get stored are not read off a comparison.
+        predictions = prior.walk_forward(design, prior_w, arm=published_arm)
+        exposure = prior.exposure_loading(design, predictions)
+        variance = prior.prior_variance(design, predictions)
+        skills = (
+            prior.blend_all(design, predictions, float(variance["value"]), published_arm)
+            if variance.get("available")
+            else []
+        )
+        prior_art = prior.artifact(
+            design,
+            tau2,
+            signal,
+            arms,
+            exposure,
+            variance,
+            skills,
+            prior.style_correlations(conn, skills),
+            prior.coefficients(design, prior_w),
+        )
+        sp_run = open_run(
+            conn,
+            prior.MODEL,
+            prior.VERSION,
+            {**prior.params(design, tau2, published_arm), "season_rapm_run_id": ss_run},
+            through,
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (sp_run, "skill_prior", json.dumps(prior_art)),
+        )
+        if skills:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_skill (run_id, player_id, season_id, prior_mean, "
+                    "prior_sd, coef, se, skill, skill_sd, weight_prior, scope, model) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            sp_run,
+                            s.player_id,
+                            s.season_id,
+                            s.prior_mean,
+                            s.prior_sd,
+                            s.coef,
+                            s.se,
+                            s.skill,
+                            s.skill_sd,
+                            s.weight_prior,
+                            prior.TARGET_SCOPE,
+                            s.model,
+                        )
+                        for s in skills
+                    ],
+                )
+        print(f"skill_prior run {sp_run}: {prior.headline(prior_art)}; {len(skills)} rows written")
+        for arm_name, block in prior_art["ladder"]["arms"].items():
+            if not block.get("available"):
+                print(f"  {arm_name}: not fitted here — {block.get('reason')}")
+                continue
+            against = block.get("vs_ridge")
+            tail = (
+                ""
+                if against is None
+                else (
+                    f"; vs ridge {against['delta_r']:+.4f} "
+                    f"[{against['lo']:+.4f}, {against['hi']:+.4f}] "
+                    + ("ships" if against["ships"] else "does not ship")
+                )
+            )
+            print(f"  {arm_name}: out-of-fold r={block['out_of_fold_r']}{tail}")
+        print(
+            f"  exposure loading {exposure.get('prior_r2')} against the target's "
+            f"{exposure.get('target_r2')} (ratio {exposure.get('ratio')}, "
+            + ("passes" if exposure.get("passes") else "FAILS")
+            + ")"
+        )
+        print(f"  {prior_art['statement']}")
+
         # The harness that scores all of it, and the one part of this pipeline
         # that was built before the thing it judges. Its own gate comes first:
         # an independent recomputation of the published persistence test, which
@@ -907,6 +1005,7 @@ def main(argv: list[str] | None = None) -> int:
             persist,
             forecast,
             admitted_games,
+            {(s.player_id, s.season_id): s.skill for s in skills},
         )
         ev_run = open_run(
             conn,
@@ -914,6 +1013,7 @@ def main(argv: list[str] | None = None) -> int:
             evalspec.VERSION,
             {
                 "manifest_sha256": evalspec.sha256(),
+                "invariants_sha256": evalspec.invariants_sha256(),
                 "primary_test": evalspec.PRIMARY.name,
                 "scope_permitted_forward": evalspec.SCOPE,
                 "bootstrap_b": evalspec.BOOTSTRAP_B,
@@ -951,6 +1051,16 @@ def main(argv: list[str] | None = None) -> int:
                     for name, block in power["by_predictor"].items()
                 )
             )
+        floor = eval_arts["skill_power"]
+        if floor["available"]:
+            wider = floor["wider_panel"]
+            print(
+                f"  the SKILL panel is {floor['n_eligible']} of {floor['n_panel']} transitions "
+                f"over {floor['clusters']} players ({wider['n']} if era-resolution rows "
+                f"counted, which they do not); {floor['statement']}"
+            )
+        else:
+            print(f"  skill_power: {floor['reason']}")
         pla = eval_arts["evaluation_placebo"]
         print(
             f"  placebos: {pla['n_run']} run, {pla['n_failed']} failed; "
@@ -1090,6 +1200,7 @@ def main(argv: list[str] | None = None) -> int:
                 "rapm_preflight": [pc_run],
                 statespace.MODEL: [ss_run],
                 skillbase.MODEL: [os_run],
+                prior.MODEL: [sp_run],
                 evalspec.MODEL: [ev_run],
                 "winprob": [wp_run],
                 maplevel.MODEL: [map_run],

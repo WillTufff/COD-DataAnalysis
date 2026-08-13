@@ -34,7 +34,7 @@ from . import metrics, seriesdyn, style
 from .db import connect
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
-from .ratings import evalspec, maplevel, player_rating, statespace
+from .ratings import evalspec, maplevel, player_rating, prior, statespace
 from .style import marker_column
 from .writeback import latest_run_id
 
@@ -48,6 +48,11 @@ DYNAMICS_MODEL = seriesdyn.MODEL
 # `writeback.open_run`, so they carry no provenance block and are not asked for
 # an evaluation-set hash.
 EXTERNAL_MODELS = {"kill_feed_reconciliation"}
+
+# How far the recomputed SKILL floor may sit from the value pinned before the
+# prior existed. The floor is published to four decimals, so this is a rounding
+# tolerance rather than room for the threshold to drift.
+FLOOR_TOL = 5e-4
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -238,6 +243,87 @@ def season_rapm_failures(
     return bad
 
 
+def skill_prior_failures(
+    power: dict[str, Any], fitted: dict[str, Any], pinned: dict[str, Any]
+) -> list[str]:
+    """The threshold a SKILL rating is judged against, and whether it has moved.
+
+    A minimum detectable effect is only a threshold if it predates the number it
+    judges. Nothing stops a floor from being computed in the same run that first
+    reports a result, or from being recomputed once that result is known — and
+    from the outside the two are indistinguishable, which is exactly the shape
+    of failure the harness exists to prevent one phase earlier.
+
+    **The first version of this checked run ids and could not have worked.** It
+    asserted that the run which first carried a `skill_power` artifact preceded
+    the run which first carried a `skill_prior` one. Both artifacts are rewritten
+    by every pipeline run and `prune_superseded` deletes the runs before it, so
+    after one run of the finished pipeline the only surviving pair is this run's
+    — and within a run `skill_prior` is written by an earlier stage than
+    `skill_power`, so the check would have failed permanently on stage order. It
+    was written while the prior did not exist, which is why nothing failed: the
+    condition is vacuous until there is a prior to judge.
+
+    What is durable is the pin. The floor was computed at P5a and written into
+    `evalspec.PUBLISHED_FIGURES`, in a commit that predates the prior's, and this
+    gate checks the floor the harness recomputes still equals it. A floor that
+    moves once a result is visible is the failure being guarded against, and
+    moving it now requires editing a pinned constant in a diff someone reads.
+
+    Three conditions on the prior itself sit beside it. The shrinkage diagnostic
+    has to pass its declared threshold — a prior that loads on maps played harder
+    than the target it predicts is a shrinkage map with a rating's name on it —
+    and every arm of the declared ladder has to carry a verdict, either measured
+    in this run or recorded from the run that measured it. An arm that quietly
+    stops being mentioned is how a ladder becomes one fit with a story attached.
+    """
+    bad = []
+    if fitted:
+        loading = fitted.get("exposure_loading", {})
+        if not loading.get("available"):
+            bad.append(f"the prior published no shrinkage diagnostic: {loading.get('reason')}")
+        elif not loading.get("passes"):
+            bad.append(
+                f"the prior loads {loading.get('prior_r2')} on exposure against the target's "
+                f"own {loading.get('target_r2')} (ratio {loading.get('ratio')}, max "
+                f"{loading.get('ratio_max')}): it is reporting shrinkage as skill"
+            )
+        arms = fitted.get("ladder", {}).get("arms", {})
+        recorded = {entry.get("arm") for entry in fitted.get("ladder_history", [])}
+        for name in ("random_forest", "lightgbm"):
+            block = arms.get(name, {})
+            if block.get("available"):
+                if block.get("vs_ridge") is None:
+                    bad.append(f"the {name} arm was fitted and never compared against the ridge")
+            elif name not in recorded:
+                bad.append(
+                    f"the {name} arm published no verdict: it was neither fitted here nor "
+                    "recorded as compared and dropped"
+                )
+    if not power.get("available"):
+        # Not a failure while there is no prior to judge: the panel can be too
+        # thin to score, and saying so is the artifact doing its job.
+        if fitted:
+            bad.append(
+                f"a SKILL prior is published but its floor was never computed: "
+                f"{power.get('reason')}"
+            )
+        return bad
+
+    anchor = power.get("floors", {}).get("composite_measured", {}).get("mde80_clustered")
+    if anchor is None:
+        bad.append("the SKILL panel published no detectable-effect floor at the measured agreement")
+    elif pinned.get("mde80_clustered") is not None and abs(
+        float(anchor) - float(pinned["mde80_clustered"])
+    ) > float(FLOOR_TOL):
+        bad.append(
+            f"the SKILL floor moved from the {pinned['mde80_clustered']} pinned before the "
+            f"prior existed to {anchor}: a threshold recomputed once the result is visible is "
+            "not a threshold declared in advance"
+        )
+    return bad
+
+
 def season_rapm_rows(conn: psycopg.Connection[Any]) -> list[tuple[str, str, int, float]]:
     """(scope, resolution, player_id, coef) for the newest season-varying run."""
     run_id = latest_run_id(conn, statespace.MODEL)
@@ -275,6 +361,26 @@ def evaluation_failures(
             "the evaluation manifest has changed since it was pinned: a test declared after "
             "the fact is not a test declared in advance"
         )
+    if not manifest.get("matches_invariants_pin", True):
+        bad.append(
+            "the fixed half of the declaration moved — target, baseline, statistic, unit, "
+            "seed or threshold rule — which is a different evaluation, not an extended one"
+        )
+    history = manifest.get("supersedes", [])
+    declared = manifest.get("primary", {}).get("predictors", [])
+    if history:
+        previous = history[-1]
+        dropped = [p for p in previous.get("predictors", []) if p not in declared]
+        if dropped:
+            bad.append(
+                f"version {previous.get('version')} declared predictors this one does not "
+                f"({', '.join(dropped)}): the list may be extended, never trimmed"
+            )
+        if any(entry.get("sha256") == manifest.get("sha256") for entry in history):
+            bad.append(
+                "the current declaration carries a digest already listed as superseded, so "
+                "the history no longer says which version is in force"
+            )
     if not repro.get("reproduces"):
         off = [c["what"] for c in repro.get("recomputed", []) if not c["matches"]]
         bad.append(
@@ -295,6 +401,17 @@ def evaluation_failures(
             bad.append(
                 "the primary test published no minimum detectable effect for "
                 + (", ".join(missing) if missing else "any predictor")
+            )
+        # Declared and unfitted is a legitimate state; declared and unaccounted
+        # for is how a predictor that was going to be gated stops being gated.
+        accounted = set(primary.get("scored_predictors", [])) | set(
+            primary.get("not_yet_fitted", [])
+        )
+        unaccounted = [p for p in declared if p not in accounted]
+        if unaccounted:
+            bad.append(
+                f"the declaration names predictors the primary test neither scored nor "
+                f"reported as unfitted: {', '.join(unaccounted)}"
             )
 
     read = secondary.get("season_plusminus_persistence", {}).get("scope_read")
@@ -430,6 +547,14 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
                 artifact(conn, evalspec.MODEL, "evaluation_primary"),
                 artifact(conn, evalspec.MODEL, "evaluation_secondary"),
                 artifact(conn, evalspec.MODEL, "evaluation_placebo"),
+            ),
+        ),
+        (
+            "skill prior",
+            skill_prior_failures(
+                artifact(conn, evalspec.MODEL, "skill_power"),
+                artifact(conn, prior.MODEL, "skill_prior"),
+                evalspec.PUBLISHED_FIGURES["skill_panel"],
             ),
         ),
         (

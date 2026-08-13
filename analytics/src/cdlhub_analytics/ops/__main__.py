@@ -67,6 +67,7 @@ JOBS: list[dict[str, Any]] = [
             "season_rapm",
             "opponent_adjust",
             "openskill",
+            "skill_prior",
             "evaluate",
             "series_dynamics",
             "player_style",
@@ -99,7 +100,18 @@ JOBS: list[dict[str, Any]] = [
         # the primary test bootstraps 2,000 draws twice, clustered and not, and
         # the placebo suite refits the plus-minus eight times on shuffled sides
         # and once more on a planted duplicate column.
-        "est_seconds": 960,
+        #
+        # Re-measured on 2026-08-13 with `skill_prior` added: **963 seconds** end
+        # to end, against 959 without it. The stage costs a handful of seconds
+        # rather than the 90 budgeted for it, because the two non-linear arms
+        # lost their comparison and were dropped: what remains is one ridge over
+        # six walk-forward folds at two hundred drawn targets, on 431 rows and
+        # sixteen columns, which is a few dozen Cholesky factorizations.
+        #
+        # An earlier reading of 523 seconds was taken off a run whose output went
+        # through a pipe, and the file timestamps it was read from were not the
+        # process's. Timed directly, the two measurements agree to four seconds.
+        "est_seconds": 965,
     },
     {
         "id": "metric_diff",

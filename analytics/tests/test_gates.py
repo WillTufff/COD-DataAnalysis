@@ -19,6 +19,7 @@ from cdlhub_analytics.gates import (
     mode_naming_failures,
     rotation_failures,
     season_rapm_failures,
+    skill_prior_failures,
 )
 
 # ------------------------------------------------------------------- rotation
@@ -237,7 +238,16 @@ def test_an_era_coefficient_that_differs_between_its_seasons_fails() -> None:
 
 
 def _manifest(**over: object) -> dict[str, Any]:
-    return {"sha256": "abc", "pinned_sha256": "abc", **over}
+    return {
+        "sha256": "abc",
+        "pinned_sha256": "abc",
+        "matches_invariants_pin": True,
+        "primary": {"predictors": ["composite", "openskill", "skill"]},
+        "supersedes": [
+            {"version": "1.0.0", "sha256": "old", "predictors": ["composite", "openskill"]}
+        ],
+        **over,
+    }
 
 
 def _repro(**over: object) -> dict[str, Any]:
@@ -255,6 +265,8 @@ def _primary(**over: object) -> dict[str, Any]:
     return {
         "available": True,
         "power": {"by_predictor": {"composite": {"mde80_clustered": 0.09}}},
+        "scored_predictors": ["composite", "openskill"],
+        "not_yet_fitted": ["skill"],
         **over,
     }
 
@@ -329,3 +341,176 @@ def test_a_placebo_finding_structure_in_shuffled_data_fails() -> None:
         _manifest(), _repro(), _primary(), _secondary(), _placebos(passes=False)
     )
     assert bad and "shuffled_sides" in bad[0]
+
+
+def test_the_fixed_half_of_the_declaration_moving_fails() -> None:
+    """Extending a declaration is allowed; changing what the test is, is not."""
+    bad = evaluation_failures(
+        _manifest(matches_invariants_pin=False), _repro(), _primary(), _secondary(), _placebos()
+    )
+    assert bad and "different evaluation" in bad[0]
+
+
+def test_a_predictor_dropped_from_a_superseded_version_fails() -> None:
+    bad = evaluation_failures(
+        _manifest(primary={"predictors": ["composite", "skill"]}),
+        _repro(),
+        _primary(scored_predictors=["composite"], not_yet_fitted=["skill"]),
+        _secondary(),
+        _placebos(),
+    )
+    assert bad and "never trimmed" in bad[0]
+
+
+def test_a_current_declaration_listed_as_superseded_fails() -> None:
+    """The history has to say which version is in force."""
+    bad = evaluation_failures(
+        _manifest(
+            supersedes=[
+                {"version": "1.0.0", "sha256": "abc", "predictors": ["composite", "openskill"]}
+            ]
+        ),
+        _repro(),
+        _primary(),
+        _secondary(),
+        _placebos(),
+    )
+    assert bad and "which version is in force" in bad[0]
+
+
+def test_a_declared_predictor_that_is_neither_scored_nor_reported_unfitted_fails() -> None:
+    bad = evaluation_failures(
+        _manifest(), _repro(), _primary(not_yet_fitted=[]), _secondary(), _placebos()
+    )
+    assert bad and "neither scored nor reported as unfitted" in bad[0]
+
+
+def test_a_predictor_declared_ahead_of_its_model_passes_while_it_is_named() -> None:
+    """The whole point of declaring `skill` before P5 fits it."""
+    assert evaluation_failures(_manifest(), _repro(), _primary(), _secondary(), _placebos()) == []
+
+
+# ------------------------------------------------------------------ the floor
+
+
+def _power(**over: object) -> dict[str, Any]:
+    return {
+        "available": True,
+        "floors": {"composite_measured": {"mde80_clustered": 0.16}},
+        **over,
+    }
+
+
+def _fitted(**over: object) -> dict[str, Any]:
+    """A prior that passes every condition, so each test breaks exactly one."""
+    return {
+        "exposure_loading": {"available": True, "passes": True, "ratio": 0.88},
+        "ladder": {
+            "arms": {
+                "ridge": {"available": True},
+                "random_forest": {"available": True, "vs_ridge": {"ships": False}},
+                "lightgbm": {"available": True, "vs_ridge": {"ships": False}},
+            },
+            "published_arm": "ridge",
+        },
+        "ladder_history": [],
+        **over,
+    }
+
+
+PINNED = {"n": 267, "clusters": 90, "mde80_clustered": 0.16, "distance_to_clear": 0.433}
+
+
+def test_a_floor_that_still_matches_its_pin_passes() -> None:
+    assert skill_prior_failures(_power(), _fitted(), PINNED) == []
+
+
+def test_a_floor_with_no_prior_yet_passes() -> None:
+    """The floor ships first and waits. That is the whole ordering."""
+    assert skill_prior_failures(_power(), {}, PINNED) == []
+
+
+def test_a_floor_that_moved_once_a_prior_existed_fails() -> None:
+    """The failure the run-id ordering was reaching for, stated so it can happen."""
+    bad = skill_prior_failures(
+        _power(floors={"composite_measured": {"mde80_clustered": 0.09}}), _fitted(), PINNED
+    )
+    assert bad and "declared in advance" in bad[0]
+
+
+def test_a_floor_that_moved_inside_rounding_passes() -> None:
+    assert (
+        skill_prior_failures(
+            _power(floors={"composite_measured": {"mde80_clustered": 0.1602}}), _fitted(), PINNED
+        )
+        == []
+    )
+
+
+def test_a_prior_published_with_no_floor_at_all_fails() -> None:
+    bad = skill_prior_failures(
+        {"available": False, "reason": "too few transitions"}, _fitted(), PINNED
+    )
+    assert bad and "never computed" in bad[0]
+
+
+def test_a_panel_too_thin_to_score_is_not_a_failure_until_a_prior_exists() -> None:
+    thin = {"available": False, "reason": "too few transitions"}
+    assert skill_prior_failures(thin, {}, PINNED) == []
+
+
+def test_a_floor_that_published_no_threshold_fails() -> None:
+    bad = skill_prior_failures(
+        _power(floors={"composite_measured": {"mde80_clustered": None}}), _fitted(), PINNED
+    )
+    assert bad and "no detectable-effect floor" in bad[0]
+
+
+def test_a_prior_that_loads_on_exposure_harder_than_its_target_fails() -> None:
+    """The diagnostic's whole job: a shrinkage map published as a rating."""
+    bad = skill_prior_failures(
+        _power(),
+        _fitted(
+            exposure_loading={
+                "available": True,
+                "passes": False,
+                "prior_r2": 0.41,
+                "target_r2": 0.30,
+                "ratio": 1.37,
+                "ratio_max": 1.0,
+            }
+        ),
+        PINNED,
+    )
+    assert bad and "reporting shrinkage as skill" in bad[0]
+
+
+def test_an_arm_that_is_neither_fitted_nor_recorded_fails() -> None:
+    """A ladder stops being one the moment an arm can go unmentioned."""
+    arms = {"ridge": {"available": True}, "random_forest": {"available": True, "vs_ridge": {}}}
+    bad = skill_prior_failures(
+        _power(),
+        _fitted(ladder={"arms": arms, "published_arm": "ridge"}),
+        PINNED,
+    )
+    assert bad and "lightgbm" in bad[0]
+
+
+def test_a_dropped_arm_passes_on_the_verdict_it_was_dropped_for() -> None:
+    """The dependency goes; the measurement that removed it does not."""
+    arms = {
+        "ridge": {"available": True},
+        "random_forest": {"available": True, "vs_ridge": {"ships": False}},
+        "lightgbm": {"available": False, "reason": "ModuleNotFoundError"},
+    }
+    assert (
+        skill_prior_failures(
+            _power(),
+            _fitted(
+                ladder={"arms": arms, "published_arm": "ridge"},
+                ladder_history=[{"arm": "lightgbm", "verdict": "did not beat the ridge"}],
+            ),
+            PINNED,
+        )
+        == []
+    )

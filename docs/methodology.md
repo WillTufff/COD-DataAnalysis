@@ -2140,9 +2140,20 @@ against nothing, and committed before there was a model to run through it.
 **The declaration is hashed.** One primary test, a labelled secondary set, the metric, the
 resampling unit per family, the bootstrap seed, and the one coefficient family a forward test
 is allowed to read. The manifest's SHA-256 is pinned in the source; a run whose manifest does
-not hash to the pin fails the release gate. Adding a predictor, relaxing a unit or swapping the
-primary test for one the model passed all move that hash, which is the difference between
-declaring a test and describing one afterwards.
+not hash to the pin fails the release gate. Relaxing a unit or swapping the primary test for one
+the model passed both move that hash, which is the difference between declaring a test and
+describing one afterwards.
+
+**A declaration can be extended, and that is a different act from editing one.** The first
+version pinned a single hash over the whole thing, which left no legal way to add a predictor
+later — and a rule with no legal path through it gets edited, at which point it stops being a
+rule. So the declaration is now in two halves. What the test *is* — the target, the baseline,
+the statistic, the resampling unit, the seed and the rule that computes the threshold — hashes
+separately and never moves. The list of predictors may grow, and only grow: every superseded
+version stays in the file with its own hash, and the release gate checks that each new list
+still contains the last. A predictor can therefore be named before the model that produces it
+exists, which is how the next rating was entered into this test in advance; until it is fitted,
+the run reports it by name as declared-and-unfitted rather than leaving a silence.
 
 **The primary test is next-season persistence on the baseline's own ground** — season *N*'s
 rating against season *N+1*'s era-adjusted K/D z, the off-diagonal cell of
@@ -2166,6 +2177,18 @@ the measured baseline correlation and that predictor's measured agreement with t
 0.09 for the composite, which agrees with K/D z at 0.572, and 0.11 for `openskill`, which
 agrees at 0.235. Then both are widened by the design effect the clustering costs, measured at
 **1.225** rather than assumed.
+
+**The next rating's floor is computed on the panel it will actually occupy, before it exists.**
+A rating built on the season plus-minus can only be scored where a season-resolution coefficient
+exists, which is the CDL era alone: **267 of the 561 transitions, over 90 of the 189 players.**
+Fewer clusters is a higher floor, so the threshold that rating will be held to is not the 0.110
+above but **0.175** — an independent floor of 0.11 widened by a design effect of 1.59 measured on
+that narrower panel, well above the 1.225 the full panel costs. On it the composite loses by
+0.258 against a baseline *r* of 0.630, so the rating has to move **0.433** in correlation to
+clear a gate that says beat rather than tie.
+That number is stored in a run that precedes any run carrying the model it judges, and the
+release gate checks that ordering, because a threshold written beside a result is not a
+threshold declared in advance.
 
 **The resampling unit is the series everywhere except here, and the exception is stated rather
 than fudged.** Maps inside a series share a lineup, a day, a patch and an opponent, so anything
@@ -2196,7 +2219,17 @@ target containing its own answer. The manifest names `filtered` as the only fami
 test may read, the harness routes its read through the estimator's own check rather than
 reimplementing it, and that check raises rather than warns. It is exercised on real
 coefficients every run instead of lying dormant: the filtered season plus-minus reaches *r* =
-0.291 against next season's K/D z over 553 cells, against the baseline's 0.572.
+0.197 against next season's K/D z over 267 season-resolution cells, against the baseline's 0.630.
+
+**That figure was 0.291 over 553 cells until the resolution split was added, and the correction
+is worth stating.** A coefficient is stored against every season it covers, so an era-resolution
+row — the CWL years, which the identification pre-flight never allowed a season on — files one
+estimate under 2017, 2018 and 2019 alike. Pooling the two resolutions put 286 such rows into a
+forward test as though they were 286 season estimates, when they are one number per player
+repeated. Read apart, the era rows score 0.364 and the season rows 0.197: the pooled figure was
+higher precisely *because* an estimate averaged over three seasons is quieter than one season's,
+which is a property of the estimator's resolution and not of the plus-minus reading forward well.
+All three are now published, and the season figure is the one that answers the question.
 
 **Negative controls, three of them, run against the plus-minus every run.**
 
@@ -2227,12 +2260,115 @@ None of these get an interval and none of them can promote anything.
 
 **The gate is that the harness recovers what is already published before it scores anything
 new.** Eleven cells of the persistence test, recomputed by a second implementation rather than
-by calling the code being reproduced, plus nine figures read straight off this page. It failed
+by calling the code being reproduced, plus every validation figure printed on this page. It failed
 that gate the first time it ran, and it was this page that was wrong: the validation section
 above had been carrying a run from before the identity merges, the plus-minus lineup rule and
 the fourth feature set, while its own pre-flight section quoted the current numbers. Both now
 agree, and a run that disagrees with either fails the release gate rather than printing a
 number nobody compares.
+
+### SKILL: the box score fitted to predict wins, and what it did not fix
+
+The composite rating loses the persistence test to a single K/D column, and the reason is
+structural rather than a matter of tuning. It is fitted against map outcome, so a column that
+*names* the result — hill time, flag captures — earns weight for naming it. That is a
+decomposition of a scoreboard, not a measurement of a player.
+
+So this asks the inverted question. The target is the season plus-minus at `filtered` scope:
+what a player's presence was worth in score margin, fitted on maps through that season and
+nothing later. The box score is the predictor. A column earns weight only if the profile it
+belongs to preceded a player who moved the margin. The fit is walk-forward by season — trained
+on the seasons before *t*, scoring *t* — and the resulting prediction is blended with the direct
+plus-minus coefficient by inverse variance. That posterior is **SKILL**.
+
+**The most important number the phase produced is about the target, not the model.** Over the
+431 player-seasons that carry a filtered season coefficient, the coefficients' standard
+deviation is 0.0622 against a mean standard error of 0.1270, and the standard error exceeds the
+absolute coefficient on 94.2% of them. Empirical Bayes returns a between-player variance of
+2.2×10⁻⁷ against a mean observation variance of 0.0162 — four orders of magnitude below the
+threshold at which this project calls a variance component collapsed. *Taken at face value with
+its own uncertainty, the season plus-minus does not establish that these players differ.*
+Nothing downstream can recover from that, and the rest of this section is written against it
+rather than around it.
+
+**What the fit reads.** One row per player-season with a season-resolution filtered coefficient
+— 431 rows, 149 players, 2020–2026. The CWL era's coefficients are estimated once over three
+seasons and filed against each of them, so training on them would enter one observation three
+times; they are excluded and the exclusion is published. The design is 16 columns: the per-mode
+box-score profile, standardized inside its own season-and-mode cohort, for the three modes the
+CDL era plays, plus one indicator per mode saying whether the player has a profile in it. A
+feature a mode reports in some seasons and not others is not admitted, because a training fold
+whose design differs from the fold it predicts is not a walk-forward fit.
+
+**Maps played and teammate concentration sit beside the design and never inside it.** A
+plus-minus coefficient is shrunk toward zero by the penalty in proportion to how little its
+lineup varied, so a model handed exposure as a feature can predict the shrinkage and publish it
+as skill. The check is a regression of the fitted prior on those two columns alone. The first
+version of it admitted them as features and then measured how well they explained the result —
+R² of 0.60, which said nothing about the box score and everything about handing the fit the
+answer. With them held out, the prior loads **0.2625**, and the target it predicts loads
+**0.2977** on the same two columns. The declared threshold was an absolute cap at 0.25, and
+that cap asks a faithful fit to load on exposure *less than the quantity it predicts does*,
+which no faithful fit can do. It was replaced, with the owner's approval and before the result
+was read, by a ratio against the target's own loading: below 1.0 the fit attenuates the
+relationship, above 1.0 it amplifies it. Measured, **0.8819**. The superseded threshold, the
+value that replaced it, and the measurement that forced the change are all carried in the
+source, and the release gate reads the ratio.
+
+**Three model arms were declared before any of them was fitted, with the rule for keeping
+them.** A regularized linear fit, a random forest and a gradient-boosted tree, on identical
+folds, identical weights and identical drawn targets — and the boosted arm ships only if it
+beats the linear one by a paired bootstrap whose interval excludes zero. On out-of-fold
+correlation with the observed coefficient:
+
+| Arm | Out-of-fold *r* | vs ridge | Kept? |
+|---|---|---|---|
+| Ridge (GCV penalty) | **0.4659** | — | published |
+| Random forest | 0.4486 | −0.0173 [−0.0637, +0.0280] | no |
+| Gradient-boosted trees | 0.4329 | −0.0330 [−0.0965, +0.0258] | no |
+
+Neither non-linear arm beat the ridge, on 431 rows against a target whose noise exceeds its
+signal — the regime where that was the predicted outcome. So the ridge publishes and **neither
+dependency was merged**: they were installed to be judged, measured once, and removed, with the
+verdicts kept in the source so a comparison that can no longer be re-run has not quietly become
+"there was only ever a ridge".
+
+**The blend has almost nothing to blend, which follows from the collapse above.** The prior's
+own out-of-fold residual variance is 0.0032 against a mean observation variance of 0.0161, so
+inverse-variance weighting puts **83% of the posterior's weight on the prior** (0.74 to 0.87
+across rows). SKILL correlates 0.93 with the prior it came from and 0.78 with the coefficient it
+was blended with. The architecture diagram's "posterior blend" is, on this record, a formality:
+SKILL is the box-score prior with the direct estimate as a correction, and it is published that
+way rather than described as a balance of two comparable estimates.
+
+**The result, against a floor computed before the model existed.** The gate runs on the
+transitions carrying all four predictors: 218 over 75 players. That is fewer than the 267 the
+floor was computed for, and the difference is not a coverage failure — SKILL is predicted from
+the seasons before it, so the earliest CDL season has no rating and its 49 transitions cannot
+carry one. On its own panel the smallest resolvable gap is 0.1623.
+
+| Predictor | Δ*r* vs K/D z | 95% interval | Detectable at | Beats the baseline? |
+|---|---|---|---|---|
+| SKILL | **−0.2416** | [−0.3554, −0.0989] | 0.1623 | no |
+| Composite | −0.2666 | [−0.4139, −0.1154] | 0.1623 | no |
+| `openskill` | −0.6362 | [−0.9376, −0.2999] | 0.2029 | no |
+
+**The architecture did not reverse the persistence failure.** SKILL predicts next season's
+era-adjusted K/D z materially *worse* than K/D z does, by a margin larger than this panel can
+mistake for noise, and K/D z is left standing as the recommended forecaster. The three-way
+comparison the earlier figures were computed on is retained unchanged beside it — 561
+transitions over 189 players, composite at −0.2286 — so nothing published before this phase was
+restated by a fourth predictor narrowing the panel.
+
+**One secondary test, declared in the manifest before the model existed, says where the failure
+comes from.** The primary test scores every rating against next season's K/D z, which is the
+baseline's own ground: a rating built to predict plus-minus is being asked to beat K/D z at
+being K/D z. Scored instead against the quantity it was fitted for — next season's filtered
+plus-minus, over 215 transitions — SKILL reaches *r* = 0.4232 against the composite's 0.2984 and
+K/D z's 0.2618. That is a diagnostic and carries no interval and no verdict; it does not soften
+the gate, which SKILL failed. What it says is that the object was fitted to a target the record
+cannot measure precisely enough to be worth predicting, and then judged against a target it was
+never built for. Both of those are real, and only the first is fixable by a better model.
 
 ## Tier 2b: Series dynamics (shipped)
 

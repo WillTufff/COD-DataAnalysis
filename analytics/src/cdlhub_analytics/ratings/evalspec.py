@@ -35,6 +35,16 @@ test uses today and therefore widens the interval — the direction the pre-flig
 predicted. The design effect between the two is measured and published rather
 than assumed.
 
+**A declaration can be extended, and that is not the same act as editing one.**
+Version 1.0.0 pinned a single digest over the whole thing, which made the pin
+unpassable for any later phase that needed a new predictor — and an unpassable
+rule gets edited, at which point it is not a rule. So the declaration is split:
+`invariants()` holds what the test *is* — target, baseline, statistic, unit,
+seed, threshold rule — and its digest never moves; the predictor list may grow,
+and only grow, with every superseded version kept in `PIN_HISTORY` and each new
+list checked to contain the last. P5 uses exactly that door and nothing else,
+adding `skill` and one secondary before the model that produces them exists.
+
 **And only the filtered family may be read forward.** The random-walk penalty is
 two-sided, so a smoothed coefficient at season *t* has already seen *t+1*, and a
 model trained on smoothed targets and scored on next-season persistence is scored
@@ -52,7 +62,7 @@ from typing import Any
 from . import statespace
 
 MODEL = "evaluation"
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 # Resampling units. `SERIES` is the plan's declared default and applies to every
 # map- and series-keyed test; `PLAYER` is what a player-season statistic can
@@ -119,7 +129,7 @@ PRIMARY = Test(
     ),
     statistic="pearson r, paired cluster bootstrap over players",
     target="era-adjusted K/D z, season N+1",
-    predictors=("composite", "openskill"),
+    predictors=("composite", "openskill", "skill"),
     baselines=("kd_z",),
     unit=PLAYER,
     significance_claimed=True,
@@ -191,6 +201,24 @@ SECONDARY: tuple[Test, ...] = (
         significance_claimed=False,
     ),
     Test(
+        name="prior_target_persistence",
+        role="secondary",
+        what=(
+            "how well season N's SKILL rating predicts season N+1's filtered plus-minus — "
+            "the quantity the box-score prior is fitted against, rather than the baseline's "
+            "own. Declared with the predictor it scores and before that predictor exists, "
+            "because the primary test asks a rating built to predict plus-minus to beat K/D z "
+            "at predicting K/D z; if SKILL fails there and wins here, the phase has the reason "
+            "for the failure rather than a shrug. Secondary, and it does not soften the gate"
+        ),
+        statistic="pearson r over consecutive cells",
+        target="filtered plus-minus coefficient, season N+1",
+        predictors=("skill", "composite"),
+        baselines=("kd_z",),
+        unit=PLAYER,
+        significance_claimed=False,
+    ),
+    Test(
         name="calibration_by_bucket",
         role="secondary",
         what=(
@@ -237,6 +265,29 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     "delta_r_tol": 5e-4,
     "forecast_maps": 9257,
     "brier_tol": 5e-5,
+    # The panel the next rating will be gated on, and the floor computed for it
+    # before that rating exists. Pinned for the same reason as everything else
+    # here: a figure on the page that nothing compares against is a figure that
+    # drifts, and this one is a threshold.
+    "skill_panel": {
+        "n": 267,
+        "clusters": 90,
+        "mde80_clustered": 0.1749,
+        "distance_to_clear": 0.433,
+    },
+    # The plus-minus read forward, at the resolution the read is valid at, with
+    # the pooled figure the page corrects and the era figure that inflated it.
+    "plusminus_forward": {"n": 267, "r": 0.1974, "pooled_r": 0.2914, "era_r": 0.3641},
+    # What the gate returned once the fourth predictor existed, from run 431/432.
+    #
+    # The panel is 218 rather than the 267 the floor was computed for, and the
+    # difference is not a coverage failure: SKILL is predicted from the seasons
+    # before it, so the earliest CDL season has no rating and its 49 transitions
+    # cannot carry one. The floor that judges the result is therefore the one
+    # this panel computes for itself, 0.1623, and the 0.1749 pinned above stays
+    # what it always was — the number written before the model, against a panel
+    # the model turned out not to fill.
+    "skill_result": {"n": 218, "clusters": 75, "delta_r": -0.2416, "mde80": 0.1623},
     "forecast_brier": {
         "rapm": 0.24609,
         "rapm_prior": 0.24675,
@@ -246,6 +297,77 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "kd": 0.25156,
     },
 }
+
+
+def invariants() -> dict[str, Any]:
+    """The half of the declaration that is never allowed to move.
+
+    A pinned manifest that no phase can legally extend has exactly one outcome:
+    the phase that needs a new predictor edits the pin, and the pin stops meaning
+    anything. P5 needs one — `skill` — so the declaration is split rather than
+    reopened.
+
+    What lives here is the *shape* of the test: what is predicted, what it is
+    compared against, how the comparison is made, what is resampled and how the
+    threshold is computed. Change any of it and this is a different evaluation,
+    not an extended one, and the gate should say so. What deliberately does not
+    live here is the predictor list, which may grow — and only grow; the gate
+    checks each new version's list is a superset of the last.
+
+    Every field below is byte-identical to what version 1.0.0 declared. The
+    digest is new because the function is, not because a value moved.
+    """
+    return {
+        "primary": {
+            "name": PRIMARY.name,
+            "what": PRIMARY.what,
+            "statistic": PRIMARY.statistic,
+            "target": PRIMARY.target,
+            "baselines": list(PRIMARY.baselines),
+            "resampling_unit": PRIMARY.unit,
+            "significance_claimed": PRIMARY.significance_claimed,
+        },
+        "scope_permitted_forward": SCOPE,
+        "bootstrap_b": BOOTSTRAP_B,
+        "bootstrap_seed": BOOTSTRAP_SEED,
+        "power_alpha": 0.05,
+        "power_target": 0.8,
+        "reproduction_tolerance": REPRODUCTION_TOL,
+    }
+
+
+def invariants_sha256() -> str:
+    return hashlib.sha256(
+        json.dumps(invariants(), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+# The digest of the fixed half, pinned once and never re-pinned. A phase that
+# needs this to change needs a new evaluation.
+PINNED_INVARIANTS_SHA256 = "74cdb3f17cc79555e06c1f6beb1a1f7347634ee18d6fe2b855999dbf569a00a6"
+
+
+# Every *superseded* version of the declaration, oldest first. The current one is
+# not listed — its digest is `PINNED_SHA256` — because the manifest carries this
+# tuple and a version cannot contain its own hash.
+#
+# Append-only, and the gate enforces it: each entry stays, and each version's
+# predictor list must contain the one before it. A predictor can be added, never
+# quietly removed, renamed, or swapped for one that scores better.
+PIN_HISTORY: tuple[dict[str, Any], ...] = (
+    {
+        "version": "1.0.0",
+        "sha256": "1fbc24905d69b7ba140df2ed1e8af2bd0a79244636c340e925b73fa999dd3dd6",
+        "predictors": ["composite", "openskill"],
+        "changed": "the declaration as first committed, ahead of the models it judges",
+        "superseded_by": (
+            "2.0.0 — P5 added the `skill` predictor and the `prior_target_persistence` "
+            "secondary, both declared before the box-score prior that produces them exists. "
+            "The primary test's target, baseline, statistic, unit and seed are untouched and "
+            "are pinned separately as PINNED_INVARIANTS_SHA256"
+        ),
+    },
+)
 
 
 def manifest() -> dict[str, Any]:
@@ -259,6 +381,8 @@ def manifest() -> dict[str, Any]:
         ),
         "primary": PRIMARY.payload(),
         "secondary": [t.payload() for t in SECONDARY],
+        "supersedes": [dict(entry) for entry in PIN_HISTORY],
+        "invariants_sha256": invariants_sha256(),
         "scope_permitted_forward": SCOPE,
         "scopes_stored": list(statespace.SCOPES),
         "bootstrap_b": BOOTSTRAP_B,
@@ -290,10 +414,15 @@ def sha256() -> str:
 
 
 # The digest of the declaration as committed. A manifest edited after the fact —
-# a predictor added, a unit relaxed, a primary test swapped for one the model
-# passes — moves this and fails the release gate, which is the whole point of
-# declaring it in advance rather than describing it afterwards.
-PINNED_SHA256 = "1fbc24905d69b7ba140df2ed1e8af2bd0a79244636c340e925b73fa999dd3dd6"
+# a unit relaxed, a primary test swapped for one the model passes — moves this and
+# fails the release gate, which is the whole point of declaring it in advance
+# rather than describing it afterwards.
+#
+# Extending it is allowed and is not the same act: a new predictor moves this
+# digest, so the old one goes into `PIN_HISTORY` and the fixed half of the
+# declaration is checked against `PINNED_INVARIANTS_SHA256`, which does not move
+# at all. Version 1.0.0's value is preserved there rather than overwritten here.
+PINNED_SHA256 = "292ab3e47da3b72303eda88acbbe697bbaab13da233a64ba672d964bcec545ac"
 
 
 def assert_forward(scope: str) -> None:

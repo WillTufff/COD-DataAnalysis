@@ -26,7 +26,8 @@ def _observation(
     kd: float,
     kd_next: float,
     *,
-    skill: float | None = 0.0,
+    openskill: float | None = 0.0,
+    skill: float | None = None,
     season_a: int = 1,
 ) -> evaluate.Observation:
     return evaluate.Observation(
@@ -37,6 +38,7 @@ def _observation(
         year_a=2018,
         composite=composite,
         kd=kd,
+        openskill=openskill,
         skill=skill,
         kd_next=kd_next,
         composite_next=composite,
@@ -49,6 +51,10 @@ def _observation(
 def _panel(n: int = 240, seed: int = 3) -> list[evaluate.Observation]:
     """A league where K/D persists and the composite carries a weaker signal."""
     rng = np.random.default_rng(seed)
+    # The SKILL column is drawn from its own generator so that adding a fourth
+    # predictor to the fixture does not shift the stream the other three were
+    # drawn from, and every number this panel already produced stays put.
+    skills = np.random.default_rng(seed + 1).standard_normal(n)
     out = []
     for i in range(n):
         kd = float(rng.standard_normal())
@@ -58,7 +64,8 @@ def _panel(n: int = 240, seed: int = 3) -> list[evaluate.Observation]:
                 composite=0.4 * kd + float(rng.standard_normal()),
                 kd=kd,
                 kd_next=0.6 * kd + 0.8 * float(rng.standard_normal()),
-                skill=0.2 * kd + float(rng.standard_normal()),
+                openskill=0.2 * kd + float(rng.standard_normal()),
+                skill=0.3 * kd + float(skills[i]),
             )
         )
     return out
@@ -110,11 +117,94 @@ def test_a_predictor_that_is_the_baseline_plus_noise_does_not_beat_it() -> None:
 def test_the_primary_test_publishes_what_it_dropped() -> None:
     panel = _panel()
     blinded = [
-        evaluate.Observation(**{**o.__dict__, "skill": None}) if i % 5 == 0 else o
+        evaluate.Observation(**{**o.__dict__, "openskill": None}) if i % 5 == 0 else o
         for i, o in enumerate(panel)
     ]
     out = evaluate.primary(blinded)
-    assert out["n_dropped_no_openskill"] == len(panel) - out["n"]
+    assert out["n_dropped_missing_a_predictor"] == len(panel) - out["n"]
+    assert out["dropped_by_predictor"]["openskill"] == len(panel) - out["n"]
+
+
+# ------------------------------------------------------------- the P5 floor
+
+
+def _resolutions(
+    panel: list[evaluate.Observation], seasonal: int, era: int = 0
+) -> dict[tuple[int, int], str]:
+    """Season resolution on the first `seasonal` rows, era on the `era` after them."""
+    out = {(o.player_id, o.season_a): "season" for o in panel[:seasonal]}
+    out.update({(o.player_id, o.season_a): "era" for o in panel[seasonal : seasonal + era]})
+    return out
+
+
+def _coefficients(panel: list[evaluate.Observation], covered: int) -> dict[tuple[int, int], float]:
+    """A filtered coefficient for the first `covered` rows and nothing else."""
+    return {(o.player_id, o.season_a): 0.01 * i for i, o in enumerate(panel[:covered])}
+
+
+def test_the_floor_is_computed_on_the_panel_a_skill_rating_could_reach() -> None:
+    """Not the published panel: only where a filtered coefficient exists."""
+    panel = _panel()
+    out = evaluate.skill_power(panel, _resolutions(panel, 120))
+    assert out["available"]
+    assert out["n_panel"] == len(panel)
+    assert out["n_eligible"] == 120
+    assert out["dropped"]["no_filtered_coefficient"] == len(panel) - 120
+
+
+def test_an_era_coefficient_does_not_widen_the_panel_it_cannot_carry() -> None:
+    """One estimate filed against three seasons cannot move across a transition."""
+    panel = _panel()
+    out = evaluate.skill_power(panel, _resolutions(panel, 120, era=80))
+    assert out["n_eligible"] == 120
+    assert out["dropped"]["era_resolution_only"] == 80
+    assert out["dropped"]["no_filtered_coefficient"] == len(panel) - 200
+    assert out["wider_panel"]["n"] == 200
+    assert (
+        out["wider_panel"]["floor"]["mde80_independent"]
+        < out["floors"]["composite_measured"]["mde80_independent"]
+    )
+
+
+def test_a_narrower_panel_raises_the_floor() -> None:
+    """The whole reason the floor is recomputed rather than inherited from PE."""
+    panel = _panel()
+    wide = evaluate.skill_power(panel, _resolutions(panel, len(panel)))
+    narrow = evaluate.skill_power(panel, _resolutions(panel, 120))
+    anchor = "composite_measured"
+    assert (
+        narrow["floors"][anchor]["mde80_independent"] > wide["floors"][anchor]["mde80_independent"]
+    )
+
+
+def test_the_floor_says_how_far_a_rating_has_to_travel() -> None:
+    panel = _panel()
+    out = evaluate.skill_power(panel, _resolutions(panel, 160))
+    anchor = out["floors"]["composite_measured"]["mde80_clustered"]
+    assert out["distance_to_clear"] == round(anchor - out["composite_gap_here"], 4)
+    assert str(out["distance_to_clear"]) in out["statement"]
+
+
+def test_a_panel_too_thin_to_score_says_so_rather_than_publishing_a_floor() -> None:
+    panel = _panel()
+    out = evaluate.skill_power(panel, _resolutions(panel, 10))
+    assert not out["available"]
+    assert out["n_eligible"] == 10
+
+
+def test_the_plusminus_secondary_separates_a_season_estimate_from_an_era_one() -> None:
+    """The defect this found in PE: 553 cells, 122 of them one number repeated."""
+    panel = _panel()
+    out = evaluate.season_plusminus_persistence(
+        panel,
+        _coefficients(panel, 200),
+        "filtered",
+        _resolutions(panel, 120, era=80),
+    )
+    assert out["resolution_read"] == "season"
+    assert out["n"] == 120
+    assert out["pooled_over_resolutions"]["n"] == 200
+    assert out["by_resolution"]["era"]["n"] == 80
 
 
 # ---------------------------------------------------------- the reproduction
