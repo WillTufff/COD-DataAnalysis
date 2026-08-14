@@ -9,8 +9,11 @@ whose components moved under their names.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+import psycopg
+
+from cdlhub_analytics.errorcontrol import Q_THRESHOLD
 from cdlhub_analytics.gates import (
     PUBLISHED_BASES,
     aging_failures,
@@ -18,8 +21,10 @@ from cdlhub_analytics.gates import (
     basis_failures,
     career_failures,
     cohort_failures,
+    error_control_failures,
     evaluation_failures,
     mode_naming_failures,
+    role_failures,
     rotation_failures,
     season_rapm_failures,
     site_read_failures,
@@ -659,3 +664,175 @@ def test_career_gate_catches_a_missing_team_column() -> None:
     failures = career_failures(payload)
     assert any("deviation_plus_team" in line for line in failures)
     assert any("disagreement" in line for line in failures)
+
+
+# ------------------------------------------------- PF: finding error control
+
+
+class _Rows:
+    """One canned result set, in the shape psycopg hands back."""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+
+class _Conn:
+    """A connection that answers the gate's one query and nothing else."""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def execute(self, _sql: str, _params: tuple[Any, ...] = ()) -> _Rows:
+        return _Rows(self._rows)
+
+
+def _conn(rows: list[tuple[Any, ...]]) -> psycopg.Connection[Any]:
+    """The stub above, typed as the connection the gate takes."""
+    return cast("psycopg.Connection[Any]", _Conn(rows))
+
+
+def _control_payload(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "available": True,
+        "insights_run_id": 42,
+        "q_threshold": Q_THRESHOLD,
+        "unclassified": [],
+        "sensitivity": [{"q": 0.1, "kept": 1, "declared": True}],
+    }
+    payload.update(over)
+    return payload
+
+
+# (kind, class, n, missing p, missing q, retracted)
+_CLEAN_ROWS: list[tuple[Any, ...]] = [
+    ("h2h_edge", "testable", 33, 0, 0, 33),
+    ("milestone", "descriptive", 30, 30, 30, 0),
+    ("team_style", "uncorrected", 10, 10, 10, 0),
+    ("model_null", "self_tested", 2, 2, 2, 0),
+]
+
+
+def test_error_control_gate_passes_on_a_correctly_partitioned_run() -> None:
+    assert error_control_failures(_conn(_CLEAN_ROWS), _control_payload()) == []
+
+
+def test_error_control_gate_refuses_a_kind_the_partition_does_not_name() -> None:
+    payload = _control_payload(unclassified=["brand_new_kind"])
+    failures = error_control_failures(_conn(_CLEAN_ROWS), payload)
+    assert any("does not name it" in line for line in failures)
+
+
+def test_error_control_gate_catches_a_testable_finding_that_was_never_corrected() -> None:
+    rows = [("h2h_edge", "testable", 33, 0, 4, 33), *_CLEAN_ROWS[1:]]
+    failures = error_control_failures(_conn(rows), _control_payload())
+    assert any("never corrected" in line for line in failures)
+
+
+def test_error_control_gate_catches_a_testable_finding_with_no_p_value() -> None:
+    rows = [("h2h_edge", "testable", 33, 5, 0, 33), *_CLEAN_ROWS[1:]]
+    failures = error_control_failures(_conn(rows), _control_payload())
+    assert any("carry no p-value" in line for line in failures)
+
+
+def test_error_control_gate_catches_a_q_value_on_something_that_is_not_a_test() -> None:
+    """A descriptive finding with a p-value is a category error wearing a number."""
+    rows = [("milestone", "descriptive", 30, 24, 30, 0), *_CLEAN_ROWS[:1]]
+    failures = error_control_failures(_conn(rows), _control_payload())
+    assert any("carry a p-value" in line for line in failures)
+
+
+def test_error_control_gate_catches_a_retraction_of_something_never_tested() -> None:
+    rows = [("team_style", "uncorrected", 10, 10, 10, 3), *_CLEAN_ROWS[:1]]
+    failures = error_control_failures(_conn(rows), _control_payload())
+    assert any("are retracted" in line for line in failures)
+
+
+def test_error_control_gate_catches_a_class_that_drifted_from_its_declaration() -> None:
+    rows = [("outlier", "descriptive", 32, 32, 32, 0)]
+    failures = error_control_failures(_conn(rows), _control_payload())
+    assert any("declared testable" in line for line in failures)
+
+
+def test_error_control_gate_catches_a_threshold_that_moved_under_the_run() -> None:
+    payload = _control_payload(q_threshold=0.25)
+    failures = error_control_failures(_conn(_CLEAN_ROWS), payload)
+    assert any("declared threshold" in line for line in failures)
+
+
+def test_error_control_gate_demands_the_survivor_count_at_more_than_one_threshold() -> None:
+    payload = _control_payload(sensitivity=[])
+    failures = error_control_failures(_conn(_CLEAN_ROWS), payload)
+    assert any("one threshold only" in line for line in failures)
+
+
+def test_error_control_gate_refuses_a_run_that_corrected_nothing() -> None:
+    failures = error_control_failures(_conn([]), _control_payload())
+    assert any("no findings" in line for line in failures)
+
+
+# --------------------------------------------------------------- P3: role
+
+
+def _role_payload(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "available": True,
+        "weapon_table": {
+            "observed": {"KBAR-32": "ar", "Erad": "smg"},
+            "disagreements": [],
+        },
+        "recovery": {
+            "accuracy": 0.72,
+            "verdict": "ambiguous between loose axes and a loose proxy",
+            "n_axes": len(PUBLISHED_BASES["core CWL"]),
+        },
+        "entry_cost": [{"outcome": "kd", "slope": 0.03, "lo95": -0.13, "hi95": 0.17}],
+        "era_split": {"recovery_era": "2017-2019", "cost_era": "2020-2026"},
+    }
+    payload.update(over)
+    return payload
+
+
+def test_role_gate_passes_on_a_run_that_measured_what_it_published() -> None:
+    assert role_failures(_role_payload()) == []
+
+
+def test_role_gate_catches_a_weapon_table_that_drifted_from_the_kill_feed() -> None:
+    table = {"observed": {"KBAR-32": "smg"}, "disagreements": ["KBAR-32: table says smg"]}
+    failures = role_failures(_role_payload(weapon_table=table))
+    assert any("disagrees with the kill feed" in line for line in failures)
+
+
+def test_role_gate_refuses_a_table_nothing_checked() -> None:
+    failures = role_failures(_role_payload(weapon_table={"observed": {}, "disagreements": []}))
+    assert any("checked against the kill feed" in line for line in failures)
+
+
+def test_role_gate_catches_a_verdict_that_does_not_follow_the_declared_rule() -> None:
+    """A hand-written verdict is the rule being rewritten after the number."""
+    rec = {"accuracy": 0.62, "verdict": "the axes carry role", "n_axes": 5}
+    failures = role_failures(_role_payload(recovery=rec))
+    assert any("declared rule" in line for line in failures)
+
+
+def test_role_gate_catches_a_recovery_run_on_the_wrong_number_of_axes() -> None:
+    rec = {
+        "accuracy": 0.72,
+        "verdict": "ambiguous between loose axes and a loose proxy",
+        "n_axes": 2,
+    }
+    failures = role_failures(_role_payload(recovery=rec))
+    assert any("axes and the CWL basis publishes" in line for line in failures)
+
+
+def test_role_gate_refuses_a_slope_published_without_its_interval() -> None:
+    failures = role_failures(_role_payload(entry_cost=[{"outcome": "kd", "slope": 0.03}]))
+    assert any("ships without" in line for line in failures)
+
+
+def test_role_gate_refuses_a_claim_that_one_era_carries_both_halves() -> None:
+    split = {"recovery_era": "2020-2026", "cost_era": "2020-2026"}
+    failures = role_failures(_role_payload(era_split=split))
+    assert any("same era" in line for line in failures)

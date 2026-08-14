@@ -23,7 +23,54 @@ from typing import Any, cast
 
 import psycopg
 
+from . import errorcontrol
 from .insights import Atom
+
+# The value a cohort reaches at a claimed percentile, which is the null a
+# percentile claim on a proportion metric is tested against. Cohorts are
+# (metric, season, mode), the same grouping the metric layer scored them in.
+_COHORT_REFERENCE_SQL = """
+SELECT metric, season_id, coalesce(mode_id, -1) AS mode_key,
+       percentile_cont(%(pctl)s) WITHIN GROUP (ORDER BY value) AS reference
+FROM player_metric_season
+WHERE run_id = %(run)s AND qualified AND metric = ANY(%(metrics)s)
+GROUP BY metric, season_id, coalesce(mode_id, -1)
+"""
+
+
+def _cohort_reference(
+    conn: psycopg.Connection[tuple[object, ...]],
+    metric_run: int,
+    metrics: list[str],
+    pctl: float,
+) -> dict[tuple[str, int, int], float]:
+    """The value at `pctl` in each (metric, season, mode) cohort."""
+    rows = conn.execute(
+        _COHORT_REFERENCE_SQL, {"run": metric_run, "metrics": metrics, "pctl": pctl}
+    ).fetchall()
+    return {
+        (cast(str, r[0]), cast(int, r[1]), cast(int, r[2])): float(cast(float, r[3]))
+        for r in rows
+        if r[3] is not None
+    }
+
+
+def _proportion_p(
+    value: float, denom: float, reference: float | None, *, high: bool = True
+) -> float | None:
+    """A percentile claim on a proportion, tested at the cohort's own boundary.
+
+    A claim of being unusually low is the same test on the complement, since
+    P(X <= k | n, p) is P(n - X >= n - k | n, 1 - p).
+    """
+    if reference is None or denom <= 0:
+        return None
+    trials = round(denom)
+    successes = round(value * denom)
+    if not high:
+        successes, reference = trials - successes, 1.0 - reference
+    return errorcontrol.threshold_binomial(successes, trials, reference, reference)
+
 
 # Qualification and volume caps.
 TOP_DECILE = 0.9
@@ -270,7 +317,8 @@ def profile_extremes(conn: psycopg.Connection[tuple[object, ...]], metric_run: i
 # --------------------------------------------------------- clutch_milestone
 
 _CLUTCH_SQL = """
-SELECT m.player_id, p.handle, se.year, t.short_name, m.metric, m.value, m.denom, m.pctl
+SELECT m.player_id, p.handle, se.year, t.short_name, m.metric, m.value, m.denom, m.pctl,
+       m.season_id, coalesce(m.mode_id, -1) AS mode_key
 FROM player_metric_season m
 JOIN players p  ON p.id = m.player_id
 JOIN seasons se ON se.id = m.season_id
@@ -285,7 +333,11 @@ def clutch_milestones(conn: psycopg.Connection[tuple[object, ...]], metric_run: 
     """Last-man-standing records, reconstructed from the kill feed."""
     catalog = _catalog(conn, metric_run)
     out: list[Atom] = []
-    for r in conn.execute(_CLUTCH_SQL, {"run": metric_run, "min_attempts": MIN_CLUTCH_ATTEMPTS}):
+    rows = list(conn.execute(_CLUTCH_SQL, {"run": metric_run, "min_attempts": MIN_CLUTCH_ATTEMPTS}))
+    reference = _cohort_reference(
+        conn, metric_run, sorted({cast(str, r[4]) for r in rows}), TOP_DECILE
+    )
+    for r in rows:
         pid, handle, year, title = (
             cast(int, r[0]),
             cast(str, r[1]),
@@ -294,6 +346,7 @@ def clutch_milestones(conn: psycopg.Connection[tuple[object, ...]], metric_run: 
         )
         metric, value = cast(str, r[4]), float(cast(float, r[5]))
         denom, pctl = float(cast(float, r[6])), float(cast(float, r[7]))
+        season_id, mode_key = cast(int, r[8]), cast(int, r[9])
         if pctl < TOP_DECILE:
             continue
         situation = "1vN rounds" if metric == "clutch_win_rate" else metric.split("_")[1]
@@ -315,6 +368,7 @@ def clutch_milestones(conn: psycopg.Connection[tuple[object, ...]], metric_run: 
                     "metric_run_id": metric_run,
                 },
                 min(0.55 + value * 0.35, 0.95),
+                p_value=_proportion_p(value, denom, reference.get((metric, season_id, mode_key))),
             )
         )
     return out[:MAX_CLUTCH]
@@ -329,7 +383,7 @@ WITH slay AS (
   WHERE run_id = %(run)s AND metric = 'kills_p10' AND mode_id IS NULL AND qualified
 )
 SELECT m.player_id, p.handle, se.year, t.short_name,
-       m.value, m.pctl, m.denom, slay.pctl, slay.value
+       m.value, m.pctl, m.denom, slay.pctl, slay.value, m.season_id
 FROM player_metric_season m
 JOIN slay ON slay.player_id = m.player_id AND slay.season_id = m.season_id
 JOIN players p  ON p.id = m.player_id
@@ -350,12 +404,16 @@ def trade_asymmetries(conn: psycopg.Connection[tuple[object, ...]], metric_run: 
     death. Untraded-death rate is lower-is-better, so the contradiction is a
     heavy slayer high on it, or a light slayer low on it."""
     out: list[Atom] = []
-    for r in conn.execute(_TRADE_SQL, {"run": metric_run}):
+    rows = list(conn.execute(_TRADE_SQL, {"run": metric_run}))
+    high = _cohort_reference(conn, metric_run, ["untraded_death_rate"], TRADE_EXTREME)
+    low = _cohort_reference(conn, metric_run, ["untraded_death_rate"], 1.0 - TRADE_EXTREME)
+    for r in rows:
         pid, handle = cast(int, r[0]), cast(str, r[1])
         year, title = cast(int, r[2]), cast(str, r[3])
         untraded, untraded_pctl = float(cast(float, r[4])), float(cast(float, r[5]))
         denom = float(cast(float, r[6]))
         slay_pctl, kills = float(cast(float, r[7])), float(cast(float, r[8]))
+        cohort = ("untraded_death_rate", cast(int, r[9]), -1)
 
         isolated = slay_pctl >= SLAY_HIGH and untraded_pctl >= TRADE_EXTREME
         answered = slay_pctl <= SLAY_LOW and untraded_pctl <= 1.0 - TRADE_EXTREME
@@ -392,6 +450,12 @@ def trade_asymmetries(conn: psycopg.Connection[tuple[object, ...]], metric_run: 
                     "metric_run_id": metric_run,
                 },
                 min(0.55 + abs(untraded_pctl - (1.0 - slay_pctl)) * 0.5, 0.95),
+                p_value=_proportion_p(
+                    untraded,
+                    denom,
+                    high.get(cohort) if isolated else low.get(cohort),
+                    high=isolated,
+                ),
             )
         )
     out.sort(key=lambda a: -a.score)

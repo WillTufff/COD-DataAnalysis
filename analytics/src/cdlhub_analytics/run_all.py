@@ -22,9 +22,11 @@ from . import (
     career,
     cohort,
     era,
+    errorcontrol,
     events,
     insights,
     metrics,
+    role,
     roundwp,
     segmentwp,
     seriesdyn,
@@ -1258,11 +1260,6 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"series_dynamics run {sd_run}: no usable series, nothing to fit")
 
-        # What a player is, as opposed to how good they are: the continuous
-        # style axes left in the metric layer once the composite rating is
-        # projected out of it, and the archetype taxonomy that does not survive
-        # a cloud with no clusters in it. Fitted after the ratings because it
-        # residualises against the published composite.
         # Every season number above, added up. Placed after the fits it reads
         # and before the interpretation layer, because a career total is an
         # aggregation of published quantities rather than a new estimate: it
@@ -1386,6 +1383,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"{block['n_players']} players ({fits})"
             )
 
+        # What a player is, as opposed to how good they are: the continuous
+        # style axes left in the metric layer once the composite rating is
+        # projected out of it, and the archetype taxonomy that does not survive
+        # a cloud with no clusters in it. Fitted after the ratings because it
+        # residualises against the published composite.
         progress.stage("player_style")
         style_run = open_run(conn, style.MODEL, style.VERSION, style.params(), through)
         orientation = {m.key: m.higher_is_better for m in metrics.CATALOG}
@@ -1421,6 +1423,24 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"player_style run {style_run}: too few complete rows, nothing fitted")
 
+        # Who takes the opening fight and what it goes with. After the style
+        # axes because the recovery test scores them, and on two eras because
+        # the weapon label and the trade columns never share one.
+        progress.stage("role")
+        role_run = open_run(conn, role.MODEL, role.VERSION, role.params(), through)
+        _, role_costs, role_rows, role_art = role.build(conn, style_run)
+        role.write(conn, role_run, role_rows)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (role_run, "role", json.dumps(role_art)),
+        )
+        print(f"role run {role_run}: {role.headline(role_art)}, {len(role_rows)} player-seasons")
+        for cost in role_costs:
+            print(
+                f"  {cost.outcome}: {cost.slope:+.3f} SD "
+                f"[{cost.lo95:+.3f}, {cost.hi95:+.3f}] over {cost.n_seasons} seasons"
+            )
+
         progress.stage("insights")
         ins_run = open_run(
             conn,
@@ -1442,6 +1462,32 @@ def main(argv: list[str] | None = None) -> int:
             conn, ins_run, era_run, elo_run, pr_run, wp_run, glicko_run, metric_run, map_run, sd_run
         )
         print(f"insights run {ins_run}: {n} atoms")
+
+        # What each of those claims is worth once the search behind it is
+        # counted. Runs after the feed exists because it corrects the feed, and
+        # before the prune so its own run is the one kept.
+        progress.stage("error_control")
+        ec_run = open_run(
+            conn,
+            errorcontrol.MODEL,
+            errorcontrol.VERSION,
+            {**errorcontrol.params(), "insights_run_id": ins_run},
+            through,
+        )
+        corrected, ec_art = errorcontrol.build(conn, ins_run)
+        errorcontrol.write(conn, corrected)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (ec_run, "error_control", json.dumps(ec_art)),
+        )
+        print(f"error_control run {ec_run}: {ec_art['statement']}")
+        for family in ec_art["families"]:
+            if family["class"] != errorcontrol.TESTABLE:
+                continue
+            print(
+                f"  {family['kind']}: {family['fails_threshold']} of {family['tested']} "
+                f"retracted, median q {family['q_bh']['median']:.3f}"
+            )
 
         # Everything above is what this run publishes. Older runs of the same
         # models — earlier insight and metric-layer versions in particular — are
@@ -1470,6 +1516,8 @@ def main(argv: list[str] | None = None) -> int:
                 career.MODEL: [cv_run],
                 aging.MODEL: [ag_run],
                 "insights": [ins_run],
+                errorcontrol.MODEL: [ec_run],
+                role.MODEL: [role_run],
             },
         )
         if removed:

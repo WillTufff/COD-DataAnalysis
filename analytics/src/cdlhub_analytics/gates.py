@@ -32,7 +32,7 @@ from typing import Any, cast
 
 import psycopg
 
-from . import aging, career, metrics, seriesdyn, style
+from . import aging, career, errorcontrol, metrics, role, seriesdyn, style
 from .db import connect
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
@@ -397,6 +397,114 @@ def career_failures(payload: dict[str, Any]) -> list[str]:
     return out
 
 
+def error_control_failures(conn: psycopg.Connection[Any], payload: dict[str, Any]) -> list[str]:
+    """Every finding is classified, and only the tests carry a test's numbers.
+
+    The partition is the whole argument of the phase. A kind that drifts into
+    being corrected without being declared would publish a q-value for a
+    sentence nobody decided was a hypothesis; a kind that drifts out would go
+    uncorrected in silence. Both are quiet failures that leave the feed looking
+    exactly as it does when the phase works, so the check reads the rows rather
+    than trusting the summary written beside them.
+    """
+    if not payload.get("available"):
+        return []
+    out: list[str] = []
+    for kind in payload.get("unclassified", []):
+        out.append(f"{kind} is published and the partition does not name it")
+
+    run_id = payload.get("insights_run_id")
+    if run_id is None:
+        return [*out, "the payload does not say which insights run it corrected"]
+
+    rows = conn.execute(
+        "SELECT kind, finding_class, count(*),"
+        " count(*) FILTER (WHERE p_value IS NULL),"
+        " count(*) FILTER (WHERE q_bh IS NULL OR q_by IS NULL),"
+        " count(*) FILTER (WHERE retracted)"
+        " FROM insights WHERE run_id = %s GROUP BY kind, finding_class ORDER BY kind",
+        (run_id,),
+    ).fetchall()
+    if not rows:
+        return [*out, f"insights run {run_id} holds no findings to correct"]
+
+    for kind, cls, n, no_p, no_q, retracted in rows:
+        declared = errorcontrol.class_of(str(kind))
+        if str(cls) != declared:
+            out.append(f"{kind} is stored as {cls} and declared {declared}")
+        if str(cls) == errorcontrol.TESTABLE:
+            if no_p:
+                out.append(f"{kind}: {no_p} of {n} testable findings carry no p-value")
+            if no_q:
+                out.append(f"{kind}: {no_q} of {n} testable findings were never corrected")
+        else:
+            if n - no_p:
+                out.append(f"{kind} is {cls} and {n - no_p} of its findings carry a p-value")
+            if retracted:
+                out.append(f"{kind} is {cls} and {retracted} of its findings are retracted")
+
+    threshold = payload.get("q_threshold")
+    if threshold != errorcontrol.Q_THRESHOLD:
+        out.append(
+            f"the run corrected at q <= {threshold} and the declared threshold is "
+            f"{errorcontrol.Q_THRESHOLD}"
+        )
+    if not payload.get("sensitivity"):
+        out.append("the survivor count is published at one threshold only")
+    return out
+
+
+def role_failures(payload: dict[str, Any]) -> list[str]:
+    """The weapon table is checked, the verdict follows its own rule, and no
+    adjusted number ships alone.
+
+    Three ways this phase could publish something it did not measure. A weapon
+    table that drifts from the kill feed would relabel the population the
+    recovery rate is scored against; a verdict written by hand would read a
+    recovery rate the pre-registered rule does not; and an adjusted K/D without
+    its raw value and the size of the adjustment beside it is an adjustment
+    nobody can audit, which the phase was directed not to publish.
+    """
+    if not payload.get("available"):
+        return []
+    out: list[str] = []
+    table = payload.get("weapon_table", {})
+    for line in table.get("disagreements", []):
+        out.append(f"weapon table disagrees with the kill feed: {line}")
+    if not table.get("observed"):
+        out.append("no weapon class was checked against the kill feed")
+
+    rec = payload.get("recovery")
+    if rec is not None:
+        accuracy = rec.get("accuracy")
+        if accuracy is None:
+            out.append("a recovery block was published with no recovery rate in it")
+        elif rec.get("verdict") != role.verdict_for(float(accuracy)):
+            out.append(
+                f"the recovery verdict is '{rec.get('verdict')}' and the declared rule "
+                f"reads {accuracy:.3f} as '{role.verdict_for(float(accuracy))}'"
+            )
+        pinned = PUBLISHED_BASES.get("core CWL", ())
+        if rec.get("n_axes") != len(pinned):
+            out.append(
+                f"recovery ran on {rec.get('n_axes')} axes and the CWL basis publishes "
+                f"{len(pinned)}"
+            )
+
+    for block in payload.get("entry_cost", []):
+        missing = [k for k in ("slope", "lo95", "hi95") if block.get(k) is None]
+        if missing:
+            out.append(f"{block.get('outcome')} ships without {', '.join(missing)}")
+
+    split = payload.get("era_split", {})
+    if split.get("recovery_era") == split.get("cost_era"):
+        out.append(
+            "the recovery and the entry cost claim the same era, and no era carries both "
+            "a weapon label and a trade column"
+        )
+    return out
+
+
 def season_rapm_rows(conn: psycopg.Connection[Any]) -> list[tuple[str, str, int, float]]:
     """(scope, resolution, player_id, coef) for the newest season-varying run."""
     run_id = latest_run_id(conn, statespace.MODEL)
@@ -681,6 +789,11 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
         ),
         ("aging", aging_failures(artifact(conn, aging.MODEL, "aging"))),
         ("career value", career_failures(artifact(conn, career.MODEL, "career_value"))),
+        ("role", role_failures(artifact(conn, role.MODEL, "role"))),
+        (
+            "finding error control",
+            error_control_failures(conn, artifact(conn, errorcontrol.MODEL, "error_control")),
+        ),
         (
             "metric diff",
             harness_failures(

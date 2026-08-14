@@ -39,11 +39,22 @@ from typing import Any, cast
 
 import psycopg
 
+from . import errorcontrol
 from .ratings.player_rating import rest_vs_slay
 
 MIN_MAPS_SEASON = 30  # outlier/trend eligibility: real seasons, not cameos
 MIN_CAREER_MAPS = 250  # floor for a career-volume milestone
 TOP_CAREER_VOLUME = 25  # and only the deepest careers past that floor
+
+# The screens the testable kinds apply. A screen is not always the null: the
+# null is the weakest state of the world that would make the published sentence
+# misleading, and only some sentences quote their own screen.
+OUTLIER_SD = 2.0  # "sat 2.4 SD above the cohort" is false below 2, so it is both
+H2H_MIN_SERIES = 8
+H2H_EDGE_RATE = 0.70
+# "won 9 of 12 against them" quotes the record, not the screen. What it claims
+# is an edge, and an edge is absent at even, so that is what it is tested for.
+H2H_NULL_RATE = 0.50
 
 
 def _ordinal(n: int) -> str:
@@ -59,6 +70,10 @@ class Atom:
     headline: str
     detail: dict[str, Any]
     score: float
+    # Computed where the row is in hand, under the null the kind's own claim
+    # names. None on every kind errorcontrol classes as anything but testable,
+    # and on a testable row whose error is missing.
+    p_value: float | None = None
 
 
 # How many atoms of one kind a single subject may contribute. Without a cap the
@@ -129,18 +144,18 @@ def _rows(
 def outliers(conn: psycopg.Connection[tuple[object, ...]], era_run: int) -> list[Atom]:
     sql = """
     SELECT psa.player_id, p.handle, se.year, t.short_name, gm.name,
-           psa.kd_raw, psa.kd_z, psa.kd_pctl, psa.maps_played
+           psa.kd_raw, psa.kd_z, psa.kd_pctl, psa.maps_played, psa.kd_z_se
     FROM player_season_adjusted psa
     JOIN players p ON p.id = psa.player_id
     JOIN seasons se ON se.id = psa.season_id
     JOIN titles t ON t.id = se.title_id
     LEFT JOIN game_modes gm ON gm.id = psa.mode_id
-    WHERE psa.run_id = %(run)s AND abs(psa.kd_z) >= 2.0
+    WHERE psa.run_id = %(run)s AND abs(psa.kd_z) >= %(sd)s
       AND psa.maps_played >= %(min_maps)s
     ORDER BY abs(psa.kd_z) DESC
     """
     out = []
-    for r in _rows(conn, sql, {"run": era_run, "min_maps": MIN_MAPS_SEASON}):
+    for r in _rows(conn, sql, {"run": era_run, "min_maps": MIN_MAPS_SEASON, "sd": OUTLIER_SD}):
         pid, handle, year, title, mode = (
             cast(int, r[0]),
             cast(str, r[1]),
@@ -154,6 +169,7 @@ def outliers(conn: psycopg.Connection[tuple[object, ...]], era_run: int) -> list
             float(cast(float, r[7])),
             cast(int, r[8]),
         )
+        se = cast("float | None", r[9])
         scope = f"{mode} " if mode else ""
         direction = "best" if z > 0 else "worst"
         out.append(
@@ -175,6 +191,9 @@ def outliers(conn: psycopg.Connection[tuple[object, ...]], era_run: int) -> list
                     "era_run_id": era_run,
                 },
                 min(abs(z) / 3.5, 1.0),
+                p_value=(
+                    None if se is None else errorcontrol.threshold_normal(z, OUTLIER_SD, float(se))
+                ),
             )
         )
     return out
@@ -220,6 +239,7 @@ def trends(conn: psycopg.Connection[tuple[object, ...]], era_run: int) -> list[A
                         "era_run_id": era_run,
                     },
                     min(abs(total) * 1.8, 1.0),
+                    p_value=errorcontrol.ordering(len(pctls)),
                 )
             )
     return out
@@ -334,18 +354,18 @@ def h2h_edges(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
       WHERE team1_score IS NOT NULL AND team1_score <> team2_score
     )
     SELECT a, b, count(*) AS n, sum(a_won) AS a_wins FROM decided
-    GROUP BY a, b HAVING count(*) >= 8
+    GROUP BY a, b HAVING count(*) >= %(min_series)s
     """
     out = []
     names = dict(
         (cast(int, r[0]), cast(str, r[1]))
         for r in conn.execute("SELECT id, name FROM teams").fetchall()
     )
-    for r in _rows(conn, sql, {}):
+    for r in _rows(conn, sql, {"min_series": H2H_MIN_SERIES}):
         a, b, n, a_wins = (cast(int, r[0]), cast(int, r[1]), cast(int, r[2]), cast(int, r[3]))
         for winner, loser, wins in ((a, b, a_wins), (b, a, n - a_wins)):
             rate = wins / n
-            if rate < 0.7:
+            if rate < H2H_EDGE_RATE:
                 continue
             out.append(
                 Atom(
@@ -362,6 +382,7 @@ def h2h_edges(conn: psycopg.Connection[tuple[object, ...]]) -> list[Atom]:
                         "win_rate": round(rate, 3),
                     },
                     min((rate - 0.5) * 1.6 + n / 40.0, 1.0),
+                    p_value=errorcontrol.threshold_binomial(wins, n, H2H_NULL_RATE, H2H_EDGE_RATE),
                 )
             )
     return out
@@ -845,8 +866,9 @@ def generate(
     # same fact; see cap_per_subject.
     atoms = cap_per_subject(atoms)
     conn.cursor().executemany(
-        "INSERT INTO insights (run_id, subject_type, subject_id, kind, headline, detail, score)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        "INSERT INTO insights (run_id, subject_type, subject_id, kind, headline, detail, score,"
+        " finding_class, p_value)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
         [
             (
                 run_id,
@@ -856,6 +878,8 @@ def generate(
                 a.headline,
                 json.dumps(a.detail),
                 a.score,
+                errorcontrol.class_of(a.kind),
+                a.p_value if errorcontrol.class_of(a.kind) == errorcontrol.TESTABLE else None,
             )
             for a in atoms
         ],

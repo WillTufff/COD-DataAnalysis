@@ -306,6 +306,20 @@ TABLES: tuple[Table, ...] = (
         ("score", "pctl"),
     ),
     Table(
+        "player_role_season",
+        "role.player",
+        ("player_id", "season_id"),
+        (
+            "maps",
+            "contact_rate",
+            "contact_win_rate",
+            "contact_pctl",
+            "kd_raw",
+            "kd_adjustment",
+            "kd_adjusted",
+        ),
+    ),
+    Table(
         "team_ratings",
         "rating.team",
         ("team_id", "series_id"),
@@ -440,7 +454,8 @@ def insight_entries(conn: Conn, run: RunRef, labels: Labels) -> Iterator[Entry]:
     categorical change it is.
     """
     rows = conn.execute(
-        "SELECT subject_type, subject_id, kind, headline, score, detail, valid_through "
+        "SELECT subject_type, subject_id, kind, headline, score, detail, valid_through, "
+        "finding_class, p_value, q_bh, q_by, retracted "
         "FROM insights WHERE run_id = %s ORDER BY subject_type, subject_id, kind, score DESC, id",
         (run.run_id,),
     ).fetchall()
@@ -453,6 +468,13 @@ def insight_entries(conn: Conn, run: RunRef, labels: Labels) -> Iterator[Entry]:
         yield (child(head, "headline"), str(row[3]))
         yield (child(head, "score"), _value(row[4]))
         yield (child(head, "valid_through"), None if row[6] is None else str(row[6]))
+        # The error-control verdict is published beside the claim, so a finding
+        # that changes class or gets retracted has to read as a move here.
+        yield (child(head, "finding_class"), str(row[7]))
+        yield (child(head, "p_value"), _value(row[8]))
+        yield (child(head, "q_bh"), _value(row[9]))
+        yield (child(head, "q_by"), _value(row[10]))
+        yield (child(head, "retracted"), bool(row[11]))
         yield from flatten(row[5], child(head, "detail"))
 
 
