@@ -3149,6 +3149,154 @@ export async function getRoundWinProb(): Promise<{
   };
 }
 
+// ---------- Segment win probability ----------
+
+// The same question round_wp asks inside a round, asked of a whole map for the
+// era the kill feed never covered. Every cell carries the race baseline it is
+// being judged against, because the finding here is the comparison and not
+// either number alone.
+export type SegmentCell = {
+  own: number;
+  opp: number;
+  n: number;
+  p: number;
+  se: number;
+  baseline: number;
+};
+
+export type SegmentBacktest =
+  | { available: false; reason: string }
+  | {
+      available: true;
+      kind: string;
+      n_maps: number;
+      n_events_scored: number;
+      models: { model: string; brier: number; brier_lo: number; brier_hi: number }[];
+      pairs: {
+        a: string;
+        b: string;
+        delta: number;
+        lo: number;
+        hi: number;
+        excludes_zero: boolean;
+        detectable: number;
+      }[];
+      calibration: {
+        lo: number;
+        hi: number;
+        n: number;
+        mean_pred?: number;
+        frac_won?: number;
+      }[];
+    };
+
+export type SegmentMode = {
+  table: {
+    kind: string;
+    n_maps: number;
+    n_states: number;
+    laplace: number;
+    bucketed: boolean;
+    cells: SegmentCell[];
+  };
+  backtest: SegmentBacktest;
+  seasons: number[];
+  win_types?: {
+    kind: string;
+    n_rounds: number;
+    types: { win_type: string; n: number; share: number | null; mean_swing: number }[];
+  };
+  swing?: { kind: string; hills: { hill: number; n: number; mean_abs_swing: number }[] };
+};
+
+export type SegmentWinProb = {
+  scope: string;
+  holes: {
+    seasons_absent: number[];
+    hardpoint_2026: string;
+    control_seasons: number[];
+    rule: string;
+  };
+  anomaly_rules: {
+    round: string;
+    hill: string;
+    map: string;
+    maps_truncated: number;
+    segments_dropped: number;
+    maps_kept: Record<string, number>;
+    maps_dropped: Record<string, Record<string, number>>;
+  };
+  by_mode: Record<string, SegmentMode>;
+  two_era_snd: {
+    modern: { n_maps: number; seasons: number[] };
+    feed: {
+      n_maps: number;
+      seasons: number[];
+      excluded_for_a_different_race: number;
+      race_reached_by_season: Record<string, Record<string, number>>;
+    };
+    cells: {
+      own: number;
+      opp: number;
+      modern_n: number;
+      modern_p: number;
+      feed_n: number;
+      feed_p: number;
+      delta: number;
+      z: number | null;
+    }[];
+    largest_disagreement: {
+      own: number;
+      opp: number;
+      modern_p: number;
+      feed_p: number;
+      delta: number;
+      z: number | null;
+    } | null;
+  };
+};
+
+export type SegmentCompetitiveness = {
+  definition: string;
+  consumed_by: string;
+  by_kind: Record<
+    string,
+    { n: number; mean: number; p10: number; median: number; p90: number }
+  >;
+  maps: { game_id: number; kind: string; year: number; weight: number }[];
+};
+
+// Both artifacts come off the same run, so a page can never show the table from
+// one run beside the map weights from another.
+export async function getSegmentWinProb(): Promise<{
+  dataThrough: string | null;
+  winProb: SegmentWinProb;
+  competitiveness: SegmentCompetitiveness | null;
+} | null> {
+  const run = await latestRun("segment_wp");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT name, payload FROM model_artifacts
+    WHERE run_id = ${run.id}
+      AND name IN ('segment_win_prob', 'segment_competitiveness')
+  `);
+  const byName = new Map(
+    (rows as unknown as { name: string; payload: unknown }[]).map((r) => [
+      r.name,
+      r.payload,
+    ]),
+  );
+  const winProb = byName.get("segment_win_prob") as SegmentWinProb | undefined;
+  if (!winProb) return null;
+  return {
+    dataThrough: run.dataThrough,
+    winProb,
+    competitiveness:
+      (byName.get("segment_competitiveness") as SegmentCompetitiveness | undefined) ??
+      null,
+  };
+}
+
 // ---------- Series dynamics ----------
 
 // Every observed rate carries two benchmarks: `rating` is independence at the

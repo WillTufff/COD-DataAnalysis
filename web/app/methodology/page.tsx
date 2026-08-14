@@ -4,6 +4,7 @@ import { Calibration } from "@/components/charts/Calibration";
 import { EstimateForest } from "@/components/charts/EstimateForest";
 import { LadderMovement } from "@/components/charts/LadderMovement";
 import { MovementVsError } from "@/components/charts/MovementVsError";
+import { ObservedVsArithmetic } from "@/components/charts/ObservedVsArithmetic";
 import { SpreadVsError } from "@/components/charts/SpreadVsError";
 import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
 import {
@@ -26,6 +27,7 @@ import {
   RAPM_CONCENTRATION_LIMIT,
   getRosterForecast,
   getRoundWinProb,
+  getSegmentWinProb,
   getSeasonEras,
   getSeasonKdSpread,
   getPlayerStyleArtifact,
@@ -67,6 +69,40 @@ import { modeLabel } from "@/lib/modes";
 export const revalidate = 3600;
 
 export const metadata: Metadata = { title: "Methodology" };
+
+// The segment table is keyed by the kind of segment, which is the shape of the
+// record rather than a mode name a reader would recognise.
+const SEGMENT_MODE_LABELS: Record<string, string> = {
+  snd_round: "Search & Destroy",
+  hill: "Hardpoint",
+  control_round: "Control",
+};
+
+function segmentModeLabel(kind: string): string {
+  return SEGMENT_MODE_LABELS[kind] ?? kind;
+}
+
+// Seasons come off the artifact with the holes already in them, so a range
+// would claim coverage the data does not have. Consecutive runs collapse and a
+// gap stays a gap.
+function formatSeasons(years: number[]): string {
+  const runs: number[][] = [];
+  for (const year of [...years].sort((a, b) => a - b)) {
+    const last = runs.at(-1);
+    if (last && year === last[last.length - 1] + 1) last.push(year);
+    else runs.push([year]);
+  }
+  return runs
+    .map((run) => (run.length > 1 ? `${run[0]}–${run[run.length - 1]}` : `${run[0]}`))
+    .join(", ");
+}
+
+// Three seasons joined by commas reads as a fragment of a longer list. The last
+// one takes an "and".
+function formatList(items: string[]): string {
+  if (items.length < 2) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -482,6 +518,31 @@ export default async function MethodologyPage() {
           ?.terms.find((t) => t.term === "prev") ?? null)
       : null;
   const roundWp = await getRoundWinProb();
+  const segment = await getSegmentWinProb();
+  const segmentWp = segment?.winProb ?? null;
+  // Ordered the way the phase was fitted rather than the way the artifact
+  // happens to be keyed: SnD first, because it is the mode with a second source
+  // to check against.
+  const segmentModes = ["snd_round", "hill", "control_round"].flatMap(
+    (kind) => {
+      const block = segmentWp?.by_mode[kind];
+      return block ? [[kind, block] as const] : [];
+    },
+  );
+  const segmentSnd = segmentWp?.by_mode.snd_round ?? null;
+  const segmentTwoEra = segmentWp?.two_era_snd ?? null;
+  const segmentWorstCell = Math.max(
+    0,
+    ...(segmentSnd?.table.cells ?? []).map((c) => Math.abs(c.p - c.baseline)),
+  );
+  const segmentSplits = segmentModes.flatMap(([kind, block]) =>
+    (block.win_types?.types ?? []).map((type) => ({ kind, type })),
+  );
+  const segmentDropped = Object.values(
+    segmentWp?.anomaly_rules.maps_dropped ?? {},
+  )
+    .flatMap((reasons) => Object.values(reasons))
+    .reduce((a, b) => a + b, 0);
   // Pulled out by name so the paragraphs below cannot drift onto another
   // comparison if the spec list ever grows.
   const roundBacktest = roundWp?.winProb.backtest.available
@@ -3891,6 +3952,209 @@ export default async function MethodologyPage() {
               </p>
             </div>
           )}
+        </section>
+      )}
+
+      {segmentWp && (
+        <section id="segment-win-probability" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Segment win probability
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              <strong className="text-ink">The object&nbsp;</strong>is the one
+              above it asked of a whole map instead of a round: the
+              probability a team wins the map from the score state it is in
+              right now. It is fitted where the kill feed does not reach, on the
+              hill rotations and round results the match record carries per
+              team &mdash; {segmentWp.scope}
+            </p>
+            <p>
+              <strong className="text-ink">The judge&nbsp;</strong>was
+              declared before anything was fitted, and it is not a coin flip.
+              The counted table has to beat the same race played forward with
+              no memory at all — every remaining round an independent coin,
+              every remaining hill an independent draw from the league&rsquo;s
+              own distribution of hill scoring, both enumerated exactly. A
+              lead is worth something under that baseline already. The table
+              earns its place only by showing that a lead is worth <i>more</i>{" "}
+              than the arithmetic says, and it is scored walk-forward, on
+              events it was never fitted on.
+            </p>
+            {segmentModes.map(([kind, block]) => {
+              const bt = block.backtest;
+              if (!bt.available) return null;
+              const brier = new Map(bt.models.map((m) => [m.model, m.brier]));
+              const gap = bt.pairs.find(
+                (p) => p.a === "state_table" && p.b === "race_baseline",
+              );
+              const table = brier.get("state_table") ?? 0;
+              const race = brier.get("race_baseline") ?? 0;
+              return (
+                <p key={kind}>
+                  <strong className="text-ink">
+                    {segmentModeLabel(kind)}
+                  </strong>{" "}
+                  — {block.table.n_maps.toLocaleString()} maps across{" "}
+                  {formatSeasons(block.seasons)}. Over{" "}
+                  {bt.n_maps.toLocaleString()} maps in {bt.n_events_scored}{" "}
+                  events the table scores a Brier of {table.toFixed(5)} and
+                  the race arithmetic scores {race.toFixed(5)}
+                  {gap
+                    ? gap.excludes_zero
+                      ? `, so the table is ${gap.delta > 0 ? "worse" : "better"} by ${Math.abs(gap.delta).toFixed(5)} and the interval clears zero`
+                      : `, a gap of ${gap.delta.toFixed(5)} against the ${gap.detectable.toFixed(5)} this archive could have resolved — too close to call rather than equal`
+                    : ""}
+                  .
+                </p>
+              );
+            })}
+            {segmentSnd?.backtest.available && (
+              <div className="border border-hairline bg-surface p-4">
+                <ObservedVsArithmetic
+                  cells={segmentSnd.table.cells.map((c) => ({
+                    own: c.own,
+                    opp: c.opp,
+                    n: c.n,
+                    observed: c.p,
+                    expected: c.baseline,
+                  }))}
+                  expectedLabel="the race arithmetic, with no memory"
+                  observedLabel="what actually happened"
+                />
+                <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                  Every Search &amp; Destroy score state, sized by how many it
+                  rests on. The dashed line is where the two agree. The states
+                  sit on it: a side two rounds from the map against one that
+                  needs four wins it as often as fair rounds say it should,
+                  and the furthest any state strays is{" "}
+                  {segmentWorstCell.toFixed(3)}.
+                </p>
+              </div>
+            )}
+            <p>
+              <strong className="text-ink">
+                A lead is worth its arithmetic, and that is the finding.
+              </strong>{" "}
+              This is a null, and it is a useful one. It says the score state
+              carries no hidden signal about which team is better — knowing a
+              side is up 4&ndash;2 tells you what the race says and nothing
+              more. There is no momentum inside a map for this archive to
+              find, and the broadcast instinct that a team &ldquo;has the map
+              now&rdquo; beyond the scoreline is not visible at this
+              resolution.
+            </p>
+            {segmentTwoEra && (
+              <p>
+                <strong className="text-ink">
+                  Two sources, one era apart, agree.
+                </strong>{" "}
+                The same Search &amp; Destroy table fitted on the 2018 kill
+                feed and on the modern match record shares{" "}
+                {segmentTwoEra.cells.length} states over{" "}
+                {segmentTwoEra.modern.n_maps.toLocaleString()} CDL maps and{" "}
+                {segmentTwoEra.feed.n_maps.toLocaleString()} feed maps. The
+                widest disagreement is{" "}
+                {segmentTwoEra.largest_disagreement
+                  ? `${Math.abs(segmentTwoEra.largest_disagreement.delta).toFixed(3)} at ${segmentTwoEra.largest_disagreement.own}–${segmentTwoEra.largest_disagreement.opp}, ${Math.abs(segmentTwoEra.largest_disagreement.z ?? 0).toFixed(2)} standard errors`
+                  : "not resolvable"}{" "}
+                — no state disagrees by even one. Two independent records of
+                two different games, a league era apart, measuring the same
+                thing. {segmentTwoEra.feed.excluded_for_a_different_race}
+                &nbsp;maps from 2017 are not in it: Infinite Warfare played
+                the mode as a race to five, and 4&ndash;3 in a race to five is
+                a different state from 4&ndash;3 in a race to six.
+              </p>
+            )}
+            {segmentSplits.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-hairline text-xs text-ink-muted">
+                      <th className="py-2 pr-4 font-normal">Mode</th>
+                      <th className="py-2 pr-4 font-normal">
+                        How the round ended
+                      </th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        Rounds
+                      </th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        Share
+                      </th>
+                      <th className="py-2 text-right font-normal">
+                        Mean swing
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {segmentSplits.map(({ kind, type }) => (
+                      <tr
+                        key={`${kind}-${type.win_type}`}
+                        className="border-b border-hairline/60"
+                      >
+                        <td className="py-1.5 pr-4 text-xs">
+                          {segmentModeLabel(kind)}
+                        </td>
+                        <td className="py-1.5 pr-4 font-mono text-xs">
+                          {type.win_type}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums">
+                          {type.n.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {type.share === null
+                            ? "—"
+                            : `${(type.share * 100).toFixed(1)}%`}
+                        </td>
+                        <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink-secondary">
+                          {type.mean_swing.toFixed(3)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                  How every round in the modern record was decided, verbatim
+                  from the source. The plant-and-defuse economy is the half of
+                  Search &amp; Destroy the 2017&ndash;2018 kill feed cannot
+                  see at all: it carries no plant and no defuse event. The
+                  swing column is what taking the round was worth, and it
+                  barely moves across the types — a round won on a defuse
+                  counts the same as a round won on kills.
+                </p>
+              </div>
+            )}
+            <p>
+              <strong className="text-ink">The known failure</strong> is
+              resolution, and it costs this model a feature the project
+              wanted. Segments are reported per team; the box score is
+              reported per player. Nothing in the record locates a player
+              inside a hill or a round, so a per-kill leverage weight —
+              discounting kills taken in a decided segment — cannot be built
+              from this data and is not attempted. What exists instead is a
+              map-level weight: how far from a coin flip the map spent its
+              time. It removes blowout maps, not the decided minutes inside
+              close ones, and no rating on this site consumes it yet.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The coverage is holed, and stays holed.
+              </strong>{" "}
+              Seasons {formatList(segmentWp.holes.seasons_absent.map(String))}{" "}
+              carry no segments at all, 2026 Overload has no block, and
+              Control exists for{" "}
+              {segmentWp.holes.control_seasons.join(" and ")} only. Nothing is
+              interpolated across any of them. Of the maps that do exist,{" "}
+              {segmentWp.anomaly_rules.maps_truncated} lost{" "}
+              {segmentWp.anomaly_rules.segments_dropped} rounds that the source
+              reports for one side only. A map stops at the first
+              result it cannot read and keeps the prefix, because the score
+              after an unknown result is itself unknown. A further{" "}
+              {segmentDropped} maps are dropped whole and counted under their
+              own reason: most of them name only one of the two teams from the
+              first round to the last.
+            </p>
+          </div>
         </section>
       )}
 

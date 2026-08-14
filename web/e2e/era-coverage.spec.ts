@@ -89,6 +89,7 @@ test.describe("rating surfaces hold rows", () => {
       "season-rapm",
       "opponent-adjustment",
       "match-context",
+      "segment-win-probability",
       "evaluation",
       "skill",
     ]) {
@@ -115,6 +116,27 @@ test.describe("rating surfaces hold rows", () => {
     await expect(section).toContainText("Call of Duty League lines");
     await expect(section).toContainText("CWL");
     expect(await section.locator("tbody tr").count()).toBeGreaterThan(1);
+  });
+
+  test("segment win probability shows all three modes and its null", async ({
+    page,
+  }) => {
+    await page.goto("/methodology");
+    const section = page.locator("#segment-win-probability");
+    await expect(section).toBeVisible();
+    // Three modes, and the phase's own reason for fitting SnD first is that it
+    // is the one with a second source. A section showing two of the three has
+    // silently lost a mode, which is exactly the failure a 200 cannot see.
+    for (const mode of ["Search & Destroy", "Hardpoint", "Control"]) {
+      await expect(section, mode).toContainText(mode);
+    }
+    // The finding is a null against the race arithmetic, not a win over a coin
+    // flip, and the write-up is wrong if it stops saying so.
+    await expect(section).toContainText("race arithmetic");
+    // The win-type table is a finding in its own right and carries the half of
+    // the mode the kill feed cannot see.
+    await expect(section).toContainText("bomb_defuse");
+    expect(await section.locator("tbody tr").count()).toBeGreaterThan(3);
   });
 
   test("/teams and /findings are not empty", async ({ page }) => {

@@ -450,6 +450,114 @@ Reporting it is the point of running the test.
 Artifacts `round_win_prob` and `round_wpa` are stored with the `round_wp` run and
 recomputed on every rerun.
 
+## Tier 1e: Segment win probability (shipped)
+
+The model above stops in 2018, because the kill feed does. This is the same question asked
+of the era after it, at the only resolution that era's record supports: given the score
+state of a map right now, what is the probability each team wins the map?
+
+The input is the within-map time series the match record has always carried and the
+transform used to discard — the cumulative score at every Hardpoint hill rotation, and the
+result of every Control and Search and Destroy round, per team. It cost no new data: the
+bytes were already stored. Three modes, measured: **33,780 hill rows over 1,573 maps,
+22,181 SnD round rows over 1,233, and 4,126 Control round rows over 508.**
+
+**Search and Destroy is fitted first, and that is the point of the phase.** SnD is the one
+mode Tier 1d already models, from a completely different source, for a different era and a
+different game engine. Fitting it here puts the same quantity on two independent records a
+league era apart, which is a check nothing else in this project can make.
+
+### What the table has to beat
+
+Not a coin flip. The baseline is **the same race played forward with no memory at all**:
+every remaining round an independent coin, every remaining hill an independent draw from
+the league's own distribution of hill scoring, both enumerated exactly rather than
+simulated. A lead is already worth something under that baseline — that is arithmetic, not
+a finding. The counted table earns its place only by showing that a lead is worth *more*
+than the arithmetic says, which would mean the score state leaks information about which
+team is better. It is scored walk-forward: fitted on every earlier event, scored on the
+next, never on its own maps.
+
+Losses accumulate per map rather than per state row. A map contributes a dozen rows that
+are the same map seen at successive states and from both sides, and counting them as
+independent observations would shrink every interval by roughly the square root of that
+count.
+
+### The result is a null, and a useful one
+
+The table does not beat the race arithmetic in any mode. On Search and Destroy and on
+Hardpoint it is very slightly *worse* — the empirical cells add estimation noise to a
+function the arithmetic already gets right — and on Control the gap is smaller than what
+this archive could have resolved, which is "too close to call" and not "equal".
+
+Cell by cell, the agreement is close enough to read off the table: a side up 4–2 in a race
+to six wins the map 81.3% of the time against the arithmetic's 81.2%, and 5–4 wins 74.7%
+against 75.0%. **The score state carries no hidden signal about team quality.** Knowing a
+team is ahead tells a reader exactly what the race says and nothing more, which is a direct
+measurement against the broadcast instinct that a team "has the map now" beyond the
+scoreline.
+
+### Two sources, one era apart, agree
+
+The same SnD table fitted on the 2018 kill feed and on the modern match record shares 35
+score states over 1,190 CDL maps and 931 feed maps. **No state disagrees by as much as one
+standard error**; the widest gap is 0.032 at 1–2, which is 0.94 standard errors.
+
+93 maps from 2017 are excluded and counted rather than dropped quietly: 92 of them end the
+moment a side reaches five rounds, so Infinite Warfare played the mode as a race to five. A
+4–3 in a race to five is one round from the map and a 4–3 in a race to six is two, so
+pooling the two eras would compare different games.
+
+### The win-type splits
+
+Every round arrives labelled with how it was decided, and the vocabulary is richer than any
+published Call of Duty analysis separates. Control: `time` 1,888, `kills` 1,116, `ticks`
+1,086. Search and Destroy: `kills` 12,273, `bomb_defuse` 4,055, `pre_plant_kills` 3,056,
+`post_plant_kills` 1,942, `bomb_explosion` 455, `time` 268. The plant-and-defuse economy is
+the half of the mode the kill feed cannot see at all — the 2017–2018 events carry no plant
+and no defuse event of any kind.
+
+The swing attached to each type — what taking the round was worth in map win probability —
+is flat across all of them. A round won on a defuse counts the same as a round won on
+kills, which follows from the null above: the table only knows the score.
+
+### The known failure: resolution
+
+**Segments are reported per team; the box score is reported per player.** Nothing in the
+record locates a player action inside a hill or a round. A per-kill leverage weight —
+discounting kills taken in an already-decided segment against the same kills in a contested
+one — therefore cannot be built from this data, and is not attempted.
+
+What exists instead is a map-level competitiveness weight: the mean distance of the map's
+win probability from a coin flip. It removes blowout maps rather than the decided minutes
+inside close ones, which is coarser than per-kill leverage by exactly the resolution the
+record lacks. It is published and **nothing consumes it**; a weight on a player-map line
+belongs with the career work, and wiring an untested weight into a rating is not something
+this phase does.
+
+### The holes, and the rules that made them
+
+Seasons 2021, 2022 and 2023 carry no segments at all, 2026 Overload has no block, and
+Control exists for 2024 and 2025 only. Nothing is interpolated across any of them.
+
+Three anomaly rules, declared before the fit and each one counted in the artifact:
+
+- A round is scored only when both teams have a row and exactly one says it won. A map that
+  fails is **truncated** at that round and keeps its prefix, because the score after an
+  unknown result is itself unknown. One map loses 8 rounds this way.
+- A Hardpoint map whose cumulative score decreases, passes 250, or contradicts the recorded
+  map score is dropped whole. Three maps are.
+- 37 Search and Destroy maps name only one team from the first round to the last, and 14
+  maps have no recorded winner. Both are dropped and reported under their own reason rather
+  than folded into the others.
+
+Eight maps carry a hill series and no recorded map score. The segments could supply it.
+They are not used for that here: filling a missing score is an ingestion change with its own
+check, not something a model does quietly on the way past.
+
+Artifacts `segment_win_prob` and `segment_competitiveness` are stored with the `segment_wp`
+run and recomputed on every rerun.
+
 ## Tier 2: Rating systems
 
 **Team strength over time (shipped).** Elo (K=32) and Glicko-2 (τ=0.5) are fit over the
