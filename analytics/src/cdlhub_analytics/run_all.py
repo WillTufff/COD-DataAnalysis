@@ -16,7 +16,7 @@ from typing import cast
 
 import psycopg
 
-from . import backtest, cohort, era, events, insights, metrics, roundwp, seriesdyn, style
+from . import backtest, cohort, era, events, insights, metrics, roundwp, segmentwp, seriesdyn, style
 from .db import connect
 from .metricdiff import run as metricdiff
 from .ratings import (
@@ -232,6 +232,65 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             print(f"round_wp run {round_run}: no kill feed in this database, nothing to fit")
+
+        # The same question one level up, for the era the kill feed never
+        # covered: P(win the map | the score state), from the segments migration
+        # 0016 parsed out of teamGameStats. Placed next to round_wp because it is
+        # the same object at a coarser resolution, and read by nothing below it.
+        progress.stage("segment_wp")
+        seg_run = open_run(
+            conn,
+            segmentwp.MODEL,
+            segmentwp.VERSION,
+            segmentwp.params(),
+            through,
+        )
+        seg_arts = segmentwp.build_artifacts(conn)
+        for name, payload in seg_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (seg_run, name, json.dumps(payload)),
+            )
+        if seg_arts:
+            swp = seg_arts["segment_win_prob"]
+            rules = swp["anomaly_rules"]
+            kept = ", ".join(f"{k} {n}" for k, n in sorted(rules["maps_kept"].items()))
+            print(f"segment_wp run {seg_run}: {kept} maps")
+            print(
+                f"  {rules['maps_truncated']} maps truncated for "
+                f"{rules['segments_dropped']} unscorable segments; dropped "
+                + ", ".join(
+                    f"{kind} {sum(reasons.values())}"
+                    for kind, reasons in sorted(rules["maps_dropped"].items())
+                )
+            )
+            for kind, block in swp["by_mode"].items():
+                bt = block["backtest"]
+                if not bt["available"]:
+                    print(f"  {kind}: {bt['reason']}")
+                    continue
+                brier = {m["model"]: m["brier"] for m in bt["models"]}
+                gap = bt["pairs"][0]
+                verdict = "resolves" if gap["excludes_zero"] else "no difference"
+                print(
+                    f"  {kind}: {bt['n_maps']} maps, table brier "
+                    f"{brier['state_table']:.5f} against the race baseline's "
+                    f"{brier['race_baseline']:.5f} ({gap['delta']:+.5f}, {verdict}; "
+                    f"detectable at {gap['detectable']:.5f})"
+                )
+            two_era = swp["two_era_snd"]
+            worst = two_era["largest_disagreement"]
+            if worst is not None:
+                print(
+                    f"  SnD across two sources: {two_era['modern']['n_maps']} CDL maps "
+                    f"against {two_era['feed']['n_maps']} kill-feed maps over "
+                    f"{len(two_era['cells'])} states, widest gap {worst['delta']:+.4f} at "
+                    f"{worst['own']}-{worst['opp']} (z={worst['z']:.2f}); "
+                    f"{two_era['feed']['excluded_for_a_different_race']} "
+                    f"2017 maps left out for a shorter race"
+                )
+        else:
+            print(f"segment_wp run {seg_run}: no segments in this database, nothing to fit")
 
         progress.stage("elo")
         elo_run = open_run(
@@ -1245,6 +1304,7 @@ def main(argv: list[str] | None = None) -> int:
                 "era_adjust": [era_run],
                 "metric_layer": [metric_run],
                 roundwp.MODEL: [round_run],
+                segmentwp.MODEL: [seg_run],
                 "elo": [elo_run],
                 "glicko2": [glicko_run],
                 "player_rating": list(rating_runs.values()),

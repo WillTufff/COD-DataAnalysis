@@ -57,6 +57,7 @@ JOBS: list[dict[str, Any]] = [
             "era_adjust",
             "metric_layer",
             "round_wp",
+            "segment_wp",
             "elo",
             "glicko2",
             "player_rating",

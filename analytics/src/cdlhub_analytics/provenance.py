@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from . import roundwp, seriesdyn, style
+from . import roundwp, segmentwp, seriesdyn, style
 from .metricdiff import evalpop
 from .ratings import (
     evalspec,
@@ -48,6 +48,7 @@ SEEDS: dict[str, int] = {
     "significance": significance.BOOTSTRAP_SEED,
     "maplevel": maplevel.PERMUTATION_SEED,
     "roundwp": roundwp.BOOTSTRAP_SEED,
+    "segmentwp": segmentwp.BOOTSTRAP_SEED,
     "seriesdyn": seriesdyn.BOOTSTRAP_SEED,
     "style": style.SEED,
     "simleague": simleague.SEED,
