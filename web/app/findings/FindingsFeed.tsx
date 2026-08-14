@@ -86,14 +86,51 @@ function Chips({ detail }: { detail: Record<string, unknown> }) {
   );
 }
 
+/** What the line is worth against chance, in the vocabulary the run declared.
+ *
+ *  Only a testable finding carries a q-value. A descriptive one is a statement
+ *  about the record and has no null to be wrong about, so it is left unmarked
+ *  rather than given a reassuring number it did not earn. An uncorrected one
+ *  claims a latent tendency the database holds no error for, and says so. */
+function Verdict({ item, qThreshold }: { item: FeedItem; qThreshold: number }) {
+  if (item.findingClass === "uncorrected")
+    return (
+      <span className="font-mono text-[11px] text-ink-muted" title="No error model exists for this metric, so no test was run.">
+        uncorrected
+      </span>
+    );
+  if (item.qBh === null) return null;
+  // BH decides retraction and BY is published beside it; where the two
+  // disagree about a standing finding, the line says so rather than the site
+  // picking the flattering one.
+  const byDisagrees =
+    !item.retracted && item.qBy !== null && item.qBy > qThreshold;
+  return (
+    <span
+      className={`font-mono text-[11px] ${item.retracted ? "text-ink-muted" : "text-ink-secondary"}`}
+      title={
+        item.qBy === null
+          ? undefined
+          : `Benjamini-Yekutieli q ${item.qBy.toFixed(2)}, valid under arbitrary dependence`
+      }
+    >
+      q {item.qBh.toFixed(2)}
+      {item.retracted && " · retracted"}
+      {byDisagrees && " · BY keeps it out"}
+    </span>
+  );
+}
+
 export function FindingsFeed({
   rows,
   initialPer,
   initialPage,
+  qThreshold,
 }: {
   rows: FeedItem[];
   initialPer: Per;
   initialPage: number;
+  qThreshold: number;
 }) {
   const state = useTableState<FeedItem>({
     rows,
@@ -122,10 +159,19 @@ export function FindingsFeed({
                 {kindLabel(item.kind)}
               </span>
               <p className="text-sm leading-snug">
-                {item.headline}
+                <span
+                  className={
+                    item.retracted
+                      ? "text-ink-secondary line-through decoration-hairline"
+                      : ""
+                  }
+                >
+                  {item.headline}
+                </span>
                 <Chips detail={item.detail} />
               </p>
               <span className="ml-auto flex flex-none items-baseline gap-3">
+                <Verdict item={item} qThreshold={qThreshold} />
                 {item.subjectSlug && (
                   <Link
                     href={

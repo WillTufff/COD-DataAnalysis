@@ -410,6 +410,11 @@ export const insights = pgTable("insights", {
   detail: jsonb("detail").notNull(),
   score: real("score").notNull(),
   validThrough: date("valid_through"),
+  findingClass: text("finding_class").notNull(),
+  pValue: doublePrecision("p_value"),
+  qBh: doublePrecision("q_bh"),
+  qBy: doublePrecision("q_by"),
+  retracted: boolean("retracted").notNull(),
 });
 
 export const backtests = pgTable("backtests", {
@@ -493,6 +498,29 @@ export const playerStyleSeason = pgTable("player_style_season", {
   axis: smallint("axis").notNull(),
   score: real("score").notNull(),
   pctl: real("pctl").notNull(),
+});
+
+// 0025_player_role_season. A position at the opening engagement, not a role
+// label: the style phase found no taxonomy to threshold against. The three K/D
+// columns are one unit — the raw number, what the contact rate accounts for,
+// and what is left — and a row carries all three or none of them.
+export const playerRoleSeason = pgTable("player_role_season", {
+  runId: integer("run_id")
+    .notNull()
+    .references(() => modelRuns.id),
+  playerId: integer("player_id")
+    .notNull()
+    .references(() => players.id),
+  seasonId: integer("season_id")
+    .notNull()
+    .references(() => seasons.id),
+  maps: integer("maps").notNull(),
+  contactRate: real("contact_rate").notNull(),
+  contactWinRate: real("contact_win_rate").notNull(),
+  contactPctl: real("contact_pctl").notNull(),
+  kdRaw: real("kd_raw"),
+  kdAdjustment: real("kd_adjustment"),
+  kdAdjusted: real("kd_adjusted"),
 });
 
 // RAPM coefficients. See 0013 — `se` is not optional decoration here, it is

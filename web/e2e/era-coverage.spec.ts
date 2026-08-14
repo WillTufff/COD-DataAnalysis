@@ -92,6 +92,8 @@ test.describe("rating surfaces hold rows", () => {
       "segment-win-probability",
       "evaluation",
       "skill",
+      "role",
+      "error-control",
     ]) {
       const section = page.locator(`#${id}`);
       await expect(section, `#${id}`).toBeVisible();
@@ -144,5 +146,18 @@ test.describe("rating surfaces hold rows", () => {
     expect(await page.locator("tbody tr").count()).toBeGreaterThan(0);
     await page.goto("/findings");
     await expect(page.locator("main")).toContainText(/\d/);
+  });
+
+  // A retracted finding that vanishes from the site looks identical to one that
+  // was never made, which is the failure the error-control phase exists to
+  // prevent. The list has to hold rows and each row has to show its q-value.
+  test("the retracted findings keep their rows and their q-values", async ({
+    page,
+  }) => {
+    await page.goto("/findings?view=retracted");
+    const main = page.locator("main");
+    await expect(main).toContainText("Retracted findings");
+    expect(await page.locator("ol > li").count()).toBeGreaterThan(0);
+    await expect(main).toContainText(/q 0\.\d\d · retracted/);
   });
 });

@@ -35,8 +35,10 @@ import {
   getPlayerSkill,
   getPlayerSpans,
   getPlayerStints,
+  getPlayerRole,
   getPlayerStyle,
   getPlayerStyleArtifact,
+  getRole,
   getSkillSeasons,
   latestRatingRun,
   latestRun,
@@ -51,6 +53,8 @@ import {
   type PlayerSkillSeason,
   type PlayerStyle,
   type PlayerStylePoint,
+  type RoleModel,
+  type RoleSeason,
   type SeasonAdjusted,
   getModeCatalog,
 } from "@/lib/analytics";
@@ -1211,9 +1215,100 @@ function CareerTotalsSection({ rows }: { rows: PlayerCareerRow[] }) {
   );
 }
 
+/** Where this player stood at the opening engagement of a Search and Destroy
+ *  round, and what the league-wide entry cost gives back on their K/D.
+ *
+ *  Three K/D numbers ship together or not at all: the raw one, the part the
+ *  contact rate accounts for, and what is left. The adjustment here is small by
+ *  construction, because the league fit it comes from could not separate K/D
+ *  from contact rate at all, and a reader can see that rather than take it. */
+function RoleSection({
+  rows,
+  model,
+}: {
+  rows: RoleSeason[];
+  model: RoleModel | null;
+}) {
+  if (rows.length === 0) return null;
+  const kd = model?.entryCost.find((c) => c.outcome === "kd") ?? null;
+  return (
+    <section className="mt-10">
+      <h2 className="lower-third">
+        Opening engagement
+        <span className="lt-note">Search &amp; Destroy &middot; 2020&ndash;2026</span>
+      </h2>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-hairline text-xs text-ink-muted">
+              <th className="py-2 pr-4 font-normal">Season</th>
+              <th className="py-2 pr-4 text-right font-normal">Maps</th>
+              <th className="py-2 pr-4 text-right font-normal">Contacts / map</th>
+              <th className="py-2 pr-4 text-right font-normal">Pctl</th>
+              <th className="py-2 pr-4 text-right font-normal">Won</th>
+              <th className="py-2 pr-4 text-right font-normal">K/D (raw)</th>
+              <th className="py-2 pr-4 text-right font-normal">Role</th>
+              <th className="py-2 text-right font-normal">K/D (adjusted)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.year}-${r.title}`} className="border-b border-hairline/50">
+                <td className="py-2 pr-4">
+                  {r.year} {r.title}
+                </td>
+                <td className="py-2 pr-4 text-right font-mono">{r.maps}</td>
+                <td className="py-2 pr-4 text-right font-mono">
+                  {r.contactRate.toFixed(2)}
+                </td>
+                <td className="py-2 pr-4 text-right font-mono text-ink-muted">
+                  {Math.round(r.contactPctl * 100)}
+                </td>
+                <td className="py-2 pr-4 text-right font-mono">
+                  {Math.round(r.contactWinRate * 100)}%
+                </td>
+                <td className="py-2 pr-4 text-right font-mono">
+                  {r.kdRaw === null ? "—" : `${r.kdRaw > 0 ? "+" : ""}${r.kdRaw.toFixed(2)}`}
+                </td>
+                <td className="py-2 pr-4 text-right font-mono text-ink-muted">
+                  {r.kdAdjustment === null
+                    ? "—"
+                    : `${r.kdAdjustment > 0 ? "+" : ""}${r.kdAdjustment.toFixed(2)}`}
+                </td>
+                <td className="py-2 text-right font-mono">
+                  {r.kdAdjusted === null
+                    ? "—"
+                    : `${r.kdAdjusted > 0 ? "+" : ""}${r.kdAdjusted.toFixed(2)}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+        A contact is an opening kill or an opening death, so the rate is how
+        often this player was in the first fight of a round, and the percentile
+        places it among that season&rsquo;s qualified players. The K/D columns
+        are standardised within the season, and all three are printed because
+        the middle one is the whole adjustment.
+        {kd && (
+          <>
+            {` Across the league, one SD more opening contact went with ${kd.slope > 0 ? "+" : ""}${kd.slope.toFixed(3)} SD of K/D, on an interval of ${kd.lo95.toFixed(3)} to ${kd.hi95.toFixed(3)} that ${kd.separates ? "excludes zero" : "does not clear zero"}.`}
+          </>
+        )}{" "}
+        The position is published without a role name: the style work found no
+        archetype to name it with. See{" "}
+        <a href="/methodology#role">methodology</a>.
+      </p>
+    </section>
+  );
+}
+
 function CareerTab({
   arcPoints,
   fingerprint,
+  role,
+  roleModel,
   style,
   ratings,
   rapm,
@@ -1226,6 +1321,8 @@ function CareerTab({
 }: {
   arcPoints: ArcPoint[];
   fingerprint: FingerprintData | null;
+  role: RoleSeason[];
+  roleModel: RoleModel | null;
   style: StyleView | null;
   ratings: PlayerRatings | null;
   rapm: PlayerRapm | null;
@@ -1287,6 +1384,8 @@ function CareerTab({
           </p>
         </section>
       )}
+
+      <RoleSection rows={role} model={roleModel} />
 
       {style && (
         <section className="mt-10">
@@ -1668,6 +1767,7 @@ export default async function PlayerPage({
     insightsRun,
     metricRun,
     styleRun,
+    roleRun,
     ratingRun,
     skillRun,
     careerRun,
@@ -1676,6 +1776,7 @@ export default async function PlayerPage({
       latestRun("insights"),
       latestRun("metric_layer"),
       latestRun("player_style"),
+      latestRun("role"),
       latestRatingRun(),
       latestSkillRun(),
       latestCareerRun(),
@@ -1689,6 +1790,8 @@ export default async function PlayerPage({
     metricCatalog,
     stylePoints,
     styleArtifact,
+    rolePoints,
+    roleArtifact,
     ratings,
     rapm,
     skill,
@@ -1705,6 +1808,8 @@ export default async function PlayerPage({
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
       styleRun ? getPlayerStyle(styleRun.id, player.id) : Promise.resolve([]),
       getPlayerStyleArtifact(),
+      roleRun ? getPlayerRole(roleRun.id, player.id) : Promise.resolve([]),
+      getRole(),
       ratingRun
         ? getPlayerRatingSeasons(player.id, ratingRun.id)
         : Promise.resolve(null),
@@ -1788,6 +1893,8 @@ export default async function PlayerPage({
                 <CareerTab
                   arcPoints={arcPoints}
                   fingerprint={fingerprint}
+                  role={rolePoints}
+                  roleModel={roleArtifact?.role ?? null}
                   style={style}
                   ratings={ratings}
                   rapm={rapm}

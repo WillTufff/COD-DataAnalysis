@@ -12,7 +12,9 @@ import {
   formatYearSpan,
   getBacktestCards,
   getCoverage,
+  getErrorControl,
   getFeedKinds,
+  getRole,
   getKillFeedReconciliation,
   getMapElo,
   getMetricCatalog,
@@ -77,6 +79,46 @@ export const metadata: Metadata = { title: "Methodology" };
 
 // The segment table is keyed by the kind of segment, which is the shape of the
 // record rather than a mode name a reader would recognise.
+// The regression outcomes of the role phase, in the words the rest of the site
+// uses for them.
+const ROLE_OUTCOME: Record<string, string> = {
+  kd: "K/D",
+  damage_per_map: "Damage per map",
+  untraded_rate: "Non-traded kill rate",
+};
+
+// The four finding classes, in the order the section argues them, with the
+// gloss each one gets in the list.
+const ERROR_CLASS_ORDER = [
+  "testable",
+  "uncorrected",
+  "descriptive",
+  "self_tested",
+] as const;
+
+const ERROR_CLASS_LABEL: Record<string, { name: string; gloss: string }> = {
+  testable: {
+    name: "testable findings",
+    gloss:
+      "claim a latent quantity and carry an error for it, so they carry a p-value and both q-values.",
+  },
+  uncorrected: {
+    name: "uncorrected findings",
+    gloss:
+      "claim a latent quantity that nothing in the database holds an error for. The metric layer stores a value, a denominator, a z and a percentile, and no standard error, so testing one would need an error bar invented for the occasion. They ship labelled, and the fix is a phase of its own: a cluster bootstrap over a player's own maps.",
+  },
+  descriptive: {
+    name: "descriptive findings",
+    gloss:
+      "state something about the record itself. A career-map count, a ranking of published ratings, a league-wide aggregate over a complete population. A q-value on one of these is a category error.",
+  },
+  self_tested: {
+    name: "self-tested findings",
+    gloss:
+      "are declared tests that already publish their own interval. They were never drawn from a family.",
+  },
+};
+
 const SEGMENT_MODE_LABELS: Record<string, string> = {
   snd_round: "Search & Destroy",
   hill: "Hardpoint",
@@ -576,6 +618,10 @@ export default async function MethodologyPage() {
   // Rendered from the run rather than restated in prose: the earlier hardcoded
   // list said "eight kinds" and stayed there through six metric-layer additions.
   const feedKinds = insightsRun ? await getFeedKinds(insightsRun.id) : [];
+  const [errorControl, roleRun] = await Promise.all([
+    getErrorControl(),
+    getRole(),
+  ]);
   // Qualified all-mode cohort sizes per title (≥ 8 maps), for the era section.
   const cohorts = eraRun ? await getSeasonKdSpread(eraRun.id, 8) : [];
   const cohortSizes = [...cohorts].sort((a, b) => a.year - b.year);
@@ -1449,6 +1495,127 @@ export default async function MethodologyPage() {
           </section>
         );
       })()}
+
+      {roleRun && (
+        <section id="role" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Role at the opening engagement
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              Role here is one number: how often a player is in the first fight
+              of a Search and Destroy round. A contact is an opening kill or an
+              opening death, and the rate is contacts per map over the{" "}
+              {roleRun.role.nContactSeasons} player-seasons with at least 30
+              maps. There is no entry label and no anchor label. The style work
+              found no archetype partition worth naming, so what the player page
+              prints is the position and its percentile.
+            </p>
+            <p>
+              The question the phase was built to answer is what the opening job
+              costs. Within each season, K/D, damage per map and the share of
+              kills that go untraded are regressed on contact rate, all four
+              standardised inside the season. Players are the resample unit for
+              the interval, because one player&rsquo;s seasons are not
+              independent draws.
+            </p>
+            {roleRun.role.entryCost.length > 0 && (
+              <div className="overflow-x-auto border border-hairline bg-surface p-4">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-hairline text-xs text-ink-muted">
+                      <th className="py-2 pr-4 font-normal">Outcome</th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        Per SD of contact rate
+                      </th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        95% interval
+                      </th>
+                      <th className="py-2 text-right font-normal">Separates</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roleRun.role.entryCost.map((c) => (
+                      <tr key={c.outcome} className="border-b border-hairline/50">
+                        <td className="py-2 pr-4">{ROLE_OUTCOME[c.outcome] ?? c.outcome}</td>
+                        <td className="py-2 pr-4 text-right font-mono">
+                          {`${c.slope > 0 ? "+" : ""}${c.slope.toFixed(3)} SD`}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-ink-muted">
+                          {`[${c.lo95.toFixed(3)}, ${c.hi95.toFixed(3)}]`}
+                        </td>
+                        <td className="py-2 text-right font-mono">
+                          {c.separates ? "yes" : "no"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p>
+              <strong className="text-ink">
+                The opening job costs no measurable K/D.
+              </strong>{" "}
+              The interval sits tight around zero, so this is a null with power
+              behind it. Two things do move, and they move in opposite
+              directions. A player who takes more opening fights does less total
+              damage per map, and a larger share of their kills goes unanswered.
+              That is an association between a role and an outcome. No mechanism
+              is claimed for it.
+            </p>
+            <p>
+              The player page publishes the raw K/D, the part the contact rate
+              accounts for, and what is left. All three ship together. An
+              adjustment whose size a reader cannot see is worse than no
+              adjustment, and this one is small because the fit above could not
+              separate the two quantities.
+            </p>
+            {roleRun.role.recovery && (
+              <>
+                <p>
+                  A second question: do the style axes already carry role, so
+                  that the modern era could be described with them? That is
+                  testable only where the record names a weapon. Every CWL title
+                  stores a favourite weapon per map and no CDL title does, so the
+                  test runs on 2017&ndash;2019. The 27 weapon names are mapped to
+                  classes.{" "}
+                  {roleRun.role.weaponTable.verifiedAgainstFeed.length} of those
+                  names also carry an observed class in the kill feed, so the
+                  mapping is checked against the feed instead of asserted. The
+                  feed reads <code className="font-mono text-xs">ar</code> for
+                  the KBAR-32, and the table follows it. A release gate fails the
+                  run if the two ever disagree.
+                </p>
+                <p>
+                  Held out by player, the {roleRun.role.recovery.nAxes} CWL style
+                  axes recover the observed class{" "}
+                  {(roleRun.role.recovery.accuracy * 100).toFixed(1)}% of the
+                  time, against a base rate of{" "}
+                  {(roleRun.role.recovery.baseRate * 100).toFixed(1)}%, over{" "}
+                  {roleRun.role.recovery.nSeasons} player-seasons and{" "}
+                  {roleRun.role.recovery.nPlayers} players. The interpretation
+                  rule was written before the number was seen:{" "}
+                  {(roleRun.role.recovery.rule.carriesAt * 100).toFixed(0)}% or
+                  above means the axes carry role,{" "}
+                  {(roleRun.role.recovery.rule.ambiguousAt * 100).toFixed(0)}% or
+                  below means they do not, and the band between the two is
+                  ambiguous. This run lands in that band, so it is published as{" "}
+                  {roleRun.role.recovery.verdict}, and no modern-era claim on
+                  this site rests on the style axes.
+                </p>
+              </>
+            )}
+            <p className="text-ink-muted">
+              {roleRun.role.eraSplit.why}. So the cost is measured on{" "}
+              {roleRun.role.eraSplit.costEra} and the recovery test on{" "}
+              {roleRun.role.eraSplit.recoveryEra}, and neither number is carried
+              across the seam. Nothing outside Search and Destroy is claimed:
+              opening contact is a round-based idea and the other modes respawn.
+            </p>
+          </div>
+        </section>
+      )}
 
       <section id="primacy" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
@@ -3637,6 +3804,132 @@ export default async function MethodologyPage() {
           </ul>
         )}
       </section>
+
+      {errorControl && (
+        <section id="error-control" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            What a finding is worth
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              Every finding above is the extreme of a scan. Scanning a league
+              across {feedKinds.length} kinds and printing the extremes produces
+              confident-looking claims out of noise, at a rate this project did
+              not quantify until now. This section quantifies it, and{" "}
+              {errorControl.control.nRetracted} of the{" "}
+              {errorControl.control.nTested} testable findings in the current run
+              are <a href="/findings?view=retracted">retracted</a> as a result.
+            </p>
+            <p>
+              A finding is testable when its sentence claims something the record
+              only estimates: an ability, an edge, a tendency. It is descriptive
+              when its sentence is a statement about the record. A season K/D is
+              a noisy read on how good a player was, and the era model already
+              ships an error bar for it, so that claim can be wrong and can be
+              tested. League-wide engagement pace across a season is computed
+              over every map the season contains. It estimates nothing, and a
+              null for it would have to be invented.
+            </p>
+            <ul className="ml-4 list-disc space-y-1">
+              {ERROR_CLASS_ORDER.filter(
+                (c) => errorControl.control.byClass[c] !== undefined,
+              ).map((c) => (
+                <li key={c}>
+                  <strong className="text-ink">
+                    {errorControl.control.byClass[c]} {ERROR_CLASS_LABEL[c].name}
+                  </strong>{" "}
+                  {ERROR_CLASS_LABEL[c].gloss}
+                </li>
+              ))}
+            </ul>
+            <p>
+              The null is the claim&rsquo;s own boundary. A finding that says a
+              season sits at least two standard deviations from its cohort is
+              tested against a true position of two, not against a true position
+              of zero. Testing it against zero would ask whether the player
+              differs from the league at all, which is known false before the
+              data is seen, so every such finding would survive any correction
+              and the exercise would control nothing.
+            </p>
+            <p>
+              The p-value is conditional on the screen that selected the claim.
+              A selected subject&rsquo;s statistic is biased upward against its
+              own true value, and conditioning on the selection removes exactly
+              that bias. Where the screen sits at the null value, which is how
+              every kind here is built, the conditioning is a factor of two on
+              the plain tail. Benjamini-Hochberg and Benjamini-Yekutieli then run
+              per family. BH assumes independence or positive dependence and
+              these families overlap, since one player-season can reach several
+              of them, so BH is the optimistic bound and BY the conservative one.
+              BH decides retraction at q &le;{" "}
+              {errorControl.control.qThreshold.toFixed(2)} and BY is published
+              beside it.
+            </p>
+            <div className="overflow-x-auto border border-hairline bg-surface p-4">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Family</th>
+                    <th className="py-2 pr-4 text-right font-normal">Tested</th>
+                    <th className="py-2 pr-4 text-right font-normal">Median q</th>
+                    <th className="py-2 text-right font-normal">Retracted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {errorControl.control.families
+                    .filter((f) => f.class === "testable")
+                    .map((f) => (
+                      <tr key={f.kind} className="border-b border-hairline/50">
+                        <td className="py-2 pr-4">{kindLabel(f.kind)}</td>
+                        <td className="py-2 pr-4 text-right font-mono">{f.tested}</td>
+                        <td className="py-2 pr-4 text-right font-mono">
+                          {f.qMedian == null ? "—" : f.qMedian.toFixed(3)}
+                        </td>
+                        <td className="py-2 text-right font-mono">
+                          {f.failsThreshold}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              The threshold was declared before any q-value was computed, and the
+              whole sensitivity curve is published so the choice is visible.
+              {errorControl.control.sensitivity.length > 0 && (
+                <>
+                  {" "}
+                  At the declared threshold{" "}
+                  {
+                    errorControl.control.sensitivity.find((s) => s.declared)
+                      ?.kept
+                  }{" "}
+                  of the {errorControl.control.nTested} tested findings survive.
+                  The rest of the curve reads{" "}
+                  {errorControl.control.sensitivity
+                    .filter((s) => !s.declared)
+                    .map((s) => `${s.kept} at q ≤ ${s.q.toFixed(2)}`)
+                    .join(", ")}
+                  .
+                </>
+              )}
+            </p>
+            <p>
+              Two screens the generator applies are not modelled here.
+              A season is collapsed to its most extreme mode slice, and a subject
+              is capped at two findings per kind. Both select on the same
+              statistic being tested, so these p-values are optimistic by an
+              amount this run does not measure. The true picture is slightly
+              harsher.
+            </p>
+            <p>
+              A retracted finding stays readable with the q-value that retracted
+              it, on its <a href="/findings?view=retracted">own page</a>. Nothing
+              disappears from the feed.
+            </p>
+          </div>
+        </section>
+      )}
 
       <section id="coverage" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">

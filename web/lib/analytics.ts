@@ -20,6 +20,7 @@ import {
   playerRapm,
   playerSeasonAdjusted,
   playerSkill,
+  playerRoleSeason,
   playerStyleSeason,
   rosterStints,
   seasons,
@@ -82,16 +83,33 @@ export type FeedItem = {
   subjectId: number;
   subjectName: string | null;
   subjectSlug: string | null; // player or team page slug, by subjectType
+  // What the claim is worth against chance. findingClass says whether the
+  // question even applies: only a testable finding carries q, and a retracted
+  // one is published with the q that retracted it rather than removed.
+  findingClass: string;
+  qBh: number | null;
+  qBy: number | null;
+  retracted: boolean;
 };
 
+/**
+ * The feed of one run.
+ *
+ * `retracted` selects one side of the error-control verdict: false is what the
+ * run still stands behind, true is the retracted set. Leaving it undefined
+ * returns both, which is what the methodology page counts over.
+ */
 export async function getFeed(
   runId: number,
   limit = 40,
   kind?: string,
   offset = 0,
+  retracted?: boolean,
 ): Promise<FeedItem[]> {
   const conditions = [eq(insights.runId, runId)];
   if (kind) conditions.push(eq(insights.kind, kind));
+  if (retracted !== undefined)
+    conditions.push(eq(insights.retracted, retracted));
   const rows = await db
     .select({
       id: insights.id,
@@ -101,6 +119,10 @@ export async function getFeed(
       score: insights.score,
       subjectType: insights.subjectType,
       subjectId: insights.subjectId,
+      findingClass: insights.findingClass,
+      qBh: insights.qBh,
+      qBy: insights.qBy,
+      retracted: insights.retracted,
       playerHandle: players.handle,
       teamName: teams.name,
     })
@@ -126,6 +148,10 @@ export async function getFeed(
     score: r.score,
     subjectType: r.subjectType,
     subjectId: r.subjectId,
+    findingClass: r.findingClass,
+    qBh: r.qBh,
+    qBy: r.qBy,
+    retracted: r.retracted,
     subjectName: r.playerHandle ?? r.teamName,
     subjectSlug: r.playerHandle
       ? playerSlug(r.playerHandle)
@@ -148,8 +174,10 @@ export async function getFeedHighlights(
   limit = 8,
   maxPerKind = 2,
 ): Promise<FeedItem[]> {
-  // Over-fetch so there is something to choose from once the quota bites.
-  const pool = await getFeed(runId, Math.max(limit * 6, 48));
+  // Over-fetch so there is something to choose from once the quota bites. A
+  // retracted finding never leads the front page: it stays readable on
+  // /findings with the q-value that retracted it, which is a different job.
+  const pool = await getFeed(runId, Math.max(limit * 6, 48), undefined, 0, false);
   const perKind = new Map<string, number>();
   const picked: FeedItem[] = [];
   for (const item of pool) {
@@ -167,15 +195,95 @@ export async function getFeedHighlights(
   return picked;
 }
 
-export async function getFeedKinds(runId: number): Promise<{ kind: string; n: number }[]> {
+export async function getFeedKinds(
+  runId: number,
+  retracted?: boolean,
+): Promise<{ kind: string; n: number }[]> {
   const rows = await db.execute(sql`
     SELECT kind, count(*) AS n FROM insights WHERE run_id = ${runId}
+    ${retracted === undefined ? sql`` : sql`AND retracted = ${retracted}`}
     GROUP BY kind ORDER BY count(*) DESC
   `);
   return (rows as unknown as Record<string, unknown>[]).map((r) => ({
     kind: String(r.kind),
     n: Number(r.n),
   }));
+}
+
+// ---------- Error control over the feed ----------
+
+export type ErrorControl = {
+  qThreshold: number;
+  nFindings: number;
+  nTested: number;
+  nRetracted: number;
+  byClass: Record<string, number>;
+  sensitivity: { q: number; kept: number; declared: boolean }[];
+  families: {
+    kind: string;
+    class: string;
+    published: number;
+    tested?: number;
+    failsThreshold?: number;
+    byDisagrees?: number;
+    qMedian?: number | null;
+    reason?: string;
+  }[];
+};
+
+type ErrorControlPayload = {
+  q_threshold: number;
+  n_findings: number;
+  n_tested: number;
+  n_retracted: number;
+  by_class: Record<string, number>;
+  sensitivity: { q: number; kept: number; declared: boolean }[];
+  families: {
+    kind: string;
+    class: string;
+    published: number;
+    tested?: number;
+    fails_threshold?: number;
+    by_disagrees?: number;
+    q_bh?: { median: number } | null;
+    reason?: string;
+  }[];
+};
+
+/** The q distribution the current run published, family by family. */
+export async function getErrorControl(): Promise<
+  { runId: number; dataThrough: string | null; control: ErrorControl } | null
+> {
+  const run = await latestRun("error_control");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${run.id} AND name = 'error_control'
+  `);
+  const p = (rows as unknown as { payload: ErrorControlPayload }[])[0]?.payload;
+  if (!p) return null;
+  return {
+    runId: run.id,
+    dataThrough: run.dataThrough,
+    control: {
+      qThreshold: p.q_threshold,
+      nFindings: p.n_findings,
+      nTested: p.n_tested,
+      nRetracted: p.n_retracted,
+      byClass: p.by_class ?? {},
+      sensitivity: p.sensitivity ?? [],
+      families: (p.families ?? []).map((f) => ({
+        kind: f.kind,
+        class: f.class,
+        published: f.published,
+        tested: f.tested,
+        failsThreshold: f.fails_threshold,
+        byDisagrees: f.by_disagrees,
+        qMedian: f.q_bh?.median ?? null,
+        reason: f.reason,
+      })),
+    },
+  };
 }
 
 // ---------- Archive overview ----------
@@ -3763,6 +3871,185 @@ export async function getPlayerStyle(
       ),
     )
     .orderBy(seasons.year, playerStyleSeason.axis);
+}
+
+// ---------- Role: the opening engagement ----------
+
+export type RoleSeason = {
+  year: number;
+  title: string;
+  maps: number;
+  contactRate: number;
+  contactWinRate: number;
+  contactPctl: number;
+  kdRaw: number | null;
+  kdAdjustment: number | null;
+  kdAdjusted: number | null;
+};
+
+export type RoleModel = {
+  statement: string;
+  mode: string;
+  nContactSeasons: number;
+  eraSplit: { recoveryEra: string; costEra: string; why: string };
+  entryCost: {
+    outcome: string;
+    slope: number;
+    lo95: number;
+    hi95: number;
+    nSeasons: number;
+    nPlayers: number;
+    separates: boolean;
+  }[];
+  recovery: {
+    accuracy: number;
+    baseRate: number;
+    nSeasons: number;
+    nPlayers: number;
+    nAxes: number;
+    verdict: string;
+    rule: { carriesAt: number; ambiguousAt: number };
+    aucByAxis: Record<string, number>;
+  } | null;
+  weaponTable: {
+    nWeapons: number;
+    verifiedAgainstFeed: string[];
+    observed: Record<string, string>;
+    disagreements: string[];
+  };
+  adjustmentAudit: {
+    player: string;
+    year: number;
+    raw: number;
+    adjustment: number;
+    adjusted: number;
+  }[];
+};
+
+type RolePayload = {
+  statement: string;
+  mode: string;
+  n_contact_seasons: number;
+  era_split: { recovery_era: string; cost_era: string; why: string };
+  entry_cost: {
+    outcome: string;
+    slope: number;
+    lo95: number;
+    hi95: number;
+    n_seasons: number;
+    n_players: number;
+    separates: boolean;
+  }[];
+  recovery: {
+    accuracy: number;
+    base_rate: number;
+    n_seasons: number;
+    n_players: number;
+    n_axes: number;
+    verdict: string;
+    rule: { carries_at: number; ambiguous_at: number };
+    auc_by_axis: Record<string, number>;
+  } | null;
+  weapon_table: {
+    n_weapons: number;
+    verified_against_feed: string[];
+    observed: Record<string, string>;
+    disagreements: string[];
+  };
+  adjustment_audit: {
+    player: string;
+    year: number;
+    raw: number;
+    adjustment: number;
+    adjusted: number;
+  }[];
+};
+
+export async function getRole(): Promise<
+  { runId: number; dataThrough: string | null; role: RoleModel } | null
+> {
+  const run = await latestRun("role");
+  if (!run) return null;
+  const rows = await db.execute(sql`
+    SELECT payload FROM model_artifacts
+    WHERE run_id = ${run.id} AND name = 'role'
+  `);
+  const p = (rows as unknown as { payload: RolePayload }[])[0]?.payload;
+  if (!p) return null;
+  return {
+    runId: run.id,
+    dataThrough: run.dataThrough,
+    role: {
+      statement: p.statement,
+      mode: p.mode,
+      nContactSeasons: p.n_contact_seasons,
+      eraSplit: {
+        recoveryEra: p.era_split.recovery_era,
+        costEra: p.era_split.cost_era,
+        why: p.era_split.why,
+      },
+      entryCost: p.entry_cost.map((c) => ({
+        outcome: c.outcome,
+        slope: c.slope,
+        lo95: c.lo95,
+        hi95: c.hi95,
+        nSeasons: c.n_seasons,
+        nPlayers: c.n_players,
+        separates: c.separates,
+      })),
+      recovery: p.recovery
+        ? {
+            accuracy: p.recovery.accuracy,
+            baseRate: p.recovery.base_rate,
+            nSeasons: p.recovery.n_seasons,
+            nPlayers: p.recovery.n_players,
+            nAxes: p.recovery.n_axes,
+            verdict: p.recovery.verdict,
+            rule: {
+              carriesAt: p.recovery.rule.carries_at,
+              ambiguousAt: p.recovery.rule.ambiguous_at,
+            },
+            aucByAxis: p.recovery.auc_by_axis,
+          }
+        : null,
+      weaponTable: {
+        nWeapons: p.weapon_table.n_weapons,
+        verifiedAgainstFeed: p.weapon_table.verified_against_feed,
+        observed: p.weapon_table.observed,
+        disagreements: p.weapon_table.disagreements,
+      },
+      adjustmentAudit: p.adjustment_audit,
+    },
+  };
+}
+
+/** One player's position at the opening engagement, season by season. */
+export async function getPlayerRole(
+  roleRunId: number,
+  playerId: number,
+): Promise<RoleSeason[]> {
+  return db
+    .select({
+      year: seasons.year,
+      title: titles.shortName,
+      maps: playerRoleSeason.maps,
+      contactRate: playerRoleSeason.contactRate,
+      contactWinRate: playerRoleSeason.contactWinRate,
+      contactPctl: playerRoleSeason.contactPctl,
+      kdRaw: playerRoleSeason.kdRaw,
+      kdAdjustment: playerRoleSeason.kdAdjustment,
+      kdAdjusted: playerRoleSeason.kdAdjusted,
+    })
+    .from(playerRoleSeason)
+    .innerJoin(seasons, eq(seasons.id, playerRoleSeason.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .where(
+      and(
+        eq(playerRoleSeason.runId, roleRunId),
+        eq(playerRoleSeason.playerId, playerId),
+      ),
+    )
+    .orderBy(seasons.year);
 }
 
 // ---------- Map meta: what the map pool was, season by season ----------
