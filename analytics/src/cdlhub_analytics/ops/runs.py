@@ -13,12 +13,15 @@ OUTPUT_TABLES: tuple[str, ...] = (
     "career_curves",
     "insights",
     "model_artifacts",
+    "player_career",
     "player_metric_season",
     "player_rapm",
     "player_season_adjusted",
+    "player_skill",
     "player_style_season",
     "team_metric_season",
     "team_ratings",
+    "team_season_effect",
 )
 
 DEFAULT_LIMIT = 200

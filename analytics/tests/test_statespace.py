@@ -407,10 +407,12 @@ def test_a_filtered_coefficient_cannot_have_seen_the_season_after_it() -> None:
         statespace.responses(first + louder)[statespace.MARGIN],
         lambdas,
     )
-    shared = sorted({p for p, c in base if c == cell} & {p for p, c in moved if c == cell})
+    shared = sorted(
+        {p for p, c in base.players if c == cell} & {p for p, c in moved.players if c == cell}
+    )
     assert shared
     for pid in shared:
-        assert base[(pid, cell)] == pytest.approx(moved[(pid, cell)], abs=1e-9)
+        assert base.players[(pid, cell)] == pytest.approx(moved.players[(pid, cell)], abs=1e-9)
 
 
 def test_the_smoothed_family_does_move_when_the_next_season_changes() -> None:
@@ -483,7 +485,7 @@ def test_both_families_are_stored_under_their_own_scope() -> None:
     response = statespace.responses(games)[statespace.MARGIN]
     fit = statespace.fit_smoothed(games, SEASONS, BY_SEASON, response, (1.0, 1.0))
     filtered = statespace.fit_filtered(games, SEASONS, BY_SEASON, response, (1.0, 1.0))
-    stored = statespace.coefficients(games, SEASONS, BY_SEASON, fit, filtered, min_maps=1)
+    stored = statespace.coefficients(games, SEASONS, BY_SEASON, fit, filtered.players, min_maps=1)
     scopes = {c.scope for c in stored}
     assert scopes == {statespace.SMOOTHED, statespace.FILTERED}
     # And they are keyed apart, which is what migration 0017's index requires.
@@ -526,14 +528,14 @@ def test_the_design_hash_moves_when_the_design_does_and_not_otherwise() -> None:
 
 
 def test_the_artifact_declines_rather_than_fitting_a_handful_of_maps() -> None:
-    payload, stored = statespace.artifact(league(10, season=3), SEASONS, BY_SEASON)
+    payload, stored, _teams = statespace.artifact(league(10, season=3), SEASONS, BY_SEASON)
     assert payload["available"] is False
     assert stored == []
 
 
 def test_the_artifact_carries_the_gate_and_never_a_bare_ranking() -> None:
     games = league(90, season=3) + league(90, season=4, first_game=300)
-    payload, stored = statespace.artifact(games, SEASONS, BY_SEASON)
+    payload, stored, _teams = statespace.artifact(games, SEASONS, BY_SEASON)
     assert payload["available"] is True
     for key in (
         "resolution_by_league",
@@ -562,7 +564,7 @@ def test_the_artifact_carries_the_gate_and_never_a_bare_ranking() -> None:
 
 def test_the_sensitivity_grid_reports_the_no_time_borrowing_fit() -> None:
     games = league(90, season=3) + league(90, season=4, first_game=300)
-    payload, _stored = statespace.artifact(games, SEASONS, BY_SEASON)
+    payload, _stored, _teams = statespace.artifact(games, SEASONS, BY_SEASON)
     assert any(row["lambda_walk"] == 0.0 for row in payload["sensitivity"])
     chosen = [
         row for row in payload["sensitivity"] if row["rank_corr_with_chosen"] == pytest.approx(1.0)

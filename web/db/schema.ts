@@ -330,12 +330,74 @@ export const careerCurves = pgTable(
     playerId: integer("player_id")
       .notNull()
       .references(() => players.id),
+    // Which season quantity was fitted, and which of the three fits produced
+    // the curve. No one fit is the answer: the peak age is an interval across
+    // all three, and their spread is the size of the survivorship problem.
+    population: text("population").notNull(),
+    fit: text("fit").notNull(),
+    // 'overall', or one half of the two-component test.
+    component: text("component").notNull(),
+    // True when age_or_seq is an age in years, false when it is a career index.
+    xIsAge: boolean("x_is_age").notNull(),
     ageOrSeq: real("age_or_seq").notNull(),
     fitted: real("fitted").notNull(),
     lo95: real("lo95"),
     hi95: real("hi95"),
   },
-  (t) => [primaryKey({ columns: [t.runId, t.playerId, t.ageOrSeq] })],
+  (t) => [
+    primaryKey({
+      columns: [
+        t.runId,
+        t.playerId,
+        t.population,
+        t.fit,
+        t.component,
+        t.xIsAge,
+        t.ageOrSeq,
+      ],
+    }),
+  ],
+);
+
+// Career value over a replacement baseline. One row per player per way of
+// counting: the axis summed and, on the plus-minus axis, how the team-season
+// term was credited. The orderings differ between them, which is the finding.
+export const playerCareer = pgTable(
+  "player_career",
+  {
+    runId: integer("run_id")
+      .notNull()
+      .references(() => modelRuns.id),
+    playerId: integer("player_id")
+      .notNull()
+      .references(() => players.id),
+    // 'composite' (the published season rating) or 'plus_minus' (the filtered
+    // season coefficient).
+    axis: text("axis").notNull(),
+    // 'none' on the composite axis, which has no team term to share.
+    credit: text("credit").notNull(),
+    // A 'cwl' row is one pooled era estimate, read beside a 'cdl' total and
+    // never added to it.
+    eraScope: text("era_scope").notNull(),
+    seasons: integer("seasons").notNull(),
+    maps: integer("maps").notNull(),
+    // The qualified-cohort minimum for the season, not a chosen percentile.
+    replacement: doublePrecision("replacement").notNull(),
+    total: doublePrecision("total").notNull(),
+    totalSd: doublePrecision("total_sd"),
+    peak: doublePrecision("peak").notNull(),
+    peakSeasonId: integer("peak_season_id").references(() => seasons.id),
+    // Null for a career shorter than three seasons.
+    bestThree: doublePrecision("best_three"),
+    bestThreeStartSeasonId: integer("best_three_start_season_id").references(
+      () => seasons.id,
+    ),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.runId, t.playerId, t.axis, t.credit, t.eraScope],
+    }),
+  ],
 );
 
 export const insights = pgTable("insights", {

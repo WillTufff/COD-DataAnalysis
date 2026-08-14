@@ -545,13 +545,29 @@ def fit_smoothed(
     return solve(gram_matrix, xty, walk, y, n_rows, lambda0, lambda_walk, columns)
 
 
+@dataclass(frozen=True)
+class FilteredFit:
+    """The one-sided family, both column blocks of it.
+
+    A player coefficient here is a deviation from their team-season, and the
+    quantity it deviates *from* is a fitted column of the same solve. Career
+    aggregation has to say whether it credits the deviation alone or the
+    deviation plus a share of the team term, and it cannot say either without
+    the team column. Returning only the player block threw that away and made
+    the question unanswerable downstream without refitting.
+    """
+
+    players: dict[tuple[int, Cell], tuple[float, float, float]]
+    teams: dict[tuple[int, int], tuple[float, str]]
+
+
 def fit_filtered(
     games: Sequence[AdmittedMap],
     seasons: dict[int, Season],
     how: dict[str, str],
     response: Response,
     lambdas: tuple[float, float],
-) -> dict[tuple[int, Cell], tuple[float, float, float]]:
+) -> FilteredFit:
     """The one-sided family: β at cell *t* from maps through *t* only.
 
     One solve per cell rather than one solve total. Its whole purpose is that it
@@ -559,7 +575,10 @@ def fit_filtered(
     penalties are handed in rather than retuned per fold, because a penalty
     chosen on a different amount of data would make the folds incomparable.
 
-    Returns (coefficient, standard error, penalty share) per (player, cell).
+    Players carry (coefficient, standard error, penalty share) per (player,
+    cell). Teams carry the coefficient per (team, season), taken from the solve
+    whose cell covers that season, so a team term is one-sided in exactly the
+    sense its players are.
     """
     order = sorted(
         {cell_of(g, seasons, how) for g in games},
@@ -567,7 +586,9 @@ def fit_filtered(
     )
     position_of = {cell: i for i, cell in enumerate(order)}
     at = [position_of[cell_of(g, seasons, how)] for g in games]
+    covered = cell_seasons(games, seasons, how)
     out: dict[tuple[int, Cell], tuple[float, float, float]] = {}
+    teams: dict[tuple[int, int], tuple[float, str]] = {}
     for position, cell in enumerate(order):
         through = [g for g, p in zip(games, at, strict=True) if p <= position]
         if not through:
@@ -581,7 +602,14 @@ def fit_filtered(
                     float(fit.se[col]),
                     float(fit.penalty_share[col]),
                 )
-    return out
+        # A team-season column belongs to whichever cell covers that season, so
+        # an era-resolution cell claims all three of its seasons at once and a
+        # season cell claims one. Later cells see more maps, so a season is
+        # written by the earliest solve that covers it and not overwritten.
+        for (team_id, season_id), col in fit.columns.teams.items():
+            if season_id in covered[cell] and (team_id, season_id) not in teams:
+                teams[(team_id, season_id)] = (float(fit.beta[col]), cell_resolution(cell))
+    return FilteredFit(players=out, teams=teams)
 
 
 def fit_logistic(
@@ -1051,6 +1079,20 @@ def cell_graphs(
 
 
 @dataclass(frozen=True)
+class TeamEffect:
+    """One stored team-season effect, in the shape `team_season_effect` takes it.
+
+    Same era rule as `Coefficient`: an era cell writes one estimate against each
+    season it covers, and `resolution` says which case the row is.
+    """
+
+    team_id: int
+    season_id: int
+    resolution: str
+    coef: float
+
+
+@dataclass(frozen=True)
 class Coefficient:
     """One stored coefficient, in the shape `player_rapm` takes it.
 
@@ -1117,6 +1159,20 @@ def coefficients(
     return out
 
 
+def team_effects(filtered: FilteredFit) -> list[TeamEffect]:
+    """The team block of the one-sided fit, in stored order.
+
+    No publication floor applies. A team-season column exists because that team
+    played that season, so there is no thin-cell case to filter: the floor on
+    `player_rapm` is about how many maps one *player* contributed to a column
+    they share with three teammates, and a team column has no such division.
+    """
+    return [
+        TeamEffect(team_id=team_id, season_id=season_id, resolution=resolution, coef=coef)
+        for (team_id, season_id), (coef, resolution) in sorted(filtered.teams.items())
+    ]
+
+
 def _distribution(values: Sequence[float]) -> dict[str, Any]:
     arr = np.asarray(values, dtype=float)
     if arr.size == 0:
@@ -1134,8 +1190,8 @@ def artifact(
     seasons: dict[int, Season],
     how: dict[str, str],
     published: Sequence[tuple[int, float]] = (),
-) -> tuple[dict[str, Any], list[Coefficient]]:
-    """The gate's payload, and the rows it is a summary of.
+) -> tuple[dict[str, Any], list[Coefficient], list[TeamEffect]]:
+    """The gate's payload, and the two row sets it is a summary of.
 
     Everything P1's gate asks for lands here: coefficients with standard errors
     and teammate concentration, the share of each one the penalty supplied, the
@@ -1146,7 +1202,7 @@ def artifact(
     and the recovery number from the pre-flight is repeated next to them.
     """
     if len(games) < 50:
-        return {"available": False, "reason": "not enough admitted maps"}, []
+        return {"available": False, "reason": "not enough admitted maps"}, [], []
 
     all_responses = responses(games)
     primary = all_responses[MARGIN]
@@ -1196,11 +1252,11 @@ def artifact(
             }
         )
 
-    stored = coefficients(games, seasons, how, smoothed, filtered)
+    stored = coefficients(games, seasons, how, smoothed, filtered.players)
     shared = [
-        (float(smoothed.beta[col]), filtered[key][0])
+        (float(smoothed.beta[col]), filtered.players[key][0])
         for key, col in smoothed.columns.players.items()
-        if key in filtered
+        if key in filtered.players
     ]
     smoothing_gap = _pearson([a for a, _ in shared], [b for _, b in shared]) if shared else None
 
@@ -1315,4 +1371,4 @@ def artifact(
             "as a ranking of the four players on a roster"
         ),
     }
-    return payload, stored
+    return payload, stored, team_effects(filtered)

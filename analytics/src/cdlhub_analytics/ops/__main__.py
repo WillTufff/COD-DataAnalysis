@@ -72,6 +72,8 @@ JOBS: list[dict[str, Any]] = [
             "skill_prior",
             "evaluate",
             "series_dynamics",
+            "career",
+            "aging",
             "player_style",
             "insights",
             "metric_diff",
@@ -113,7 +115,12 @@ JOBS: list[dict[str, Any]] = [
         # An earlier reading of 523 seconds was taken off a run whose output went
         # through a pipe, and the file timestamps it was read from were not the
         # process's. Timed directly, the two measurements agree to four seconds.
-        "est_seconds": 965,
+        #
+        # `career` adds five seconds: it opens no design matrix and fits nothing,
+        # so its cost is four queries and an aggregation over a few thousand
+        # player-seasons. `aging` adds twenty: three fits over two populations,
+        # the largest of which is 532 paired seasons.
+        "est_seconds": 990,
     },
     {
         "id": "metric_diff",

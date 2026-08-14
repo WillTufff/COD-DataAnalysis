@@ -4,6 +4,7 @@ import { Calibration } from "@/components/charts/Calibration";
 import { EstimateForest } from "@/components/charts/EstimateForest";
 import { LadderMovement } from "@/components/charts/LadderMovement";
 import { MovementVsError } from "@/components/charts/MovementVsError";
+import { AgingCurves } from "@/components/charts/AgingCurves";
 import { ObservedVsArithmetic } from "@/components/charts/ObservedVsArithmetic";
 import { SpreadVsError } from "@/components/charts/SpreadVsError";
 import { WhatWinsMaps } from "@/components/charts/WhatWinsMaps";
@@ -27,6 +28,8 @@ import {
   RAPM_CONCENTRATION_LIMIT,
   getRosterForecast,
   getRoundWinProb,
+  getAging,
+  getCareerValue,
   getSegmentWinProb,
   getSeasonEras,
   getSeasonKdSpread,
@@ -48,6 +51,8 @@ import {
   getSkillPower,
   getSkillPrior,
   getSkillSeasons,
+  latestAgingRun,
+  latestCareerRun,
   latestEvaluationRun,
   latestOpenskillRun,
   latestMatchContextRun,
@@ -518,6 +523,15 @@ export default async function MethodologyPage() {
           ?.terms.find((t) => t.term === "prev") ?? null)
       : null;
   const roundWp = await getRoundWinProb();
+
+  // Career value and aging are two runs, read separately so a database with one
+  // and not the other renders the half it has.
+  const careerRun = await latestCareerRun();
+  const career = careerRun ? await getCareerValue(careerRun.id) : null;
+  const agingRun = await latestAgingRun();
+  const aging = agingRun ? await getAging(agingRun.id) : null;
+  const agingOverall = aging?.populations["composite.overall"] ?? null;
+
   const segment = await getSegmentWinProb();
   const segmentWp = segment?.winProb ?? null;
   // Ordered the way the phase was fitted rather than the way the artifact
@@ -3158,6 +3172,181 @@ export default async function MethodologyPage() {
                 CWL years carry no season-resolution coefficient to blend with.
               </p>
             )}
+          </div>
+        </section>
+      )}
+
+      {career && (
+        <section id="career-value" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Career value
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              Every other number on this site describes one season. A career
+              total sums them over a baseline, and the arithmetic is the easy
+              part. Two quantities get summed here, because they answer
+              different questions. The composite season rating asks what a
+              season was worth on the scoreboard, and it covers all{" "}
+              {career.populations.seasons} seasons. The season plus-minus asks
+              what a player&rsquo;s presence was worth in score margin, which is
+              the question most arguments are about.
+            </p>
+            <p>
+              The baseline is the qualified-cohort minimum for each season, at a
+              floor of {career.qualified_maps} maps. A percentile would be a
+              chosen number wearing a definition, and the choice would move
+              every total.
+            </p>
+            {career.credit_rules.rank_correlation !== null && (
+              <p>
+                <strong className="text-ink">
+                  The credit rule turned out not to matter.
+                </strong>{" "}
+                A season coefficient is a deviation from the player&rsquo;s
+                team-season, so a career total can credit that deviation alone
+                or add a share of the team term. Both columns are published. Over{" "}
+                {career.credit_rules.n_players} CDL careers the two orderings
+                correlate at{" "}
+                {career.credit_rules.rank_correlation.toFixed(3)}, and{" "}
+                {career.credit_rules.top_ten_overlap} of the top ten are the
+                same players. The phase that specified this expected the choice
+                to change the order of the table. It does not.
+              </p>
+            )}
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[30rem] text-left text-xs">
+                <thead className="text-ink-muted">
+                  <tr>
+                    <th className="py-1 pr-4 font-normal">Table</th>
+                    <th className="py-1 pr-4 font-normal">Careers</th>
+                    <th className="py-1 font-normal">
+                      Clearing two standard deviations
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono">
+                  {Object.entries(career.separation)
+                    .filter(([, block]) => block.n > 0)
+                    .map(([key, block]) => (
+                      <tr key={key} className="border-t border-hairline">
+                        <td className="py-1 pr-4">{key}</td>
+                        <td className="py-1 pr-4">{block.n}</td>
+                        <td className="py-1">
+                          {block.share_clear === null
+                            ? "—"
+                            : `${block.n_clear_of_zero} (${(block.share_clear * 100).toFixed(1)}%)`}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              The plus-minus rows follow from a season coefficient whose spread
+              cannot be distinguished from zero given its own standard error.
+              Summing seven of them narrows the interval. It does not
+              manufacture a separation the seasons never contained, and every
+              total carries its own standard deviation so this stays visible.
+            </p>
+            <p>
+              The two eras are never summed together. The CWL years store one
+              pooled coefficient per player per era, filed against each season it
+              covers, so adding those three would count one estimate three
+              times. A CWL contribution is its own row, read beside a CDL total.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {aging?.available && (
+        <section id="aging" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Aging
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              A curve fitted on the player-seasons we can see is biased upward at
+              the old end. Players who decline leave the league and stop
+              producing seasons, so the players still measured at 28 are the ones
+              who did not decline. Three fits are published together: the naive
+              one on every observed season, a delta fit on paired consecutive
+              seasons of the same player, and the same pairs weighted by an
+              inverse probability of surviving to the next season.
+            </p>
+            {agingOverall && (
+              <>
+                <AgingCurves
+                  curves={Object.entries(agingOverall.fits).map(
+                    ([fit, payload]) => ({
+                      fit,
+                      peak: payload.peak,
+                      peakLo: payload.peak_lo,
+                      peakHi: payload.peak_hi,
+                      points: payload.curve,
+                    }),
+                  )}
+                  intervalLo={agingOverall.peak_interval.lo}
+                  intervalHi={agingOverall.peak_interval.hi}
+                  caption="Three aging curves on the composite rating, with the peak each locates"
+                />
+                {agingOverall.peak_interval.lo !== null && (
+                  <p>
+                    <strong className="text-ink">
+                      The peak sits between{" "}
+                      {agingOverall.peak_interval.lo.toFixed(1)} and{" "}
+                      {agingOverall.peak_interval.hi?.toFixed(1)}.
+                    </strong>{" "}
+                    That is the union of all three intervals, over{" "}
+                    {agingOverall.n_players} players and{" "}
+                    {agingOverall.n_observations} player-seasons. The three point
+                    estimates spread{" "}
+                    {agingOverall.peak_interval.spread?.toFixed(2)} years. The
+                    naive fit peaks nearly a year later than the two
+                    within-player fits, which is survivorship in the direction
+                    the literature predicts.
+                  </p>
+                )}
+                <p>
+                  The retention weighting moves the delta answer by about a
+                  hundredth of a year. The correction is applied and it does
+                  almost nothing, which says the gap between the naive and delta
+                  fits is a between-player effect and not a survival effect.
+                </p>
+              </>
+            )}
+            <p>
+              Slaying and objective contribution were fitted separately, with the
+              prediction that their peaks differ. They differ at the point
+              estimate and in the predicted order, with slaying about two years
+              earlier.{" "}
+              {aging.two_component.separated
+                ? "The intervals do not overlap."
+                : "The intervals overlap, so the record does not separate them."}
+            </p>
+            <p>
+              None of the three fits finds an interior maximum on the season
+              plus-minus. Nothing is published for it. If the spread between
+              season coefficients cannot be distinguished from zero, an age curve
+              through them has nothing to bend around.
+            </p>
+            <p>
+              Birthdates are known for {aging.players_with_birthdate} of the
+              players here. A player without one is fitted on their career-season
+              index, in a separate population that never mixes with the age one.
+              {agingOverall?.age_window && (
+                <>
+                  {" "}
+                  A curve is drawn only over the ages this record supports, which
+                  here is {agingOverall.age_window[0]} to{" "}
+                  {agingOverall.age_window[1]}: the widest run of consecutive
+                  ages carrying at least {aging.min_age_support} player-seasons
+                  each. Every observation still enters the fit. Drawing to the
+                  thin tails would put a steep post-28 decline on five seasons
+                  and make it the most confident shape on the page.
+                </>
+              )}
+            </p>
           </div>
         </section>
       )}

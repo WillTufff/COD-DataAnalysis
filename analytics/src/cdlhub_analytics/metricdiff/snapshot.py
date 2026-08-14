@@ -311,11 +311,58 @@ TABLES: tuple[Table, ...] = (
         ("team_id", "series_id"),
         ("rating_pre", "rating_post", "rating_sd"),
     ),
+    # SKILL was published by P5 and never entered this snapshot, so a change to
+    # the rating the site leads with reported nothing moved. Added here rather
+    # than left for its own phase: an instrument blind to the flagship number is
+    # worse than no instrument, because it reads as a clean bill of health.
+    Table(
+        "player_skill",
+        "skill.player",
+        ("player_id", "season_id", "scope"),
+        (
+            "prior_mean",
+            "prior_sd",
+            "coef",
+            "se",
+            "skill",
+            "skill_sd",
+            "weight_prior",
+            "model",
+        ),
+    ),
+    # Keyed by every discriminator migration 0019 added, not only the player and
+    # the x value: one player now holds a curve per population, per fit and per
+    # component, and a key that named fewer of them would compare a delta fit
+    # against a naive one and report the difference as a move.
     Table(
         "career_curves",
         "curve.player",
-        ("player_id", "age_or_seq"),
+        ("player_id", "population", "fit", "component", "x_is_age", "age_or_seq"),
         ("fitted", "lo95", "hi95"),
+    ),
+    # Same rule one table over: axis and credit are different ways of counting
+    # the same career and their orderings differ by design.
+    Table(
+        "player_career",
+        "career.player",
+        ("player_id", "axis", "credit", "era_scope"),
+        (
+            "seasons",
+            "maps",
+            "replacement",
+            "total",
+            "total_sd",
+            "peak",
+            "peak_season_id",
+            "best_three",
+            "best_three_start_season_id",
+        ),
+    ),
+    Table(
+        "team_season_effect",
+        "rapm.team",
+        ("team_id", "season_id", "scope"),
+        ("coef", "resolution"),
     ),
 )
 

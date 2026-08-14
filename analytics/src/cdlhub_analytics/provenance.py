@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from . import roundwp, segmentwp, seriesdyn, style
+from . import aging, roundwp, segmentwp, seriesdyn, style
 from .metricdiff import evalpop
 from .ratings import (
     evalspec,
@@ -56,6 +56,7 @@ SEEDS: dict[str, int] = {
     "opponent": opponent.PLACEBO_SEED,
     "evalspec": evalspec.BOOTSTRAP_SEED,
     "prior": prior.SEED,
+    "aging": aging.BOOTSTRAP_SEED,
 }
 
 

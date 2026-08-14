@@ -11,8 +11,8 @@ uncertainty, and trend.
 
 **Status.** Sections are marked shipped or planned. As of now the era adjustment,
 the two team rating systems, the open player rating, the series win-probability
-model, the backtest harness, and the finding generator are running on real data.
-Career modeling is specified but not yet implemented. The site covers 2017 to
+model, the backtest harness, the finding generator, and career value and aging are
+running on real data. The site covers 2017 to
 2026: the CWL archive through 2019, and the CDL seasons from three sources joined
 on a per-row provenance tag.
 
@@ -2950,13 +2950,13 @@ not published alone either.
 
 #### The peak age
 
-**Between 20.4 and 25.4.** That is the union of all three intervals on the composite
+**Between 20.5 and 25.4.** That is the union of all three intervals on the composite
 rating, over 258 players and 830 player-seasons. The three point estimates land at 22.50,
 22.51 and 23.32, a spread of 0.81 years.
 
 | Fit | Peak | 95% interval | Observations |
 |---|---|---|---|
-| Naive | 23.32 | 20.38 – 25.38 | 830 seasons |
+| Naive | 23.32 | 20.53 – 25.38 | 830 seasons |
 | Delta | 22.50 | 21.46 – 23.48 | 530 pairs |
 | Retention-weighted | 22.51 | 21.31 – 23.55 | 530 pairs |
 
@@ -2978,8 +2978,8 @@ in the predicted order. The intervals overlap, so the record does not separate t
 
 | Component | Peak estimates | Published interval |
 |---|---|---|
-| Slaying (K/D z-score) | 20.01, 20.04 | 18.23 – 21.64 |
-| Objective contribution | 20.42, 22.24, 22.27 | 18.33 – 24.20 |
+| Slaying (K/D z-score) | 20.01, 20.04 | 19.08 – 21.68 |
+| Objective contribution | 20.42, 22.24, 22.27 | 19.23 – 24.13 |
 
 Slaying peaks about two years earlier at the point estimate. Two overlapping intervals
 are not a separation, and this is reported as a negative result.
@@ -2996,9 +2996,14 @@ age curve through them has nothing to bend around.
 
 Birthdates are known for 439 of 815 players. A player without one is fitted on their
 career-season index instead, in a separate population that never mixes with the age one.
-Averaging an age curve with a career-index curve would produce a curve of neither. Curves
-are published over ages 17 to 32; outside that window the record holds a handful of
-seasons and a quadratic will extrapolate freely.
+Averaging an age curve with a career-index curve would produce a curve of neither.
+
+A curve is drawn only over the ages this record supports: the widest run of consecutive
+ages that each carry at least 10 player-seasons. That is 18 to 28 on the box score and 19
+to 28 on the plus-minus. Every observation still enters the fit, and the window restricts
+only the drawn range and the range a peak may be published in. The record holds one season
+at 17 and five in total across 29 to 32, so a quadratic drawn to those edges would put its
+steepest claim on its thinnest evidence.
 
 No survival library is used. What the retention model needs is the probability that a
 player seen at age *a* appears the next season, over at most ten periods, with no

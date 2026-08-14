@@ -16,7 +16,20 @@ from typing import cast
 
 import psycopg
 
-from . import backtest, cohort, era, events, insights, metrics, roundwp, segmentwp, seriesdyn, style
+from . import (
+    aging,
+    backtest,
+    career,
+    cohort,
+    era,
+    events,
+    insights,
+    metrics,
+    roundwp,
+    segmentwp,
+    seriesdyn,
+    style,
+)
 from .db import connect
 from .metricdiff import run as metricdiff
 from .ratings import (
@@ -769,7 +782,7 @@ def main(argv: list[str] | None = None) -> int:
         progress.stage("season_rapm")
         how = statespace.resolutions(fork)
         admitted_games, _lineup_rule = rapm.admitted_maps(usable_rows)
-        season_art, season_rows = statespace.artifact(
+        season_art, season_rows, team_rows = statespace.artifact(
             admitted_games, seasons, how, [(row[0], row[2]) for row in rapm_rows]
         )
         ss_run = open_run(
@@ -815,6 +828,20 @@ def main(argv: list[str] | None = None) -> int:
                             c.penalty_share,
                         )
                         for c in season_rows
+                    ],
+                )
+        # The column a player coefficient is a deviation from. Stored because a
+        # career total has to say whether it credited the team term, and the
+        # answer is not recoverable from the player rows alone.
+        if team_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO team_season_effect "
+                    "(run_id, team_id, season_id, scope, resolution, coef) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [
+                        (ss_run, t.team_id, t.season_id, statespace.FILTERED, t.resolution, t.coef)
+                        for t in team_rows
                     ],
                 )
         if season_art["available"]:
@@ -1236,6 +1263,129 @@ def main(argv: list[str] | None = None) -> int:
         # projected out of it, and the archetype taxonomy that does not survive
         # a cloud with no clusters in it. Fitted after the ratings because it
         # residualises against the published composite.
+        # Every season number above, added up. Placed after the fits it reads
+        # and before the interpretation layer, because a career total is an
+        # aggregation of published quantities rather than a new estimate: it
+        # opens no design matrix and fits nothing.
+        progress.stage("career")
+        career_rows, career_art = career.build(conn, pr_run, ss_run)
+        cv_run = open_run(
+            conn,
+            career.MODEL,
+            career.VERSION,
+            {
+                **career.params(),
+                "rating_run_id": pr_run,
+                "season_rapm_run_id": ss_run,
+            },
+            through,
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (cv_run, "career_value", json.dumps(career_art)),
+        )
+        if career_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_career (run_id, player_id, axis, credit, era_scope, "
+                    "seasons, maps, replacement, total, total_sd, peak, peak_season_id, "
+                    "best_three, best_three_start_season_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            cv_run,
+                            r.player_id,
+                            r.axis,
+                            r.credit,
+                            r.era_scope,
+                            r.seasons,
+                            r.maps,
+                            r.replacement,
+                            r.total,
+                            r.total_sd,
+                            r.peak,
+                            r.peak_season_id,
+                            r.best_three,
+                            r.best_three_start_season_id,
+                        )
+                        for r in career_rows
+                    ],
+                )
+        print(f"career run {cv_run}: {career.headline(career_art)}")
+        for key, count in sorted(career_art["rows_by_key"].items()):
+            block = career_art["separation"][key]
+            share = block["share_clear"]
+            clears = "no interval" if share is None else f"{share:.1%} clear of zero"
+            print(f"  {key}: {count} careers, {clears}")
+        rules = career_art["credit_rules"]
+        if rules["rank_correlation"] is not None:
+            print(
+                f"  the two credit rules agree at rho {rules['rank_correlation']:.3f} over "
+                f"{rules['n_players']} players, sharing {rules['top_ten_overlap']} of the top ten"
+            )
+
+        # The same seasons on an age axis, and the selection problem that makes
+        # any single curve of them wrong. Three fits, published together,
+        # because the disagreement between them is the measurement.
+        progress.stage("aging")
+        curve_rows, aging_art = aging.build(conn, pr_run, era_run, ss_run)
+        ag_run = open_run(
+            conn,
+            aging.MODEL,
+            aging.VERSION,
+            {
+                **aging.params(),
+                "rating_run_id": pr_run,
+                "era_run_id": era_run,
+                "season_rapm_run_id": ss_run,
+            },
+            through,
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (ag_run, "aging", json.dumps(aging_art)),
+        )
+        if curve_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO career_curves (run_id, player_id, population, fit, component, "
+                    "x_is_age, age_or_seq, fitted, lo95, hi95) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            ag_run,
+                            r.player_id,
+                            r.population,
+                            r.fit,
+                            r.component,
+                            r.x_is_age,
+                            r.age_or_seq,
+                            r.fitted,
+                            r.lo95,
+                            r.hi95,
+                        )
+                        for r in curve_rows
+                    ],
+                )
+        print(f"aging run {ag_run}: {aging.headline(aging_art)}; {len(curve_rows)} curve rows")
+        for key, block in sorted(aging_art["populations"].items()):
+            interval = block["peak_interval"]
+            if interval["lo"] is None:
+                print(
+                    f"  {key}: {block['n_observations']} player-seasons, no fit located "
+                    "an interior peak"
+                )
+                continue
+            fits = ", ".join(
+                f"{name} {payload['peak']}"
+                for name, payload in sorted(block["fits"].items())
+                if payload["peak"] is not None
+            )
+            print(
+                f"  {key}: peak {interval['lo']}-{interval['hi']} over "
+                f"{block['n_players']} players ({fits})"
+            )
+
         progress.stage("player_style")
         style_run = open_run(conn, style.MODEL, style.VERSION, style.params(), through)
         orientation = {m.key: m.higher_is_better for m in metrics.CATALOG}
@@ -1317,6 +1467,8 @@ def main(argv: list[str] | None = None) -> int:
                 maplevel.MODEL: [map_run],
                 seriesdyn.MODEL: [sd_run],
                 style.MODEL: [style_run],
+                career.MODEL: [cv_run],
+                aging.MODEL: [ag_run],
                 "insights": [ins_run],
             },
         )

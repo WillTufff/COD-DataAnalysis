@@ -56,7 +56,7 @@ The full loop runs end to end on real data, locally:
   question of player against team does not move the table. Aging publishes three curves
   and no single peak: a naive fit on every observed season, a delta fit on paired
   consecutive seasons, and the same pairs weighted by a fitted retention probability. The
-  peak sits between 20.4 and 25.4, the naive fit lands a year later than the two
+  peak sits between 20.5 and 25.4, the naive fit lands a year later than the two
   within-player fits, and the retention correction moves the answer by a hundredth of a
   year. Slaying peaks about two years before objective contribution at the point
   estimate, with intervals that overlap.
@@ -91,8 +91,7 @@ The full loop runs end to end on real data, locally:
   board, eight of the nineteen chasing seasons reach the leader's interval, and the order
   between them is not a claim the model can make.
 
-The site covers 2017 to 2026. Career modeling (aging curves, peak detection) is
-specified in the methodology but not yet implemented.
+The site covers 2017 to 2026.
 
 ## Layout
 

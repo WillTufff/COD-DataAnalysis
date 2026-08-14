@@ -13,8 +13,10 @@ from typing import Any
 
 from cdlhub_analytics.gates import (
     PUBLISHED_BASES,
+    aging_failures,
     artifact_names_read,
     basis_failures,
+    career_failures,
     cohort_failures,
     evaluation_failures,
     mode_naming_failures,
@@ -562,3 +564,98 @@ def test_an_artifact_no_page_reads_yet_is_not_a_failure() -> None:
     """The gate is one-directional on purpose: writing ahead of the site is how
     every phase here shipped, and reading ahead of the models is the defect."""
     assert site_read_failures({"rapm_season"}, {"rapm_season", "rapm_recovery"}) == []
+
+
+# ------------------------------------------------------------------ P6: aging
+
+
+Fit = dict[str, float | None]
+
+
+def _aging_payload(**fits: Fit) -> dict[str, Any]:
+    """A payload shaped the way `aging._block` writes one, with the published
+    interval taken as the union of the fits, which is what the gate asserts."""
+    los = [lo for f in fits.values() if (lo := f.get("peak_lo")) is not None]
+    his = [hi for f in fits.values() if (hi := f.get("peak_hi")) is not None]
+    return {
+        "available": True,
+        "populations": {
+            "composite.overall": {
+                "fits": fits,
+                "peak_interval": {
+                    "lo": min(los) if los else None,
+                    "hi": max(his) if his else None,
+                },
+            }
+        },
+    }
+
+
+def test_aging_gate_passes_when_the_interval_spans_every_fit() -> None:
+    payload = _aging_payload(
+        naive={"peak": 23.1, "peak_lo": 19.6, "peak_hi": 25.3},
+        delta={"peak": 22.3, "peak_lo": 21.2, "peak_hi": 23.1},
+        retention={"peak": 22.3, "peak_lo": 21.1, "peak_hi": 23.2},
+    )
+    assert aging_failures(payload) == []
+
+
+def test_aging_gate_refuses_a_peak_published_from_one_fit() -> None:
+    payload = _aging_payload(
+        naive={"peak": 23.1, "peak_lo": 19.6, "peak_hi": 25.3},
+        delta={"peak": None, "peak_lo": None, "peak_hi": None},
+        retention={"peak": None, "peak_lo": None, "peak_hi": None},
+    )
+    assert any("one fit" in line for line in aging_failures(payload))
+
+
+def test_aging_gate_refuses_an_interval_narrower_than_the_fits_it_spans() -> None:
+    payload = _aging_payload(
+        naive={"peak": 23.1, "peak_lo": 19.6, "peak_hi": 25.3},
+        delta={"peak": 22.3, "peak_lo": 21.2, "peak_hi": 23.1},
+    )
+    payload["populations"]["composite.overall"]["peak_interval"] = {"lo": 21.2, "hi": 23.1}
+    failures = aging_failures(payload)
+    assert any("lower bound" in line for line in failures)
+    assert any("upper bound" in line for line in failures)
+
+
+def test_aging_gate_is_silent_when_nothing_located_a_peak() -> None:
+    """A null is a result. The gate exists to stop one fit being published as
+    three, not to demand that a peak be found."""
+    payload = _aging_payload(
+        naive={"peak": None, "peak_lo": None, "peak_hi": None},
+        delta={"peak": None, "peak_lo": None, "peak_hi": None},
+    )
+    assert aging_failures(payload) == []
+
+
+# ----------------------------------------------------------------- P6: career
+
+
+def test_career_gate_passes_when_both_credit_rules_shipped() -> None:
+    payload = {
+        "available": True,
+        "rows_by_key": {
+            "plus_minus.deviation.cdl": 149,
+            "plus_minus.deviation_plus_team.cdl": 149,
+        },
+        "credit_rules": {"rank_correlation": 0.97},
+    }
+    assert career_failures(payload) == []
+
+
+def test_career_gate_catches_a_missing_team_column() -> None:
+    """An empty team_season_effect silently drops the shared rule, which would
+    publish a settled question as though it had one answer."""
+    payload = {
+        "available": True,
+        "rows_by_key": {
+            "plus_minus.deviation.cdl": 149,
+            "plus_minus.deviation_plus_team.cdl": 0,
+        },
+        "credit_rules": {"rank_correlation": None},
+    }
+    failures = career_failures(payload)
+    assert any("deviation_plus_team" in line for line in failures)
+    assert any("disagreement" in line for line in failures)

@@ -3297,6 +3297,158 @@ export async function getSegmentWinProb(): Promise<{
   };
 }
 
+// ---------- Career value and aging ----------
+
+export type CareerValue = {
+  available: boolean;
+  team_share: number;
+  qualified_maps: number;
+  replacement: string;
+  populations: {
+    composite_player_seasons: number;
+    plus_minus_player_seasons: number;
+    seasons: number;
+    split_player_seasons: number;
+  };
+  rows_by_key: Record<string, number>;
+  credit_rules: {
+    n_players: number;
+    rank_correlation: number | null;
+    top_ten_overlap: number | null;
+    largest_moves: {
+      player_id: number;
+      rank_deviation: number;
+      rank_with_team: number;
+    }[];
+  };
+  separation: Record<
+    string,
+    {
+      n: number;
+      n_with_interval: number;
+      n_clear_of_zero: number;
+      share_clear: number | null;
+    }
+  >;
+  statement: string;
+};
+
+export type AgingFit = {
+  peak: number | null;
+  peak_lo: number | null;
+  peak_hi: number | null;
+  n_observations: number;
+  n_players: number;
+  curve: { x: number; y: number }[];
+};
+
+export type Aging = {
+  available: boolean;
+  min_age_support: number;
+  players_with_birthdate: number;
+  seasons: number;
+  populations: Record<
+    string,
+    {
+      n_observations: number;
+      n_players: number;
+      age_window: [number, number] | null;
+      fits: Record<string, AgingFit>;
+      peak_interval: {
+        lo: number | null;
+        hi: number | null;
+        point_estimates: number[];
+        spread: number | null;
+        fits_locating_a_peak: number;
+      };
+    }
+  >;
+  two_component: {
+    available: boolean;
+    reason?: string;
+    intervals_overlap?: boolean;
+    separated?: boolean;
+  };
+  statement: string;
+};
+
+export function latestCareerRun(): Promise<ModelRun | null> {
+  return latestRun("career_value");
+}
+
+export function latestAgingRun(): Promise<ModelRun | null> {
+  return latestRun("aging");
+}
+
+export function getCareerValue(runId: number): Promise<CareerValue | null> {
+  return artifactPayload<CareerValue>(runId, "career_value");
+}
+
+export function getAging(runId: number): Promise<Aging | null> {
+  return artifactPayload<Aging>(runId, "aging");
+}
+
+// One player's career totals, every way of counting them. The page shows the
+// composite total first and the two plus-minus credit columns beside it,
+// because the credit rule is a choice and the reader should see both.
+export type PlayerCareerRow = {
+  axis: string;
+  credit: string;
+  eraScope: string;
+  seasons: number;
+  maps: number;
+  total: number;
+  totalSd: number | null;
+  peak: number;
+  peakSeasonYear: number | null;
+  bestThree: number | null;
+  bestThreeStartYear: number | null;
+};
+
+export async function getPlayerCareer(
+  runId: number,
+  playerId: number,
+): Promise<PlayerCareerRow[]> {
+  const rows = await db.execute(sql`
+    SELECT c.axis, c.credit, c.era_scope, c.seasons, c.maps, c.total,
+           c.total_sd, c.peak, ps.year AS peak_year, c.best_three,
+           bs.year AS best_three_year
+    FROM player_career c
+    LEFT JOIN seasons ps ON ps.id = c.peak_season_id
+    LEFT JOIN seasons bs ON bs.id = c.best_three_start_season_id
+    WHERE c.run_id = ${runId} AND c.player_id = ${playerId}
+    ORDER BY c.axis, c.credit, c.era_scope
+  `);
+  return (
+    rows as unknown as {
+      axis: string;
+      credit: string;
+      era_scope: string;
+      seasons: number;
+      maps: number;
+      total: number;
+      total_sd: number | null;
+      peak: number;
+      peak_year: number | null;
+      best_three: number | null;
+      best_three_year: number | null;
+    }[]
+  ).map((r) => ({
+    axis: r.axis,
+    credit: r.credit,
+    eraScope: r.era_scope,
+    seasons: Number(r.seasons),
+    maps: Number(r.maps),
+    total: Number(r.total),
+    totalSd: r.total_sd === null ? null : Number(r.total_sd),
+    peak: Number(r.peak),
+    peakSeasonYear: r.peak_year === null ? null : Number(r.peak_year),
+    bestThree: r.best_three === null ? null : Number(r.best_three),
+    bestThreeStartYear:
+      r.best_three_year === null ? null : Number(r.best_three_year),
+  }));
+}
+
 // ---------- Series dynamics ----------
 
 // Every observed rate carries two benchmarks: `rating` is independence at the

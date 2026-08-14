@@ -32,7 +32,7 @@ from typing import Any, cast
 
 import psycopg
 
-from . import metrics, seriesdyn, style
+from . import aging, career, metrics, seriesdyn, style
 from .db import connect
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
@@ -326,6 +326,77 @@ def skill_prior_failures(
     return bad
 
 
+def aging_failures(payload: dict[str, Any]) -> list[str]:
+    """A peak age must be an interval across all three fits, never one fit's point.
+
+    The whole argument of the aging phase is that a single curve is biased by
+    survivorship and that the three fits disagree by more than any one of their
+    standard errors. A payload that published one fit's peak, or that published
+    an interval narrower than the fits it claims to span, would have thrown that
+    argument away while still passing every unit test — the fits would each be
+    correct and the claim on top of them would not be.
+
+    So three conditions. Every population that locates a peak must locate it in
+    more than one fit; the published interval must contain every fit's own
+    interval; and the naive fit must be present wherever any fit is, because it
+    is the biased one and the size of the bias is only visible against it.
+    """
+    if not payload.get("available"):
+        return []
+    out: list[str] = []
+    for key, block in sorted(payload.get("populations", {}).items()):
+        fits = block.get("fits", {})
+        interval = block.get("peak_interval", {})
+        located = [name for name, fit in fits.items() if fit.get("peak") is not None]
+        if not located:
+            continue
+        if len(located) < 2:
+            out.append(
+                f"{key}: a peak age is published from one fit ({located[0]}) alone; "
+                "the interval has to span the fits that disagree"
+            )
+        if "naive" not in fits:
+            out.append(
+                f"{key}: the naive fit is missing, so the bias has nothing to be read against"
+            )
+        lo, hi = interval.get("lo"), interval.get("hi")
+        if lo is None or hi is None:
+            out.append(f"{key}: {len(located)} fits located a peak and no interval was published")
+            continue
+        for name, fit in sorted(fits.items()):
+            fit_lo, fit_hi = fit.get("peak_lo"), fit.get("peak_hi")
+            if fit_lo is not None and fit_lo < lo - 1e-9:
+                out.append(f"{key}: the published interval starts above {name}'s own lower bound")
+            if fit_hi is not None and fit_hi > hi + 1e-9:
+                out.append(f"{key}: the published interval ends below {name}'s own upper bound")
+    return out
+
+
+def career_failures(payload: dict[str, Any]) -> list[str]:
+    """Both credit rules ship, and a CWL total is never a sum.
+
+    The credit rule was decided in the open and both columns were published
+    because their orderings differ. A run that quietly produced one of them —
+    which is what an empty `team_season_effect` does, since the shared rule
+    drops every player it cannot find a team column for — would publish a
+    settled question as though it had only one answer.
+    """
+    if not payload.get("available"):
+        return []
+    out: list[str] = []
+    counts = payload.get("rows_by_key", {})
+    for key in ("plus_minus.deviation.cdl", "plus_minus.deviation_plus_team.cdl"):
+        if not counts.get(key):
+            out.append(f"{key} published no careers; both credit rules have to ship together")
+    rules = payload.get("credit_rules", {})
+    if counts.get("plus_minus.deviation.cdl") and rules.get("rank_correlation") is None:
+        out.append(
+            "the two credit rules were not compared, so the ordering they disagree about "
+            "is published without the disagreement"
+        )
+    return out
+
+
 def season_rapm_rows(conn: psycopg.Connection[Any]) -> list[tuple[str, str, int, float]]:
     """(scope, resolution, player_id, coef) for the newest season-varying run."""
     run_id = latest_run_id(conn, statespace.MODEL)
@@ -608,6 +679,8 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
                 evalspec.PUBLISHED_FIGURES["skill_panel"],
             ),
         ),
+        ("aging", aging_failures(artifact(conn, aging.MODEL, "aging"))),
+        ("career value", career_failures(artifact(conn, career.MODEL, "career_value"))),
         (
             "metric diff",
             harness_failures(

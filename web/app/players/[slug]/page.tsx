@@ -31,6 +31,7 @@ import {
   getPlayerMetrics,
   getPlayerRapm,
   getPlayerRatingSeasons,
+  getPlayerCareer,
   getPlayerSkill,
   getPlayerSpans,
   getPlayerStints,
@@ -39,12 +40,14 @@ import {
   getSkillSeasons,
   latestRatingRun,
   latestRun,
+  latestCareerRun,
   latestSkillRun,
   teamSlug,
   type MetricCatalog,
   type PlayerMetricValue,
   type PlayerRapm,
   type PlayerRatings,
+  type PlayerCareerRow,
   type PlayerSkillSeason,
   type PlayerStyle,
   type PlayerStylePoint,
@@ -1110,6 +1113,104 @@ function RatingSection({ ratings }: { ratings: PlayerRatings }) {
 
 // ---------- Tab content ----------
 
+// Career totals over a replacement baseline, every way of counting them.
+//
+// Three columns because they rank different players first, and both credit
+// rules because the choice between them is a choice. On this record the two
+// rules agree at rho 0.998, so a reader who only wants one number can take
+// either; the pair is here so that agreement is checkable on a player page and
+// not only in the methodology.
+const CREDIT_LABEL: Record<string, string> = {
+  none: "scoreboard",
+  deviation: "own deviation",
+  deviation_plus_team: "with team share",
+};
+
+function CareerTotalsSection({ rows }: { rows: PlayerCareerRow[] }) {
+  if (rows.length === 0) return null;
+  const composite = rows.filter((r) => r.axis === "composite");
+  const plusMinus = rows.filter((r) => r.axis === "plus_minus");
+  return (
+    <section className="mt-10">
+      <h2 className="lower-third">
+        Career value
+        <span className="lt-note">summed over the qualified-cohort minimum</span>
+      </h2>
+      <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
+        <table className="w-full min-w-[34rem] text-left text-xs">
+          <thead className="text-ink-muted">
+            <tr>
+              <th className="py-1 pr-4 font-normal">Counted as</th>
+              <th className="py-1 pr-4 font-normal">Seasons</th>
+              <th className="py-1 pr-4 font-normal">Total</th>
+              <th className="py-1 pr-4 font-normal">Peak</th>
+              <th className="py-1 font-normal">Best three</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono">
+            {[...composite, ...plusMinus].map((r) => (
+              <tr
+                key={`${r.axis}-${r.credit}-${r.eraScope}`}
+                className="border-t border-hairline"
+              >
+                <td className="py-1 pr-4">
+                  {r.axis === "composite"
+                    ? "scoreboard, all seasons"
+                    : `plus-minus ${r.eraScope.toUpperCase()}, ${CREDIT_LABEL[r.credit] ?? r.credit}`}
+                </td>
+                <td className="py-1 pr-4">{r.seasons}</td>
+                <td className="py-1 pr-4">
+                  {r.total.toFixed(2)}
+                  {r.totalSd !== null && (
+                    <span className="text-ink-muted">
+                      {" \u00b1 "}
+                      {r.totalSd.toFixed(2)}
+                    </span>
+                  )}
+                </td>
+                {/* An era row is one pooled estimate across three seasons, so
+                    it cannot name which of them was the peak. Showing the total
+                    again in this column would read as a season that stood out. */}
+                <td className="py-1 pr-4">
+                  {r.peakSeasonYear === null ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    <>
+                      {r.peak.toFixed(2)}
+                      <span className="text-ink-muted"> {r.peakSeasonYear}</span>
+                    </>
+                  )}
+                </td>
+                <td className="py-1">
+                  {r.bestThree === null ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    <>
+                      {r.bestThree.toFixed(2)}
+                      {r.bestThreeStartYear !== null && (
+                        <span className="text-ink-muted">
+                          {" from "}
+                          {r.bestThreeStartYear}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+          A CWL row is one pooled estimate for the whole era, so it sits beside a
+          CDL total and is never added to it. Most plus-minus intervals across
+          the league overlap, which is what the season coefficients under them
+          support.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function CareerTab({
   arcPoints,
   fingerprint,
@@ -1117,6 +1218,7 @@ function CareerTab({
   ratings,
   rapm,
   skill,
+  careerTotals,
   skillYears,
   lastYear,
   allModes,
@@ -1128,6 +1230,7 @@ function CareerTab({
   ratings: PlayerRatings | null;
   rapm: PlayerRapm | null;
   skill: PlayerSkillSeason[];
+  careerTotals: PlayerCareerRow[];
   skillYears: number[];
   lastYear: number | null;
   allModes: SeasonAdjusted[];
@@ -1151,6 +1254,8 @@ function CareerTab({
           )}
         </div>
       </section>
+
+      <CareerTotalsSection rows={careerTotals} />
 
       <SkillSection
         skill={skill}
@@ -1558,14 +1663,22 @@ export default async function PlayerPage({
   const player = await getPlayerBySlug(slug.toLowerCase());
   if (!player) notFound();
 
-  const [eraRun, insightsRun, metricRun, styleRun, ratingRun, skillRun] =
-    await Promise.all([
+  const [
+    eraRun,
+    insightsRun,
+    metricRun,
+    styleRun,
+    ratingRun,
+    skillRun,
+    careerRun,
+  ] = await Promise.all([
       latestRun("era_adjust"),
       latestRun("insights"),
       latestRun("metric_layer"),
       latestRun("player_style"),
       latestRatingRun(),
       latestSkillRun(),
+      latestCareerRun(),
     ]);
   const [
     adjusted,
@@ -1581,6 +1694,7 @@ export default async function PlayerPage({
     skill,
     skillSeasons,
     modeCatalog,
+    careerTotals,
   ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
@@ -1600,6 +1714,9 @@ export default async function PlayerPage({
       skillRun ? getPlayerSkill(skillRun.id, player.id) : Promise.resolve([]),
       skillRun ? getSkillSeasons(skillRun.id) : Promise.resolve([]),
       getModeCatalog(),
+      careerRun
+        ? getPlayerCareer(careerRun.id, player.id)
+        : Promise.resolve([]),
     ]);
   const skillYears = skillSeasons.map((s) => s.year);
   const metricCards = buildMetricCards(metricValues, metricCatalog, modeCatalog);
@@ -1675,6 +1792,7 @@ export default async function PlayerPage({
                   ratings={ratings}
                   rapm={rapm}
                   skill={skill}
+                  careerTotals={careerTotals}
                   skillYears={skillYears}
                   lastYear={
                     allModes.length > 0
