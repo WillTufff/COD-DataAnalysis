@@ -69,6 +69,15 @@ The full loop runs end to end on real data, locally:
   as positions on continuous axes, not as archetype labels. The fit runs once per
   era, because the column sets do not overlap enough to share a basis, and the axes are
   never compared across that seam.
+- **Role.** How often a player is in the first fight of a Search and Destroy round,
+  published as a rate and a percentile with no entry or anchor label attached, over 311
+  qualified player-seasons. The opening job costs no measurable K/D: the slope is +0.031 SD
+  per SD of contact rate on an interval of -0.125 to +0.167. Two things do move. A player
+  who takes more opening fights does less damage per map and gets a larger share of their
+  kills left unanswered. Whether the style axes already carry role is testable only where
+  the record names a weapon, which is 2017-2019, and there they recover the observed class
+  72.3% of the time against a 57.5% base rate. The pre-registered rule reads that as
+  ambiguous, so no modern-era claim rests on the axes.
 - **Metric layer.** 104 derived metrics per player, season and mode, plus team
   style metrics and loadout meta aggregates, all era-scored against their own cohort.
   Which seasons a metric covers is measured from the data rather than declared, so
@@ -83,6 +92,14 @@ The full loop runs end to end on real data, locally:
   pool season by season, a loadout meta page, a findings
   ledger, and the methodology write-up with an auto-generated metric glossary. Player and
   team pages are prerendered; the filterable views render per request.
+- **Error control.** Every finding is the extreme of a scan, so each one is classified and
+  the testable ones are corrected. 103 of the 227 findings claim a latent quantity the
+  database holds an error for; the rest are descriptive, self-tested, or claim a quantity
+  nothing here can test and say so. A finding is tested against its own screen boundary,
+  with the p-value conditioned on the selection that produced it, and Benjamini-Hochberg
+  and Benjamini-Yekutieli both run per family. At the declared q <= 0.10, one of the 103
+  survives. The other 102 keep their rows and move to a retracted list with the q-value
+  that retracted them, and the whole sensitivity curve is published beside the verdict.
 - **Uncertainty.** Every rating the site publishes carries the interval its model
   computed: the composite rating's posterior SD on the player page, the rating board and
   the player index; the era model's standard error on the career arc, the season tables

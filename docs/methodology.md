@@ -2849,6 +2849,63 @@ bisection is 0.99-stable. What these bases rule out is groups of that kind. They
 rule out roles too subtle for 26 CWL box-score columns to see, and the CDL basis, at 7
 columns, rules out considerably less than that. No such claim is made from either.
 
+## Tier 2d: Role at the opening engagement (shipped)
+
+The nouns Tier 2c refused to fit are still worth one number. This section asks how often a
+player is in the first fight of a Search and Destroy round, and what taking that fight
+goes with. A contact is an opening kill or an opening death, so the contact rate is
+`(first_bloods + first_deaths) / maps`, and the contact win rate is the share of those
+opening fights won. A player-season qualifies at 30 maps. 311 of them do, across 109
+players.
+
+Nothing is labelled. A high rate is not called an entry and a low one is not called an
+anchor, because Tier 2c found no partition to hang either noun on. The player page prints
+the rate, its percentile among that season's qualified players, and the win rate.
+
+**What the opening job costs.** K/D, damage per map and the untraded share of kills are
+each regressed on contact rate, all four standardised inside the season, with players as
+the resample unit for the interval:
+
+| Outcome | Per SD of contact rate | 95% interval | Separates |
+|---|---|---|---|
+| K/D | +0.031 SD | [-0.125, +0.167] | no |
+| Damage per map | -0.171 SD | [-0.312, -0.045] | yes |
+| Non-traded kill rate | +0.140 SD | [+0.026, +0.239] | yes |
+
+The K/D interval is tight around zero. This is a null with power behind it, and it
+contradicts the premise the phase was built on: on this record the opening job costs no
+measurable K/D. Two quantities do move, in opposite directions. A player who takes more
+opening fights does less total damage per map, and a larger share of their kills goes
+unanswered. That is an association between a role and an outcome, and no mechanism is
+claimed for it.
+
+The player page publishes the raw K/D, the part the contact rate accounts for, and what is
+left, all three together. An adjustment whose size a reader cannot audit is worse than no
+adjustment. This one is small, because the fit above could not separate the two
+quantities in the first place.
+
+**Do the style axes already carry role?** If they did, the modern era could be described
+with them. The question is answerable only where the record names a weapon, and the
+favourite-weapon column exists on every CWL title and no CDL title, so the test runs on
+2017-2019. The 27 weapon names are mapped to classes. Five of those names also appear in
+the kill feed with an observed class, so the mapping is checked against the feed instead of
+asserted, and the feed decides where they differ: it reads `ar` for the KBAR-32. A release
+gate fails the run if the table and the feed ever disagree.
+
+Held out by player, the five CWL style axes recover the observed class 72.3% of the time
+against a base rate of 57.5%, over 285 player-seasons and 169 players. The interpretation
+rule was written before the number was seen: 75% or above means the axes carry role, 60%
+or below means they do not, and between the two is ambiguous. The result lands in that
+band and is published as ambiguous. No modern-era claim on this site rests on the style
+axes. The strongest single axis is survival, at an AUC of 0.22, which separates hard in
+the direction that says SMG players die more.
+
+**The eras do not share a question.** `first_deaths` and `non_traded_kills` are zero on
+every CWL title, and the weapon label is absent on every CDL title, so the cost and the
+label never coexist. The cost is measured on 2020-2026 and the recovery test on 2017-2019,
+and neither number crosses the seam. Nothing outside Search and Destroy is claimed:
+opening contact is a round-based idea, and the other modes respawn.
+
 ## Tier 3: Career and player-shape modeling (shipped)
 
 Two models live here. One adds seasons up. The other asks what age does to them.
@@ -3078,7 +3135,7 @@ Six more read the metric layer, which is where the claims a box score cannot mak
 - **team style**: rosters at the extremes of how they divided hill duty, opening duty
   and kills.
 
-There are currently 223. Each carries the numbers backing it and a link into the
+There are currently 227. Each carries the numbers backing it and a link into the
 evidence view, so any claim on the site can be traced to the data that produced it.
 These are generated from model output by fixed rules, not written by hand and not
 written by a language model.
@@ -3101,6 +3158,88 @@ excellent at *both* K/D and an intangible as contradictions, with a headline cla
 the opposite of the truth. And a "nobody in the league matched this" claim requires
 twice the qualifying sample, because clearing a leaderboard minimum is a much weaker
 thing than being unmatched.
+
+## Tier 5b: Error control over the findings (shipped)
+
+Every finding in Tier 5 is the extreme of a scan. Scanning a league across sixteen kinds
+and printing the extremes produces confident-looking claims out of noise, and until this
+layer existed nothing here quantified the rate. Grepping the analytics package for
+`bonferroni`, `benjamini`, `hochberg` or `fdr` returned nothing at all.
+
+**A third of the ledger is not a test.** A finding is testable when its sentence claims
+something the record only estimates: an ability, an edge, a tendency. It is descriptive
+when its sentence is a statement about the record. A season K/D is a noisy read on how good
+a player was, and the era model already publishes an error bar for it, so the claim can be
+wrong and can be tested. League-wide engagement pace across a season is computed over every
+map the season contains. It estimates nothing, and a null for it would have to be invented.
+Four classes fall out of that criterion:
+
+| Class | n | What it means |
+|---|---|---|
+| testable | 103 | A latent quantity, and an error for it in the database. Carries a p-value and both q-values. |
+| uncorrected | 58 | A latent quantity, and no error anywhere to test it with. |
+| descriptive | 62 | A statement about the record. No latent quantity, no null. |
+| self-tested | 4 | A declared test that already publishes its own interval. |
+
+The uncorrected class is the metric layer's five kinds. `player_metric_season` stores a
+value, a denominator, a z and a percentile for an arbitrary metric, and no standard error,
+so a threshold test on one of them would need an error bar invented for the occasion. They
+ship labelled, with the reason on the page. The fix is a phase of its own: a cluster
+bootstrap over a player's own maps would give a uniform error for any metric.
+
+**The null is the claim's own boundary.** A finding that says a season sits at least two
+standard deviations from its cohort is tested against a true position of two. Testing it
+against zero would ask whether the player differs from the league at all, which is known
+false before the data is seen. Under that null the screened outliers score a mean |t| of
+5.74, every one of them survives any correction, and the exercise controls nothing. The
+boundary null tests the sentence the site actually prints.
+
+**The p-value is conditional on the screen that selected the claim.** A selected subject's
+statistic is biased upward against its own true value. Conditioning on the selection
+removes exactly that bias:
+
+    p = P(statistic >= observed | statistic >= screen, true value = boundary)
+
+Where the screen sits at the null value, which is how every kind here is built, this
+reduces to twice the plain tail. The selection correction is a factor of two, written down
+instead of absorbed, and it is valid post-selection.
+
+**Both step-up procedures ship.** Benjamini-Hochberg controls the false discovery rate
+under independence or positive dependence. These families overlap by construction, since
+one player-season can reach several of them, so BH is the optimistic bound.
+Benjamini-Yekutieli is valid under arbitrary dependence and costs power. A reader gets both
+and can see where they disagree. The declared threshold is q <= 0.10 on the BH column, per
+family, and it was fixed before any q-value was computed.
+
+| Family | Tested | Median q | Retracted |
+|---|---|---|---|
+| Head-to-head | 33 | 1.000 | 33 |
+| Outlier | 32 | 0.628 | 32 |
+| Trend | 17 | 0.333 | 17 |
+| Trade economy | 12 | 0.829 | 11 |
+| Clutch record | 9 | 1.000 | 9 |
+
+**One of the 103 survives.** The sensitivity curve is published with the verdict, so the
+threshold reads as a choice: 0 findings survive at q <= 0.05, 1 at the declared 0.10, 7 at
+0.20, 28 at 0.33 and 41 at 0.50. The seven a 0.20 threshold would keep are the ones a
+reader would call real, and 0.10 retracts them. Moving the threshold after seeing that
+table is the post-hoc adjustment a pre-registration exists to prevent, so it was not moved.
+
+Three things drive the result and all three are real. A finding sitting at its own screen
+boundary earns nothing: a 6-of-8 head-to-head is the least impressive record that can clear
+a 70% screen, so conditional on having been selected it carries no evidence. A season K/D
+is measured with an error about half the cohort spread, so a season at 2.4 SD is compatible
+with a true 2 SD. A monotone move across three seasons happens one time in three by chance,
+so every three-season trend starts at p = 1/3 before any correction.
+
+**Two screens are not modelled.** A season is collapsed to its most extreme mode slice and
+a subject is capped at two findings per kind. Both select on the same statistic being
+tested, so these p-values are optimistic by an amount this run does not measure. The true
+picture is slightly harsher.
+
+**Retraction is a published event.** A finding that fails the threshold keeps its row and
+its q-value and moves to a retracted list on the site. Nothing disappears from the feed,
+and the descriptive and uncorrected findings are untouched by any of this.
 
 ## Reproducibility: the metric diff and what a run records
 
