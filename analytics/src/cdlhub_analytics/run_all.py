@@ -31,6 +31,7 @@ from . import (
     segmentwp,
     seriesdyn,
     style,
+    validation,
 )
 from .db import connect
 from .metricdiff import run as metricdiff
@@ -1440,6 +1441,29 @@ def main(argv: list[str] | None = None) -> int:
                 f"  {cost.outcome}: {cost.slope:+.3f} SD "
                 f"[{cost.lo95:+.3f}, {cost.hi95:+.3f}] over {cost.n_seasons} seasons"
             )
+
+        progress.stage("validate")
+        val_run = open_run(conn, validation.MODEL, validation.VERSION, validation.params(), through)
+        val_arts = validation.build(
+            conn,
+            pr_run,
+            sp_run,
+            admitted_games,
+            seasons,
+            how,
+            (
+                float(season_art["penalties"]["lambda0"]),
+                float(season_art["penalties"]["lambda_walk"]),
+            ),
+        )
+        for name, payload in val_arts.items():
+            conn.execute(
+                "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+                (val_run, name, json.dumps(payload)),
+            )
+        print(f"validation run {val_run}:")
+        for name, payload in val_arts.items():
+            print(f"  {name}: {validation.headline(payload)}")
 
         progress.stage("insights")
         ins_run = open_run(

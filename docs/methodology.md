@@ -2617,6 +2617,85 @@ the gate, which SKILL failed. What it says is that the object was fitted to a ta
 cannot measure precisely enough to be worth predicting, and then judged against a target it was
 never built for. Both of those are real, and only the first is fixable by a better model.
 
+### Four checks the ratings could have failed
+
+Every test above scores a rating against the record it was fitted on. These four score it
+against things outside that record: a rating built by somebody else, a set of awards voted
+on by somebody else, the record with a season removed, and the moments a team swapped a
+player. All four were written down with their populations and their verdict rules before any
+of them ran. None is a fitting target and none can move a coefficient.
+
+**Against an outside rating.** The [Cito API](https://citoapi.com) publishes its own per-map
+player rating for 2020-2026, and it is licensed against redistribution, so what appears here
+is derived from it and never the values themselves. Over 468 player-seasons the composite
+VALUE agrees at Spearman 0.647 (95% interval 0.564 to 0.715, clustered on the player); over
+the 359 seasons SKILL covers, SKILL agrees at 0.757 (0.691 to 0.807). Neither number is a
+result on its own. Both ratings read the same box score, so agreement measures shared
+arithmetic.
+
+The first run of this comparison was wrong, in a way worth recording. It returned a pooled
+Spearman of 0.477 while every individual season fell between 0.53 and 0.79, and 2020 came
+back with a Pearson of 0.00 against a Spearman of 0.47. The cause was that an `overall` of
+exactly zero marks an unrated map. Cito rates Hardpoint, Control and Search and Destroy;
+Domination was a CDL mode in 2020 alone, and all 1,820 of its player-map rows read zero. With
+another 505 zeros on early 2020 maps, 32% of that season was being averaged in as a rating of
+zero. Excluding them moves 2020 to a Pearson of 0.623 and the pooled figure to 0.647.
+Coverage is published per season beside the correlation, because a reader comparing 2020 to
+2024 is comparing 68% of a season against all of one.
+
+**Against the awards.** Liquipedia carries 158 individual awards, of which 59 name a player
+for a whole season: 29 first-team selections, 20 second-team, 5 Regular Season MVP and 5
+Rookie of the Year. Scored against the top *n* of that season's VALUE table, where *n* is the
+number of players the season actually selected, **22 of 45 land in the top n against 5.0
+expected by chance.**
+
+| Season | Selected | Scored | Field | In top n | Expected |
+|---|---|---|---|---|---|
+| 2020 | 5 | 5 | 76 | 4 | 0.33 |
+| 2021 | 4 | 4 | 63 | 2 | 0.25 |
+| 2022 | 8 | 8 | 63 | 2 | 1.02 |
+| 2023 | 8 | 7 | 63 | 2 | 0.89 |
+| 2024 | 8 | 7 | 65 | 4 | 0.86 |
+| 2025 | 8 | 7 | 62 | 3 | 0.90 |
+| 2026 | 8 | 7 | 76 | 5 | 0.74 |
+
+An award is a vote. It tracks team success and airtime, so a disagreement is evidence about
+the ballot as readily as about the rating, and none of this is fitted against.
+
+**Seven of the 59 referents are missing, and all seven are one player.** The 2020 team
+selected five players; every season since has selected four. Scrappy holds a first-team
+selection in four seasons and the Regular Season MVP in two, and carries no rating under the
+name the award was given to: the box score sits under `Scrap` and the roster history under
+`Scrappy`, and nothing links them. Twelve more players carry a split of that shape, found by
+grouping on real name. They are named in the artifact and left alone here, because merging an
+identity moves every number downstream of it and that is not a validation decision.
+
+**One test in the plan could not be run.** It asked whether SKILL identifies Rookie of the
+Year before the season it was awarded for. All five winners have zero rated seasons before
+their award, which is what being a rookie means, and no Challengers tier exists in this
+record to have rated them in. What replaces it is the winner's rank inside their own season's
+rookie cohort: Gwinn 2nd of 11, RenKoR 3rd of 12, Nium 3rd of 21, and Pred 10th of 10.
+
+**With a season removed.** Take one CDL season out of the plus-minus fit, refit, and see how
+much the remaining seasons reorder. The weakest of six holdouts reorders the later cells at
+Spearman 0.988, against a floor of 0.8 set in advance. Removing a season also cannot touch
+any cell before it, because the one-sided family solves through each cell and no further, and
+the check confirms that on all 2,517 earlier cells rather than assuming it. Read this as a
+weak test passed: one season is 7 to 9% of the admitted maps, and a fit that survives losing
+it has not been asked a hard question.
+
+**When a team swaps a player.** A CDL team changed exactly one of its four players between
+consecutive events on 122 occasions, read from the maps actually played. On the 94 swaps both
+ratings can score, **SKILL moves with the outcome and VALUE does not.** A one-standard-deviation
+difference between the departing and arriving player is worth 7.2 points of map win rate under
+SKILL (95% interval 4.0 to 10.5) and 1.5 points under VALUE (-3.2 to 6.1). VALUE's interval is
+wider than this many swaps could resolve, so it is an absence of power and not a measured null,
+and it is reported that way.
+
+Read as an association and not an effect. Teams replace a player for reasons that correlate
+with form, and the prediction ignores the three players who stayed. The outcome is map win
+rate because a score margin means a different thing in each mode.
+
 ## Tier 2b: Series dynamics (shipped)
 
 A Call of Duty series is a race to three maps, and much of what gets said about one is a

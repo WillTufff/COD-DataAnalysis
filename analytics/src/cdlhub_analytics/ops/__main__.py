@@ -76,6 +76,7 @@ JOBS: list[dict[str, Any]] = [
             "aging",
             "player_style",
             "role",
+            "validate",
             "insights",
             "error_control",
             "metric_diff",

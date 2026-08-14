@@ -32,7 +32,7 @@ from typing import Any, cast
 
 import psycopg
 
-from . import aging, career, errorcontrol, metrics, role, seriesdyn, style
+from . import aging, career, errorcontrol, metrics, role, seriesdyn, style, validation
 from .db import connect
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
@@ -505,6 +505,68 @@ def role_failures(payload: dict[str, Any]) -> list[str]:
     return out
 
 
+def validation_failures(payloads: dict[str, dict[str, Any]]) -> list[str]:
+    """Four verdicts, each with its population, and no licensed value republished.
+
+    The adversarial phase is the one with the most room to report a null it
+    never had the power to find, and the one with a licence attached to half its
+    inputs. So: every test says what it ran on, every null says whether the
+    design could have resolved it, and the convergent test's published rows are
+    checked field by field against the schema the module declares. A field added
+    to a disagreement row without being added to `DISAGREEMENT_FIELDS` fails the
+    release, which is the point of closing the schema at all.
+    """
+    out: list[str] = []
+    for name, payload in sorted(payloads.items()):
+        if not payload.get("verdict"):
+            out.append(f"{name} published no verdict")
+        population = payload.get("population")
+        if not isinstance(population, dict) or not population:
+            out.append(f"{name} published no population size")
+
+    convergent = payloads.get("validation_convergent", {})
+    if convergent.get("attribution") in (None, ""):
+        out.append("the convergent test names no attribution for its source")
+    allowed = set(validation.DISAGREEMENT_FIELDS)
+    for row in convergent.get("disagreements", []):
+        extra = sorted(set(row) - allowed)
+        if extra:
+            out.append(f"a named disagreement carries undeclared fields: {', '.join(extra)}")
+            break
+
+    shock = payloads.get("validation_shock", {})
+    for block in (shock, shock.get("against", {})):
+        if not block:
+            continue
+        if block.get("excludes_zero") is False and block.get("informative") is None:
+            out.append(
+                f"the roster shock null on {block.get('axis')} does not say whether the "
+                f"design could have resolved it"
+            )
+        if block.get("detectable_slope") is None and block.get("slope") is not None:
+            out.append(f"the roster shock on {block.get('axis')} reports no detectable effect")
+
+    retro = payloads.get("validation_retrodiction", {})
+    leaked = retro.get("one_sided_violations")
+    if leaked:
+        out.append(
+            f"{leaked} filtered cells before the held-out season moved, and a one-sided "
+            f"fit through season t cannot depend on t+1"
+        )
+    return out
+
+
+def validation_payloads(conn: psycopg.Connection[Any]) -> dict[str, dict[str, Any]]:
+    """The newest validation run's artifacts, keyed by name."""
+    run_id = latest_run_id(conn, validation.MODEL)
+    if run_id is None:
+        raise CannotRun(f"no {validation.MODEL} run")
+    rows = conn.execute(
+        "SELECT name, payload FROM model_artifacts WHERE run_id = %s", (run_id,)
+    ).fetchall()
+    return {str(r[0]): cast(dict[str, Any], r[1]) for r in rows}
+
+
 def season_rapm_rows(conn: psycopg.Connection[Any]) -> list[tuple[str, str, int, float]]:
     """(scope, resolution, player_id, coef) for the newest season-varying run."""
     run_id = latest_run_id(conn, statespace.MODEL)
@@ -794,6 +856,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             "finding error control",
             error_control_failures(conn, artifact(conn, errorcontrol.MODEL, "error_control")),
         ),
+        ("validation", validation_failures(validation_payloads(conn))),
         (
             "metric diff",
             harness_failures(

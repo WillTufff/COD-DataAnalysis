@@ -136,6 +136,34 @@ def move_season(d: date) -> int:
 # mirrors the Cito scope denylist. Row counts still show up in the report.
 SKIP_PREFIXES = ("Call_of_Duty_Challengers/", "Call_of_Duty_King/", "Esports_World_Cup/")
 
+
+# The award string carries the season in some years and not others -- 2022 says
+# `CDL First All-Star Team`, 2023 says `CDL 2023 Team of The Year`, and the two
+# name the same selection. Matching on the part that does not move is what folds
+# them together. Anything unrecognised is stored as `unmapped` and reported, so
+# a new award kind shows up as a name in the report and not as a silent bucket.
+def award_kind(raw: str) -> str:
+    """Fold an LPDB award string onto a normalized kind."""
+    name = raw.strip()
+    if "Second All-Star" in name:
+        return "second_team"
+    if "First All-Star" in name or "Team of The Year" in name:
+        return "first_team"
+    if name == "Rookie of the Year":
+        return "roty"
+    if name == "Regular Season MVP":
+        return "rs_mvp"
+    if name in ("MVP", "Tournament MVP"):
+        return "event_mvp"
+    if name == "FMVP":
+        return "fmvp"
+    if name == "Captain's MVP":
+        return "captains_mvp"
+    if name.startswith("Best ") and name.endswith("Player"):
+        return "mode_best"
+    return "unmapped"
+
+
 _ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6"}
 
 
@@ -195,6 +223,13 @@ class LpdbLoader:
             "bios_updated": [],
             "players_without_bio": [],
             "unmapped_nationalities": [],
+            "awards_unresolved": [],
+            "awards_unmapped": [],
+            "awards_without_season": [],
+        }
+        self._seasons: dict[int, int] = {
+            cast(int, year): cast(int, sid)
+            for sid, year in self.conn.execute("SELECT id, year FROM seasons").fetchall()
         }
         # (season year, event name) -> id; season year -> [(name, start, end, id)]
         self._events: dict[tuple[int, str], int] = {}
@@ -383,6 +418,63 @@ class LpdbLoader:
             ),
         )
         self.counts["event_placements"] += 1
+
+    def load_awards(self, rows: list[dict[str, Any]]) -> None:
+        """Individual awards, keyed on the season the game code implies.
+
+        These arrive in the placements payload and never reach
+        `_load_placement`, which drops them at its non-team guard. They are
+        loaded here instead, on the season rather than the event: six of the
+        seven CDL regular-season pages have no local counterpart, so an
+        event-keyed load would keep one season of selections out of seven.
+        """
+        self.conn.execute("DELETE FROM player_awards WHERE data_source = %s", (SOURCE,))
+        for row in rows:
+            if str(row.get("mode")) != "award_individual":
+                continue
+            handle = str(row.get("opponentname") or "").strip()
+            if handle in ("", "TBD", "Tbd"):
+                continue
+            season = GAME_SEASONS[row["game"]]
+            season_id = self._seasons.get(season)
+            if season_id is None:
+                self.report["awards_without_season"].append({"handle": handle, "season": season})
+                continue
+            raw = str((row.get("extradata") or {}).get("award") or "")
+            kind = award_kind(raw)
+            if kind == "unmapped":
+                self.report["awards_unmapped"].append(raw)
+            pagename = str(row["pagename"])
+            player_id = self.player_id(handle)
+            if player_id is None:
+                self.report["awards_unresolved"].append({"handle": handle, "award": raw})
+            self.conn.execute(
+                """
+                INSERT INTO player_awards
+                  (pagename, raw_award, handle, award, season_id, player_id, event_id,
+                   awarded_on, data_source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (pagename, raw_award, handle) DO UPDATE SET
+                  award = EXCLUDED.award,
+                  season_id = EXCLUDED.season_id,
+                  player_id = EXCLUDED.player_id,
+                  event_id = EXCLUDED.event_id,
+                  awarded_on = EXCLUDED.awarded_on,
+                  data_source = EXCLUDED.data_source
+                """,
+                (
+                    pagename,
+                    raw,
+                    handle,
+                    kind,
+                    season_id,
+                    player_id,
+                    self.match_event(pagename, str(row.get("tournament") or ""), season),
+                    _parse_date(row.get("date")),
+                    SOURCE,
+                ),
+            )
+            self.counts["player_awards"] += 1
 
     def load_teams(self, rows: list[dict[str, Any]]) -> None:
         by_name: dict[str, dict[str, Any]] = {}
@@ -728,7 +820,9 @@ class LpdbLoader:
 def load(conn: psycopg.Connection[tuple[object, ...]]) -> tuple[dict[str, int], dict[str, Any]]:
     aliases = Aliases.load()
     loader = LpdbLoader(conn, aliases)
-    loader.load_placements(json.loads(PLACEMENTS_PATH.read_text()))
+    placements = json.loads(PLACEMENTS_PATH.read_text())
+    loader.load_placements(placements)
+    loader.load_awards(placements)
     loader.load_teams(json.loads(TEAMS_PATH.read_text()))
     if TOURNAMENTS_PATH.exists():
         loader.load_events_extras(json.loads(TOURNAMENTS_PATH.read_text()))

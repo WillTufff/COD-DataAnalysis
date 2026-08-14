@@ -94,6 +94,7 @@ test.describe("rating surfaces hold rows", () => {
       "skill",
       "role",
       "error-control",
+      "validation",
     ]) {
       const section = page.locator(`#${id}`);
       await expect(section, `#${id}`).toBeVisible();

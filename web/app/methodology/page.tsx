@@ -15,6 +15,11 @@ import {
   getErrorControl,
   getFeedKinds,
   getRole,
+  getValidationConvergent,
+  getValidationFace,
+  getValidationRetrodiction,
+  getValidationShock,
+  latestValidationRun,
   getKillFeedReconciliation,
   getMapElo,
   getMetricCatalog,
@@ -622,6 +627,17 @@ export default async function MethodologyPage() {
     getErrorControl(),
     getRole(),
   ]);
+  // The adversarial phase writes its own run. Every block is optional: a
+  // database fitted before P7 renders the section away rather than empty.
+  const validationRun = await latestValidationRun();
+  const [convergent, faceValidity, retrodiction, shock] = validationRun
+    ? await Promise.all([
+        getValidationConvergent(validationRun.id),
+        getValidationFace(validationRun.id),
+        getValidationRetrodiction(validationRun.id),
+        getValidationShock(validationRun.id),
+      ])
+    : [null, null, null, null];
   // Qualified all-mode cohort sizes per title (≥ 8 maps), for the era section.
   const cohorts = eraRun ? await getSeasonKdSpread(eraRun.id, 8) : [];
   const cohortSizes = [...cohorts].sort((a, b) => a.year - b.year);
@@ -3927,6 +3943,115 @@ export default async function MethodologyPage() {
               it, on its <a href="/findings?view=retracted">own page</a>. Nothing
               disappears from the feed.
             </p>
+          </div>
+        </section>
+      )}
+
+      {(convergent || faceValidity || retrodiction || shock) && (
+        <section id="validation" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Four checks the ratings could have failed
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed">
+            <p>
+              Every other test on this page scores a rating against the record
+              it was fitted on. These four score it against things outside that
+              record, with the population and the verdict rule for each written
+              down before any of them ran. None is a fitting target and none can
+              move a coefficient.
+            </p>
+            {convergent && (
+              <>
+                <p>
+                  <strong>Against an outside rating.</strong>{" "}
+                  {convergent.verdict}. Attribution:{" "}
+                  <a href="https://citoapi.com">{convergent.attribution}</a>.
+                  The source is licensed against redistribution, so what appears
+                  here is derived from it and never the values themselves.
+                </p>
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-hairline text-xs text-ink-muted">
+                      <th className="py-2 pr-4 font-normal">Axis</th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        Player-seasons
+                      </th>
+                      <th className="py-2 pr-4 text-right font-normal">
+                        Spearman
+                      </th>
+                      <th className="py-2 text-right font-normal">95%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {convergent.axes.map((a) => (
+                      <tr key={a.axis} className="border-b border-hairline/60">
+                        <td className="py-1.5 pr-4 uppercase">{a.axis}</td>
+                        <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                          {a.n}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                          {a.spearman.toFixed(3)}
+                        </td>
+                        <td className="py-1.5 text-right font-mono tabular-nums">
+                          {a.spearman_lo95 === null || a.spearman_hi95 === null
+                            ? "—"
+                            : `${a.spearman_lo95.toFixed(3)} to ${a.spearman_hi95.toFixed(3)}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-ink-muted">
+                  {convergent.limits} {convergent.disagreement_count}{" "}
+                  player-seasons are ordered very differently by the two numbers.
+                </p>
+              </>
+            )}
+            {faceValidity && (
+              <p>
+                <strong>Against the awards.</strong> {faceValidity.verdict}.{" "}
+                {faceValidity.population.awards_excluded > 0 && (
+                  <>
+                    {faceValidity.population.awards_excluded} selections could
+                    not be scored:{" "}
+                    {Array.from(
+                      new Set(faceValidity.excluded.map((e) => e.handle)),
+                    ).join(", ")}{" "}
+                    carries no rating under the name the award was given to.{" "}
+                  </>
+                )}
+                {faceValidity.limits}
+              </p>
+            )}
+            {retrodiction && (
+              <p>
+                <strong>With a season removed.</strong> {retrodiction.verdict},
+                over {retrodiction.population.seasons_held_out} seasons held out
+                one at a time. {retrodiction.one_sided_violations} cells before
+                the hole moved, and a fit that runs through season t cannot
+                depend on t+1. {retrodiction.limits}
+              </p>
+            )}
+            {shock && (
+              <>
+                <p>
+                  <strong>When a team swaps a player.</strong> A CDL team
+                  changed exactly one of its four players between consecutive
+                  events on {shock.population.swaps} occasions, read from the
+                  maps actually played. On the {shock.population.scored} both
+                  ratings can score:
+                </p>
+                <ul className="list-disc space-y-1 pl-5">
+                  {[shock.against, shock].map((arm) => (
+                    <li key={arm.axis}>
+                      <span className="uppercase">{arm.axis}</span>:{" "}
+                      {arm.verdict}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-ink-muted">{shock.limits}</p>
+              </>
+            )}
           </div>
         </section>
       )}

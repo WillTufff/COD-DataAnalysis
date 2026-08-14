@@ -4907,6 +4907,164 @@ export async function getEvaluationPopulation(): Promise<EvaluationPopulation | 
   return artifactPayload<EvaluationPopulation>(run.id, "evaluation_population");
 }
 
+// ---------- Validation: the four adversarial checks ----------
+//
+// Its own run, written after the ratings it scores. Nothing here can move a
+// coefficient, and nothing here carries a third-party rating value: the source
+// licence forbids redistribution, so a named disagreement ships ranks and our
+// own number and never theirs.
+
+export type ValidationConvergent = {
+  source: string;
+  attribution: string;
+  verdict: string;
+  limits: string;
+  disagreement_count: number;
+  population: {
+    player_seasons: number;
+    axes: Record<string, number>;
+    coverage: {
+      year: number;
+      rated_maps: number;
+      unrated_maps: number;
+      rated_share: number;
+    }[];
+  };
+  axes: {
+    axis: string;
+    n: number;
+    n_players: number;
+    pearson: number;
+    spearman: number;
+    spearman_lo95: number | null;
+    spearman_hi95: number | null;
+    by_season: { year: number; n: number; pearson: number; spearman: number }[];
+  }[];
+  disagreements: {
+    player_id: number;
+    handle: string;
+    year: number;
+    field: number;
+    our_rank: number;
+    their_rank: number;
+    our_rating: number;
+    gap: number;
+    axis: string;
+  }[];
+};
+
+export type ValidationFace = {
+  verdict: string;
+  limits: string;
+  agreement_rate: number | null;
+  expected_rate: number | null;
+  population: {
+    awards_scored: number;
+    awards_excluded: number;
+    referents_loaded: number;
+  };
+  by_season: {
+    year: number;
+    team_size: number;
+    selections: number;
+    scored: number;
+    field: number;
+    in_top_n: number;
+    in_top_2n: number;
+    expected_top_n: number;
+  }[];
+  excluded: { handle: string; year: number; award: string }[];
+  ranked_awards: {
+    award: string;
+    handle: string;
+    year: number;
+    cohort: number;
+    rank: number | null;
+    prior_rated_seasons: number;
+  }[];
+};
+
+export type ValidationRetrodiction = {
+  verdict: string;
+  limits: string;
+  stability_floor: number;
+  worst_spearman: number | null;
+  passes_floor: boolean | null;
+  one_sided_violations: number;
+  population: {
+    seasons_held_out: number;
+    admitted_maps: number;
+    player_cells: number;
+  };
+  by_holdout: {
+    held_out: number;
+    maps_removed?: number;
+    cells_after: number;
+    cells_before?: number;
+    cells_before_moved?: number;
+    spearman: number | null;
+    pearson?: number;
+    note?: string;
+  }[];
+};
+
+export type ValidationShockArm = {
+  axis: string;
+  verdict: string;
+  limits: string;
+  outcome?: string;
+  slope?: number;
+  lo95?: number;
+  hi95?: number;
+  slope_per_sd?: number;
+  lo95_per_sd?: number;
+  hi95_per_sd?: number;
+  detectable_slope?: number;
+  excludes_zero?: boolean;
+  informative?: boolean;
+  population: {
+    swaps: number;
+    scored: number;
+    unrated: number;
+    teams?: number;
+  };
+};
+
+export type ValidationShock = ValidationShockArm & {
+  against: ValidationShockArm;
+};
+
+export function latestValidationRun(): Promise<ModelRun | null> {
+  return latestRun("validation");
+}
+
+export function getValidationConvergent(
+  runId: number,
+): Promise<ValidationConvergent | null> {
+  return artifactPayload<ValidationConvergent>(runId, "validation_convergent");
+}
+
+export function getValidationFace(
+  runId: number,
+): Promise<ValidationFace | null> {
+  return artifactPayload<ValidationFace>(runId, "validation_face");
+}
+
+export function getValidationRetrodiction(
+  runId: number,
+): Promise<ValidationRetrodiction | null> {
+  return artifactPayload<ValidationRetrodiction>(
+    runId,
+    "validation_retrodiction",
+  );
+}
+
+export function getValidationShock(
+  runId: number,
+): Promise<ValidationShock | null> {
+  return artifactPayload<ValidationShock>(runId, "validation_shock");
+}
+
 // ---------- The identification pre-flight ----------
 //
 // Fitted before the season plus-minus, and the reason that model has two

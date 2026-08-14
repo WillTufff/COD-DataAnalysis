@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from . import aging, role, roundwp, segmentwp, seriesdyn, style
+from . import aging, role, roundwp, segmentwp, seriesdyn, style, validation
 from .metricdiff import evalpop
 from .ratings import (
     evalspec,
@@ -57,6 +57,7 @@ SEEDS: dict[str, int] = {
     "evalspec": evalspec.BOOTSTRAP_SEED,
     "prior": prior.SEED,
     "aging": aging.BOOTSTRAP_SEED,
+    "validation": validation.BOOTSTRAP_SEED,
     "role": role.BOOTSTRAP_SEED,
 }
 
