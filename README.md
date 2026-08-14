@@ -1,7 +1,7 @@
 # cdlhub
 
 cdlhub is a free, open-source analytics project for competitive Call of Duty. The goal
-is to model and interpret the stats rather than just list them: era-adjusted comparisons
+is to model and interpret the stats: era-adjusted comparisons
 across titles, rating systems whose backtests are published alongside them, career-arc
 modeling, and generated findings, covering the CWL era through the current CDL.
 
@@ -16,14 +16,14 @@ The full loop runs end to end on real data, locally:
   decided series and 99 events. The Activision `cwl-data` archive supplies 44,552 of
   those rows and is committed to this repository (2017 Champs on IW, the 2018 WWII
   season, the 2019 BO4 season); the CDL seasons 2020-2026 come from the Cito API,
-  which carries Breaking Point match data, and are held locally rather than
+  which carries Breaking Point match data, and are held locally. They are not
   redistributed. Liquipedia's LPDB supplies the structure around them: 99 enriched
   events, 1,068 placements with prize money, 3,486 roster stints, 4,898 transfers and
   player bios.
 - **Models.** Era adjustment (cohort z-scores and percentiles per season and mode,
   minimum 8 maps), Elo (K=32), Glicko-2 (τ=0.5), an open composite player rating fit on
   what actually wins maps and published as the posterior of a two-level model, so its
-  interval is the model's rather than a bootstrap of its point estimate, and a
+  interval comes from the model itself, not a bootstrap of its point estimate, and a
   win-probability model whose result was a published null.
   Walk-forward backtests over 3,027 decided series put Elo at 0.2218 Brier / 64.4%
   accuracy and Glicko-2 at 0.2272 / 63.6%. Those gaps are paired and carry intervals:
@@ -47,13 +47,26 @@ The full loop runs end to end on real data, locally:
   model against the outcome, and how much of the sample is still playing, on one shared
   time axis). Half of all rounds are over by 60 seconds, and at thirty the eventual winner
   is ahead by under two thirds of a player.
+- **Career value and aging.** Season numbers, added up over a replacement baseline, and
+  what age does to them. A career total is published on two axes: the composite season
+  rating over all ten seasons, and the season plus-minus for the CDL era. The plus-minus
+  half ships twice, once crediting a player's own deviation from their team and once
+  adding a quarter share of the team term, because the choice between them is a choice.
+  The two orderings correlate at 0.998 and share the same top ten, so on this record the
+  question of player against team does not move the table. Aging publishes three curves
+  and no single peak: a naive fit on every observed season, a delta fit on paired
+  consecutive seasons, and the same pairs weighted by a fitted retention probability. The
+  peak sits between 20.4 and 25.4, the naive fit lands a year later than the two
+  within-player fits, and the retention correction moves the answer by a hundredth of a
+  year. Slaying peaks about two years before objective contribution at the point
+  estimate, with intervals that overlap.
 - **Player style.** Are roles a taxonomy or a continuum? With the composite rating
   projected out (style and quality are nearly orthogonal) and only metrics every season
   can reach, no partition beats a cloud with no clusters in it, in either era: over
   2017-2019 the best-separated k scores a silhouette of 0.286 where an unclustered
   Gaussian of the same shape scores 0.251 to 0.305. Bootstrap stability of 0.961 looks
   convincing until the same null reproduces itself just as well. So players are published
-  as positions on continuous axes rather than as archetype labels. The fit runs once per
+  as positions on continuous axes, not as archetype labels. The fit runs once per
   era, because the column sets do not overlap enough to share a basis, and the axes are
   never compared across that seam.
 - **Metric layer.** 104 derived metrics per player, season and mode, plus team
@@ -202,6 +215,6 @@ what you have.
   User-Agent. No HTML scraping. Derived data is shared under CC-BY-SA 3.0. Responses
   are snapshotted to `pipeline/snapshots/lpdb/`, which is also not committed.
 - Every row in the database carries the source it came from, so the per-source
-  licensing rules above are enforced by a column rather than inferred from the season.
+  licensing rules above are enforced by a column. They are not inferred from the season.
 - Code is AGPL-3.0 (see [LICENSE](LICENSE)).
 - The project will not build anything betting-related.
