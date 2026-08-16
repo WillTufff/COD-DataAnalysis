@@ -32,6 +32,7 @@ import {
   getPlayerRapm,
   getPlayerRatingSeasons,
   getPlayerCareer,
+  getPlayerCareerRank,
   getPlayerSkill,
   getPlayerSpans,
   getPlayerStints,
@@ -43,6 +44,7 @@ import {
   latestRatingRun,
   latestRun,
   latestCareerRun,
+  latestCareerRankRun,
   latestSkillRun,
   teamSlug,
   type MetricCatalog,
@@ -50,6 +52,8 @@ import {
   type PlayerRapm,
   type PlayerRatings,
   type PlayerCareerRow,
+  type PlayerCareerRankSummary,
+  type PlayerCareerRankSeason,
   type PlayerSkillSeason,
   type PlayerStyle,
   type PlayerStylePoint,
@@ -1109,7 +1113,7 @@ function RatingSection({ ratings }: { ratings: PlayerRatings }) {
             the same level, not a decline or a rise.
           </>
         )}{" "}
-        <a href="/methodology#player-rating">Methodology</a>.
+        <Link href="/methodology/player-rating">Methodology</Link>.
       </p>
     </section>
   );
@@ -1215,6 +1219,105 @@ function CareerTotalsSection({ rows }: { rows: PlayerCareerRow[] }) {
   );
 }
 
+/** A second, independent career axis: peak/best-three/total over the
+ *  gold-tier metric basket instead of over VALUE or SKILL. Disagrees with
+ *  `CareerTotalsSection` where the two measure different things — see
+ *  docs/methodology.md#career-rank. Net-of-teammates and opponent strength
+ *  are shown per season as context, never folded into the score itself. */
+function CareerRankSection({
+  summary,
+  seasons,
+}: {
+  summary: PlayerCareerRankSummary | null;
+  seasons: PlayerCareerRankSeason[];
+}) {
+  if (summary === null || seasons.length === 0) return null;
+  return (
+    <section className="mt-10">
+      <h2 className="lower-third">
+        Career rank
+        <span className="lt-note">the gold-tier metric basket, blended by season</span>
+      </h2>
+      <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
+        <p className="font-mono text-sm">
+          {summary.total.toFixed(1)}
+          {summary.totalSd !== null && (
+            <span className="text-ink-muted">
+              {" ± "}
+              {summary.totalSd.toFixed(1)}
+            </span>
+          )}
+          <span className="ml-2 text-xs text-ink-muted">
+            over {summary.nSeasons} season{summary.nSeasons === 1 ? "" : "s"}
+            {!summary.qualified && " · below the ranking floor"}
+          </span>
+        </p>
+        <p className="mt-1 text-xs text-ink-muted">
+          Peak {summary.peak.toFixed(1)}
+          {summary.peakSeasonYear !== null && ` (${summary.peakSeasonYear})`}
+          {summary.bestThree !== null && (
+            <>
+              {" · best three "}
+              {summary.bestThree.toFixed(1)}
+              {summary.bestThreeStartYear !== null &&
+                ` from ${summary.bestThreeStartYear}`}
+            </>
+          )}
+        </p>
+        <table className="mt-4 w-full min-w-[34rem] text-left text-xs">
+          <thead className="text-ink-muted">
+            <tr>
+              <th className="py-1 pr-4 font-normal">Season</th>
+              <th className="py-1 pr-4 font-normal">Score</th>
+              <th className="py-1 pr-4 font-normal">Net of teammates</th>
+              <th className="py-1 font-normal">Opponent strength</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono">
+            {seasons.map((s) => (
+              <tr key={s.seasonId} className="border-t border-hairline">
+                <td className="py-1 pr-4">
+                  {s.year} {s.league}
+                </td>
+                <td className="py-1 pr-4">
+                  {s.score.toFixed(1)}
+                  {s.sd !== null && (
+                    <span className="text-ink-muted">
+                      {" ± "}
+                      {s.sd.toFixed(1)}
+                    </span>
+                  )}
+                </td>
+                <td className="py-1 pr-4">
+                  {s.netOfTeammates === null ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    s.netOfTeammates.toFixed(2)
+                  )}
+                </td>
+                <td className="py-1">
+                  {s.opponentStrength === null ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    s.opponentStrength.toFixed(2)
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+          The score blends every gold-tier stat the player page shows,
+          weighted by how much each mode was played that season, plus award
+          credit. Its SD reflects how much that basket disagreed with itself,
+          not a measurement error on any one stat. Net of teammates and
+          opponent strength are context, not adjustments to the score.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 /** Where this player stood at the opening engagement of a Search and Destroy
  *  round, and what the league-wide entry cost gives back on their K/D.
  *
@@ -1298,7 +1401,7 @@ function RoleSection({
         )}{" "}
         The position is published without a role name: the style work found no
         archetype to name it with. See{" "}
-        <a href="/methodology#role">methodology</a>.
+        <Link href="/methodology/role">methodology</Link>.
       </p>
     </section>
   );
@@ -1314,6 +1417,7 @@ function CareerTab({
   rapm,
   skill,
   careerTotals,
+  careerRank,
   skillYears,
   lastYear,
   allModes,
@@ -1328,6 +1432,10 @@ function CareerTab({
   rapm: PlayerRapm | null;
   skill: PlayerSkillSeason[];
   careerTotals: PlayerCareerRow[];
+  careerRank: {
+    summary: PlayerCareerRankSummary | null;
+    seasons: PlayerCareerRankSeason[];
+  };
   skillYears: number[];
   lastYear: number | null;
   allModes: SeasonAdjusted[];
@@ -1353,6 +1461,8 @@ function CareerTab({
       </section>
 
       <CareerTotalsSection rows={careerTotals} />
+
+      <CareerRankSection summary={careerRank.summary} seasons={careerRank.seasons} />
 
       <SkillSection
         skill={skill}
@@ -1413,7 +1523,7 @@ function CareerTab({
             player-seasons, with the composite
             rating already projected out &mdash; this is how someone played at
             their level, not what level that was. See{" "}
-            <a href="/methodology#player-style">methodology</a>.
+            <Link href="/methodology/player-style">methodology</Link>.
           </p>
         </section>
       )}
@@ -1733,7 +1843,7 @@ function SeasonTab({ view }: { view: SeasonView }) {
           metric (hill time, S&amp;D opening plays, captures) as a cohort
           z-score; &ldquo;—&rdquo; means the archive lacks that stat or the
           player didn&rsquo;t qualify. Full definitions are in the{" "}
-          <Link href="/methodology#metrics" className="underline">
+          <Link href="/methodology/metrics" className="underline">
             metric glossary
           </Link>
           .
@@ -1771,6 +1881,7 @@ export default async function PlayerPage({
     ratingRun,
     skillRun,
     careerRun,
+    careerRankRun,
   ] = await Promise.all([
       latestRun("era_adjust"),
       latestRun("insights"),
@@ -1780,6 +1891,7 @@ export default async function PlayerPage({
       latestRatingRun(),
       latestSkillRun(),
       latestCareerRun(),
+      latestCareerRankRun(),
     ]);
   const [
     adjusted,
@@ -1798,6 +1910,7 @@ export default async function PlayerPage({
     skillSeasons,
     modeCatalog,
     careerTotals,
+    careerRank,
   ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
@@ -1822,6 +1935,9 @@ export default async function PlayerPage({
       careerRun
         ? getPlayerCareer(careerRun.id, player.id)
         : Promise.resolve([]),
+      careerRankRun
+        ? getPlayerCareerRank(careerRankRun.id, player.id)
+        : Promise.resolve({ summary: null, seasons: [] }),
     ]);
   const skillYears = skillSeasons.map((s) => s.year);
   const metricCards = buildMetricCards(metricValues, metricCatalog, modeCatalog);
@@ -1900,6 +2016,7 @@ export default async function PlayerPage({
                   rapm={rapm}
                   skill={skill}
                   careerTotals={careerTotals}
+                  careerRank={careerRank}
                   skillYears={skillYears}
                   lastYear={
                     allModes.length > 0

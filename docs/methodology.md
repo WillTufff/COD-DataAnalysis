@@ -3064,6 +3064,58 @@ count one estimate three times. A CWL contribution is stored as its own row and 
 a CDL total. The composite axis has no such constraint, and its single row spans 2017 to
 2026.
 
+### Career rank: a second all-time axis, over the metric basket instead of VALUE
+
+Career value sums a rating fitted against map outcome. Career rank sums a different
+quantity, a **breadth score**: the coverage-weighted mean percentile across every
+gold-tier stat a player's own page shows that season, weighted by each mode's share of
+that season's maps. The basket is exactly `buildMetricCards`'s gold-tier set, the same
+metrics a reader sees on the player page, minus the kill-feed categories (IW/WWII only)
+and the round-card keys. The per-map twin of any per-10 pair is dropped so a rate and
+its timed form never double count the same signal. A season needs at least two surviving
+stats to score at all, the same floor the player page itself uses to decide whether a
+card renders. Award status (First/Second Team, MVPs, Rookie of the Year) adds a fixed
+number of percentile points on top of the season score, capped at 100.
+
+**A career needs at least three qualified seasons for an overall row.** Below that
+floor, season scores still compute and no total, peak or best-three is published. Peak,
+best three consecutive and total are the same three columns career value publishes,
+computed over the breadth score instead.
+
+**CWL years count at full weight here, unlike the plus-minus axis.** The plus-minus
+stores one pooled coefficient per player per CWL era because that axis's season unit is
+a fitted coefficient shared across three years, and summing all three would count one
+estimate three times. The breadth score is computed fresh per year from that year's own
+box scores, so there is no shared estimate to guard against. 2017, 2018 and 2019 each
+count as their own season.
+
+**Two team-strength numbers ride beside every season score, never inside it.**
+Net-of-teammates is a player's own season VALUE minus the mean VALUE of the modal-team
+roster around them: the team a player played the most maps for that season, the same
+join `career.py` uses for its own team-share credit rule. That join was chosen over the
+event-window `roster_stints` table because a mid-season roster is a measurement, not a
+stated availability window. Opponent strength is the mean VALUE of the teams actually
+faced that season, weighted by maps. Neither number corrects the score. The
+[opponent-adjustment phase](#opponent-adjustment-what-the-box-score-owed-to-who-was-across-from-it)
+found that correction a null at the season grain, so both numbers are context, published
+the same way a total's standard deviation is published without being folded into the
+arithmetic.
+
+The opponent-strength proxy needs its own honesty check. The project has no independent
+team rating, so a team's own season strength is approximated as the mean VALUE of its
+modal-team players. That proxy was checked against an outside signal before this
+shipped: season map win rate, taken from `games.winner_team_id`. It correlates with the
+proxy at Pearson r = 0.77 and Spearman r = 0.81 over 200 team-seasons with at least 10
+maps, strong enough to trust as a real signal and not a coincidence of the join.
+
+**Every total carries a standard deviation**, the same convention career value follows.
+It comes from how much the gold-tier basket disagreed with itself that season: not a
+measurement error on any one stat, but the spread across the stats in the basket. A
+season where the metrics mostly agree gets a tight SD; a season where they scatter gets
+a wide one. A career total's SD compounds the season SDs as independent variances, the
+same simplification career value's own total_sd makes. That understates the true width,
+because the underlying metric fits share a cohort across years.
+
 ### Aging: three curves, because one curve would be wrong
 
 A curve fitted on the player-seasons we can see is biased upward at the old end. Players

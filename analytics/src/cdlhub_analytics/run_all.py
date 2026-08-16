@@ -33,6 +33,7 @@ from . import (
     style,
     validation,
 )
+from .career_rank import engine as career_rank
 from .db import connect
 from .metricdiff import run as metricdiff
 from .ratings import (
@@ -1322,6 +1323,58 @@ def main(argv: list[str] | None = None) -> int:
                 f"{rules['n_players']} players, sharing {rules['top_ten_overlap']} of the top ten"
             )
 
+        # A second, independent career axis: peak/best-three/total over the
+        # gold-tier metric basket (plus award credit) instead of over VALUE or
+        # SKILL. Full archive, not the frozen evaluation population — the
+        # frozen set exists to keep the formula honest during development
+        # (see ai/career-rank-preregistration.md), not to gate what the site
+        # publishes.
+        progress.stage("career_rank")
+        cr_rows, cr_payload, cr_run = career_rank.write(conn)
+        if cr_rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO player_season_rank (run_id, player_id, season_id, score, "
+                    "sd, net_of_teammates, opponent_strength) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            cr_run,
+                            row.player_id,
+                            season_id,
+                            score,
+                            row.season_sd.get(season_id),
+                            row.net_of_teammates.get(season_id),
+                            row.opponent_strength.get(season_id),
+                        )
+                        for row in cr_rows
+                        for season_id, score in row.seasons.items()
+                    ],
+                )
+                cur.executemany(
+                    "INSERT INTO player_career_rank (run_id, player_id, qualified, n_seasons, "
+                    "total, total_sd, peak, peak_season_id, best_three, "
+                    "best_three_start_season_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            cr_run,
+                            row.player_id,
+                            row.career.qualified,
+                            row.career.n_seasons,
+                            row.career.total,
+                            row.career.total_sd,
+                            row.career.peak,
+                            row.career.peak_season_id,
+                            row.career.best_three,
+                            row.career.best_three_start_season_id,
+                        )
+                        for row in cr_rows
+                    ],
+                )
+        print(
+            f"career_rank run {cr_run}: {cr_payload['n_players_scored']} players scored, "
+            f"{cr_payload['career']['n_qualified']} qualified"
+        )
+
         # The same seasons on an age axis, and the selection problem that makes
         # any single curve of them wrong. Three fits, published together,
         # because the disagreement between them is the measurement.
@@ -1538,6 +1591,7 @@ def main(argv: list[str] | None = None) -> int:
                 seriesdyn.MODEL: [sd_run],
                 style.MODEL: [style_run],
                 career.MODEL: [cv_run],
+                career_rank.MODEL: [cr_run],
                 aging.MODEL: [ag_run],
                 "insights": [ins_run],
                 errorcontrol.MODEL: [ec_run],

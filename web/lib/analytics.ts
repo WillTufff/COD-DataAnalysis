@@ -3557,6 +3557,188 @@ export async function getPlayerCareer(
   }));
 }
 
+// ---------- Career rank ----------
+//
+// A second, independent all-time axis: peak/best-three/total over the
+// gold-tier metric basket (plus award credit) instead of over VALUE or
+// SKILL, published by `career_rank.engine`. See
+// docs/methodology.md#career-rank for what it is measuring and why it
+// disagrees with `player_career` where it does.
+
+export function latestCareerRankRun(): Promise<ModelRun | null> {
+  return latestRun("career_rank");
+}
+
+// The whole engine run, for the methodology page — the aggregate counts and
+// the top-ten-by-* lists it publishes, not a per-player row.
+export type CareerRankArtifact = {
+  n_players_scored: number;
+  basket_size: number;
+  restricted: boolean;
+  career: {
+    min_seasons_floor: number;
+    n_players: number;
+    n_qualified: number;
+    n_below_floor: number;
+    top_ten_by_total: { player_id: number; total: number; total_sd: number | null }[];
+  };
+};
+
+export function getCareerRankArtifact(
+  runId: number,
+): Promise<CareerRankArtifact | null> {
+  return artifactPayload<CareerRankArtifact>(runId, "career_rank");
+}
+
+export type CareerRankLeaderboardRow = {
+  playerId: number;
+  handle: string;
+  nSeasons: number;
+  total: number;
+  totalSd: number | null;
+  peak: number;
+  peakSeasonYear: number | null;
+  bestThree: number | null;
+  bestThreeStartYear: number | null;
+};
+
+export async function getCareerRankLeaderboard(
+  runId: number,
+  limit: number,
+): Promise<CareerRankLeaderboardRow[]> {
+  const rows = await db.execute(sql`
+    SELECT c.player_id, p.handle, c.n_seasons, c.total, c.total_sd, c.peak,
+           ps.year AS peak_year, c.best_three, bs.year AS best_three_year
+    FROM player_career_rank c
+    JOIN players p ON p.id = c.player_id
+    LEFT JOIN seasons ps ON ps.id = c.peak_season_id
+    LEFT JOIN seasons bs ON bs.id = c.best_three_start_season_id
+    WHERE c.run_id = ${runId} AND c.qualified
+    ORDER BY c.total DESC
+    LIMIT ${limit}
+  `);
+  return (
+    rows as unknown as {
+      player_id: number;
+      handle: string;
+      n_seasons: number;
+      total: number;
+      total_sd: number | null;
+      peak: number;
+      peak_year: number | null;
+      best_three: number | null;
+      best_three_year: number | null;
+    }[]
+  ).map((r) => ({
+    playerId: r.player_id,
+    handle: r.handle,
+    nSeasons: Number(r.n_seasons),
+    total: Number(r.total),
+    totalSd: r.total_sd === null ? null : Number(r.total_sd),
+    peak: Number(r.peak),
+    peakSeasonYear: r.peak_year === null ? null : Number(r.peak_year),
+    bestThree: r.best_three === null ? null : Number(r.best_three),
+    bestThreeStartYear:
+      r.best_three_year === null ? null : Number(r.best_three_year),
+  }));
+}
+
+export type PlayerCareerRankSummary = {
+  qualified: boolean;
+  nSeasons: number;
+  total: number;
+  totalSd: number | null;
+  peak: number;
+  peakSeasonYear: number | null;
+  bestThree: number | null;
+  bestThreeStartYear: number | null;
+};
+
+export type PlayerCareerRankSeason = {
+  seasonId: number;
+  year: number;
+  league: string;
+  score: number;
+  sd: number | null;
+  netOfTeammates: number | null;
+  opponentStrength: number | null;
+};
+
+export async function getPlayerCareerRank(
+  runId: number,
+  playerId: number,
+): Promise<{
+  summary: PlayerCareerRankSummary | null;
+  seasons: PlayerCareerRankSeason[];
+}> {
+  const [summaryRows, seasonRows] = await Promise.all([
+    db.execute(sql`
+      SELECT c.qualified, c.n_seasons, c.total, c.total_sd, c.peak,
+             ps.year AS peak_year, c.best_three, bs.year AS best_three_year
+      FROM player_career_rank c
+      LEFT JOIN seasons ps ON ps.id = c.peak_season_id
+      LEFT JOIN seasons bs ON bs.id = c.best_three_start_season_id
+      WHERE c.run_id = ${runId} AND c.player_id = ${playerId}
+    `),
+    db.execute(sql`
+      SELECT r.season_id, s.year, s.league, r.score, r.sd,
+             r.net_of_teammates, r.opponent_strength
+      FROM player_season_rank r
+      JOIN seasons s ON s.id = r.season_id
+      WHERE r.run_id = ${runId} AND r.player_id = ${playerId}
+      ORDER BY s.year
+    `),
+  ]);
+  const s = (
+    summaryRows as unknown as {
+      qualified: boolean;
+      n_seasons: number;
+      total: number;
+      total_sd: number | null;
+      peak: number;
+      peak_year: number | null;
+      best_three: number | null;
+      best_three_year: number | null;
+    }[]
+  )[0];
+  return {
+    summary: s
+      ? {
+          qualified: s.qualified,
+          nSeasons: Number(s.n_seasons),
+          total: Number(s.total),
+          totalSd: s.total_sd === null ? null : Number(s.total_sd),
+          peak: Number(s.peak),
+          peakSeasonYear: s.peak_year === null ? null : Number(s.peak_year),
+          bestThree: s.best_three === null ? null : Number(s.best_three),
+          bestThreeStartYear:
+            s.best_three_year === null ? null : Number(s.best_three_year),
+        }
+      : null,
+    seasons: (
+      seasonRows as unknown as {
+        season_id: number;
+        year: number;
+        league: string;
+        score: number;
+        sd: number | null;
+        net_of_teammates: number | null;
+        opponent_strength: number | null;
+      }[]
+    ).map((r) => ({
+      seasonId: r.season_id,
+      year: Number(r.year),
+      league: r.league,
+      score: Number(r.score),
+      sd: r.sd === null ? null : Number(r.sd),
+      netOfTeammates:
+        r.net_of_teammates === null ? null : Number(r.net_of_teammates),
+      opponentStrength:
+        r.opponent_strength === null ? null : Number(r.opponent_strength),
+    })),
+  };
+}
+
 // ---------- Series dynamics ----------
 
 // Every observed rate carries two benchmarks: `rating` is independence at the

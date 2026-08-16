@@ -7,6 +7,7 @@ import { IntervalBar, halfWidth, overlaps } from "@/components/charts/RatingInte
 import {
   type PlayerIndexSort,
   formatLeagueSpans,
+  getCareerRankLeaderboard,
   getEvaluationPrimary,
   getLeagueSpans,
   getRatingComparison,
@@ -14,6 +15,7 @@ import {
   getSkillLeaderboard,
   getSkillPrior,
   getSkillSeasons,
+  latestCareerRankRun,
   latestEvaluationRun,
   latestRatingRun,
   latestRun,
@@ -93,11 +95,16 @@ export default async function PlayersPage({
   const initialSort: SortState = { id: sort, dir };
 
   // The composite rating board, ranking whole seasons rather than careers.
-  const [ratingBoard, comparison, leagueSpans] = await Promise.all([
-    getRatingLeaderboard(ratingRun.id, eraRun.id),
-    getRatingComparison(ratingRun.id),
-    getLeagueSpans(),
-  ]);
+  const [ratingBoard, comparison, leagueSpans, careerRankRun] =
+    await Promise.all([
+      getRatingLeaderboard(ratingRun.id, eraRun.id),
+      getRatingComparison(ratingRun.id),
+      getLeagueSpans(),
+      latestCareerRankRun(),
+    ]);
+  const careerRankBoard = careerRankRun
+    ? await getCareerRankLeaderboard(careerRankRun.id, 25)
+    : [];
   const brierGain = comparison
     ? 1 -
       comparison.overall[comparison.published].brier /
@@ -351,7 +358,7 @@ export default async function PlayersPage({
             {skillSeasons[skillSeasons.length - 1]?.year} only; earlier seasons
             have no season before them to train the prior on, so those years
             lead with the season rating below.{" "}
-            <Link href="/methodology#skill" className="underline">
+            <Link href="/methodology/skill" className="underline">
               methodology
             </Link>
             .
@@ -468,7 +475,95 @@ export default async function PlayersPage({
               </>
             )}
             {brierGain === null && <> The full spec is on </>}
-            <Link href="/methodology#player-rating" className="underline">
+            <Link href="/methodology/player-rating" className="underline">
+              methodology
+            </Link>
+            .
+          </p>
+        </section>
+      )}
+
+      {careerRankBoard.length > 0 && (
+        <section
+          data-surface="career-rank-board"
+          className="mt-16 border-t border-hairline pt-8"
+        >
+          <h2 className="lower-third">
+            All-time
+            <span className="lt-note">
+              career rank, the gold-tier metric basket blended by season
+            </span>
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
+            A different question again: not one season&rsquo;s VALUE, but
+            every gold-tier stat a player&rsquo;s page shows, summed across a
+            career of at least three qualified seasons.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-3 font-normal">#</th>
+                  <th className="py-2 pr-4 font-normal">Player</th>
+                  <th className="py-2 pr-4 text-right font-normal">Seasons</th>
+                  <th className="py-2 pr-4 text-right font-normal">
+                    Total ± sd
+                  </th>
+                  <th className="py-2 pr-4 font-normal">Peak</th>
+                  <th className="py-2 font-normal">Best three</th>
+                </tr>
+              </thead>
+              <tbody>
+                {careerRankBoard.map((r, i) => (
+                  <tr key={r.playerId} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
+                      {i + 1}
+                    </td>
+                    <td className="py-1.5 pr-4 font-medium">
+                      <Link
+                        href={`/players/${playerSlug(r.handle)}`}
+                        className="hover:text-accent hover:underline"
+                      >
+                        {r.handle}
+                      </Link>
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.nSeasons}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                      {r.total.toFixed(1)}
+                      {r.totalSd !== null && (
+                        <span className="text-ink-muted"> ±{r.totalSd.toFixed(1)}</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-4 text-ink-secondary">
+                      {r.peak.toFixed(1)}
+                      {r.peakSeasonYear !== null && ` (${r.peakSeasonYear})`}
+                    </td>
+                    <td className="py-1.5 text-ink-secondary">
+                      {r.bestThree === null ? (
+                        "—"
+                      ) : (
+                        <>
+                          {r.bestThree.toFixed(1)}
+                          {r.bestThreeStartYear !== null &&
+                            ` from ${r.bestThreeStartYear}`}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+            The score blends every gold-tier stat on a player&rsquo;s page,
+            weighted by each mode&rsquo;s share of that season&rsquo;s maps,
+            plus award credit. Its ±sd reflects how much that basket
+            disagreed with itself that season, not a measurement error on any
+            one stat. A CWL year counts at full weight, same as a CDL season.
+            The full spec is on{" "}
+            <Link href="/methodology/career-rank" className="underline">
               methodology
             </Link>
             .
