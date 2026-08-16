@@ -188,12 +188,12 @@ class Columns:
 def cell_of(game: AdmittedMap, seasons: dict[int, Season], how: dict[str, str]) -> Cell:
     """Which time cell a map's player columns belong to."""
     season = seasons[game.season_id]
-    resolution = how.get(season.league, SEASON)
+    resolution = how.get(season.era_key, SEASON)
     if resolution == SEASON:
         return (SEASON, game.season_id)
     if resolution == WHOLE:
         return (WHOLE, WHOLE)
-    return (ERA, season.league)
+    return (ERA, season.era_key)
 
 
 def _cell_start(cell: Cell, seasons: dict[int, Season]) -> tuple[int, str]:
@@ -207,7 +207,7 @@ def _cell_start(cell: Cell, seasons: dict[int, Season]) -> tuple[int, str]:
         return (seasons[int(key)].year, "")
     if kind == WHOLE:
         return (0, WHOLE)
-    years = [s.year for s in seasons.values() if s.league == key]
+    years = [s.year for s in seasons.values() if s.era_key == key]
     return (min(years) if years else 0, str(key))
 
 
@@ -989,7 +989,7 @@ def against_published(
         return {"available": False, "reason": "no published career fit to compare against"}
     whole = dict.fromkeys(("CDL", "CWL"), WHOLE)
     for season in seasons.values():
-        whole[season.league] = WHOLE
+        whole[season.era_key] = WHOLE
     cell: Cell = (WHOLE, WHOLE)
     response = responses(games)[MARGIN]
     arms = {
@@ -1121,7 +1121,15 @@ def coefficients(
     filtered: dict[tuple[int, Cell], tuple[float, float, float]],
     min_maps: int = MIN_MAPS_PUBLISH,
 ) -> list[Coefficient]:
-    """Both families, expanded to one row per (scope, player, season)."""
+    """Both families, expanded to one row per (scope, player, season).
+
+    A cell whose standard error is not positive is dropped. That happens at the
+    front of the one-sided family, where the first solve sees fewer maps than it
+    has columns, fits them exactly, and leaves a residual variance of zero. A
+    zero there is not an interval of zero width, it is the absence of one, and
+    publishing it would give the era's first cell the tightest bound on the
+    board. The count is published as `unidentified_cells`.
+    """
     maps = cell_maps(games, seasons, how)
     concentration = cell_concentration(games, seasons, how)
     covered = cell_seasons(games, seasons, how)
@@ -1142,6 +1150,8 @@ def coefficients(
         if one_sided is not None:
             rows.append((FILTERED, *one_sided))
         for scope, coef, se, share in rows:
+            if not (np.isfinite(se) and se > 0.0):
+                continue
             for season_id in covered[cell]:
                 out.append(
                     Coefficient(
@@ -1157,6 +1167,18 @@ def coefficients(
                     )
                 )
     return out
+
+
+def unidentified_cells(
+    smoothed: Fit, filtered: dict[tuple[int, Cell], tuple[float, float, float]]
+) -> int:
+    """How many (family, cell) estimates carry no standard error to publish."""
+
+    def bad(se: float) -> bool:
+        return not (np.isfinite(se) and se > 0.0)
+
+    count = sum(1 for col in smoothed.columns.players.values() if bad(float(smoothed.se[col])))
+    return count + sum(1 for (_coef, se, _share) in filtered.values() if bad(se))
 
 
 def team_effects(filtered: FilteredFit) -> list[TeamEffect]:
@@ -1253,6 +1275,7 @@ def artifact(
         )
 
     stored = coefficients(games, seasons, how, smoothed, filtered.players)
+    unidentified = unidentified_cells(smoothed, filtered.players)
     shared = [
         (float(smoothed.beta[col]), filtered.players[key][0])
         for key, col in smoothed.columns.players.items()
@@ -1332,6 +1355,11 @@ def artifact(
         "publication": {
             "min_maps": MIN_MAPS_PUBLISH,
             "rows": len(stored),
+            "unidentified_cells": unidentified,
+            "unidentified_rule": (
+                "a cell whose standard error is not positive is dropped: the solve had "
+                "fewer maps than columns and left no residual variance to report"
+            ),
             "player_cells_published": len({(c.player_id, c.season_id) for c in stored})
             if stored
             else 0,

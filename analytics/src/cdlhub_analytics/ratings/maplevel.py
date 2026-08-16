@@ -89,6 +89,7 @@ ARMS = ("global", "mode", "blend")
 # all — the condition `checks.sh` fails on, since a new title arriving without a
 # rotation is exactly what should stop a release.
 THIRD_MAP: dict[str, str] = {
+    "BO2": "capture-the-flag",
     "IW": "uplink",
     "WWII": "capture-the-flag",
     "BO4": "control",
@@ -104,6 +105,32 @@ ROTATION: dict[str, tuple[str, ...]] = {
     title: ("hardpoint", "search-and-destroy", third, "hardpoint", "search-and-destroy")
     for title, third in THIRD_MAP.items()
 }
+
+# Two pre-2017 titles do not have that shape and need writing out in full.
+# Ghosts opened on Domination rather than Hardpoint, and Black Ops 3 played
+# Capture the Flag fourth rather than repeating Hardpoint. Measured over the
+# wiki load: Ghosts holds its five slots at 0.996, 0.992, 0.996, 0.987 and
+# 0.983; Black Ops 3 at 0.990, 0.944, 0.955, 0.994 and 0.957.
+WRITTEN_OUT: dict[str, tuple[str, ...]] = {
+    "GHO": ("domination", "search-and-destroy", "blitz", "domination", "search-and-destroy"),
+    "BO3": (
+        "hardpoint",
+        "search-and-destroy",
+        "uplink",
+        "capture-the-flag",
+        "search-and-destroy",
+    ),
+}
+ROTATION.update(WRITTEN_OUT)
+
+# Advanced Warfare has no rotation to declare. Its third map splits Uplink 0.585
+# against Capture the Flag 0.340 and its fourth splits three ways, so no order
+# was a rule both teams knew. A title named here takes no best-of-five rollup
+# and is counted as one that has none, which is the same path a title with no
+# entry at all takes. The difference is that this is a measurement written down
+# rather than an omission.
+NO_FIXED_ROTATION = frozenset({"AW"})
+
 SERIES_WINS_NEEDED = 3
 
 # A (team, mode) cell enters the specialization table once it has this many maps.
@@ -252,7 +279,8 @@ class Walk:
     series_preds: dict[str, dict[int, Prediction]]
     state: State
     n_series_rolled: int
-    n_series_no_rotation: int
+    n_series_no_rotation: int  # the title declares none, which is a defect
+    n_series_no_fixed_rotation: int  # the title is measured to have none
     n_series_other_format: int  # not a race to three, so no best-of-five rollup
 
 
@@ -307,6 +335,7 @@ def walk_forward(
     at = 0
     rolled = 0
     no_rotation = 0
+    no_fixed_rotation = 0
     other_format = 0
 
     for block in _series_blocks(maps):
@@ -326,7 +355,9 @@ def walk_forward(
         rotation = ROTATION.get(head.title)
         wins1 = sum(1 for m in block if m.team1_won)
         wins2 = len(block) - wins1
-        if rotation is None:
+        if rotation is None and head.title in NO_FIXED_ROTATION:
+            no_fixed_rotation += 1
+        elif rotation is None:
             no_rotation += 1
         elif max(wins1, wins2) != SERIES_WINS_NEEDED:
             other_format += 1
@@ -358,6 +389,7 @@ def walk_forward(
         state=state,
         n_series_rolled=rolled,
         n_series_no_rotation=no_rotation,
+        n_series_no_fixed_rotation=no_fixed_rotation,
         n_series_other_format=other_format,
     )
 
@@ -638,6 +670,7 @@ def build_artifacts(
         "series_rollup": {
             "n_series": walk.n_series_rolled,
             "n_series_no_rotation": walk.n_series_no_rotation,
+            "n_series_no_fixed_rotation": walk.n_series_no_fixed_rotation,
             "n_series_other_format": walk.n_series_other_format,
             "wins_needed": SERIES_WINS_NEEDED,
             "rotation": {t: list(r) for t, r in ROTATION.items()},

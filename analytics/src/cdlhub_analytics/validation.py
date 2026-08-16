@@ -785,8 +785,11 @@ def load_swaps(conn: psycopg.Connection[tuple[object, ...]]) -> list[Swap]:
                     ) AS rn
             FROM played
         ), lineup AS (
+          -- A full lineup only. An event where the record holds three of the
+          -- four players is not a three-man lineup, and comparing it against a
+          -- four-man one reports the missing transcription as a roster move.
           SELECT event_id, team_id, array_agg(player_id ORDER BY player_id) AS players
-            FROM ranked WHERE rn <= %s GROUP BY 1, 2
+            FROM ranked WHERE rn <= %s GROUP BY 1, 2 HAVING count(*) = %s
         ), results AS (
           SELECT r.event_id, t.team_id,
                  count(*) AS maps,
@@ -814,11 +817,15 @@ def load_swaps(conn: psycopg.Connection[tuple[object, ...]]) -> list[Swap]:
                a.wins::float / a.maps, b.wins::float / b.maps, a.maps, b.maps
           FROM ordered a
           JOIN ordered b ON b.team_id = a.team_id AND b.rn = a.rn + 1
+         -- Both directions, because one is not enough: a lineup that lost one
+         -- player and gained two is not a swap, and the arrival subquery above
+         -- returns two rows for it and fails.
          WHERE cardinality(ARRAY(SELECT unnest(a.players) EXCEPT SELECT unnest(b.players))) = 1
+           AND cardinality(ARRAY(SELECT unnest(b.players) EXCEPT SELECT unnest(a.players))) = 1
            AND a.maps > 0 AND b.maps > 0
          ORDER BY b.year, b.team_id
         """,
-        (LINEUP_SIZE,),
+        (LINEUP_SIZE, LINEUP_SIZE),
     ).fetchall()
     return [
         Swap(

@@ -12,12 +12,13 @@ Everything about how the numbers are produced is written up in
 
 The full loop runs end to end on real data, locally:
 
-- **Data.** Three sources, 2017 through 2026: 98,384 player-map rows across 3,027
-  decided series and 99 events. The Activision `cwl-data` archive supplies 44,552 of
-  those rows and is committed to this repository (2017 Champs on IW, the 2018 WWII
-  season, the 2019 BO4 season); the CDL seasons 2020-2026 come from the Cito API,
-  which carries Breaking Point match data, and are held locally. They are not
-  redistributed. Liquipedia's LPDB supplies the structure around them: 99 enriched
+- **Data.** Four sources, 2013 through 2026: 138,926 player-map rows across 4,369
+  decided series and 176 events. The Call of Duty Esports Wiki supplies 40,542 of those
+  rows for 2013-2016, pulled through its Cargo API and held locally. The Activision
+  `cwl-data` archive supplies 44,552 and is committed to this repository (2017 Champs on
+  IW, the 2018 WWII season, the 2019 BO4 season); the CDL seasons 2020-2026 come from
+  the Cito API, which carries Breaking Point match data, and are held locally. They are
+  not redistributed. Liquipedia's LPDB supplies the structure around them: 99 enriched
   events, 1,068 placements with prize money, 3,486 roster stints, 4,898 transfers and
   player bios.
 - **Models.** Era adjustment (cohort z-scores and percentiles per season and mode,
@@ -25,18 +26,18 @@ The full loop runs end to end on real data, locally:
   what actually wins maps and published as the posterior of a two-level model, so its
   interval comes from the model itself, not a bootstrap of its point estimate, and a
   win-probability model whose result was a published null.
-  Walk-forward backtests over 3,027 decided series put Elo at 0.2218 Brier / 64.4%
-  accuracy and Glicko-2 at 0.2272 / 63.6%. Those gaps are paired and carry intervals:
-  Elo's edge over Glicko-2 (−0.0054, 95% CI −0.0086 to −0.0026) separates, the
-  win-probability model's edge over Glicko-2 does not, and the null it publishes comes
-  with a power statement saying what size of effect the archive could have found. Every model write is versioned through `model_runs` and replaced on rerun;
+  Walk-forward backtests over 4,369 decided series put Elo at 0.2194 Brier / 65.2%
+  accuracy and Glicko-2 at 0.2237 / 64.4%. Those gaps are paired and carry intervals:
+  Elo's edge over Glicko-2 (−0.0043, 95% CI −0.0069 to −0.0017) separates, Elo and the
+  win-probability model no longer separate from each other, and every null published here
+  comes with a power statement saying what size of effect the archive could have found. Every model write is versioned through `model_runs` and replaced on rerun;
   superseded runs of the same model are pruned so only what a run published survives.
 - **Series dynamics.** What a 1-0 lead is worth, measured against an exact enumeration
-  of a race to three with no memory in it. The map-1 winner takes 75.9% of 1,272
+  of a race to three with no memory in it. The map-1 winner takes 74.5% of 3,833
   best-of-fives, which against ratings alone looks like momentum: too many sweeps, too
   few deciders. Modeling the sequence with a per-series quality offset the ratings did
-  not have puts the carryover at −0.8 points of map win probability (95% CI −5.5 to
-  +3.9), against +10.9 from the same data fitted the ordinary way.
+  not have puts the carryover at +1.1 points of map win probability (95% CI −1.6 to
+  +3.8), against +9.6 from the same data fitted the ordinary way.
 - **Rounds.** The first model built on the kill feed: given the survivor count in a Search
   and Destroy round right now, what is each side worth? Sixteen non-terminal states from
   ~104,000 observations, walk-forward by event. Round odds track the *ratio* of survivors
@@ -108,7 +109,7 @@ The full loop runs end to end on real data, locally:
   board, eight of the nineteen chasing seasons reach the leader's interval, and the order
   between them is not a claim the model can make.
 
-The site covers 2017 to 2026.
+The site covers 2013 to 2026.
 
 ## Layout
 
@@ -225,6 +226,16 @@ what you have.
   analysis — ratings, era-adjusted metrics, model outputs — is published. Requests are
   paced under the tier's limits, every response is snapshotted to disk, and a match is
   never fetched twice.
+- 2013-2016 box scores, placements, event rosters and awards come from the
+  [Call of Duty Esports Wiki](https://cod-esports.fandom.com) (CC-BY-SA 3.0) through its
+  Cargo API, pulled 2026-08-16 at one request per 20 seconds with an identifying
+  User-Agent. Derived data is shared under CC-BY-SA 3.0. These are community
+  transcriptions of broadcast scoreboards, so they rank below the two publisher-side
+  sources and never overwrite a row either of them holds. The wiki also covers
+  2017-2026, and that half is used only to measure the source against rows already
+  held: 83,418 player-lines reconcile at a 1.57% disagreement rate on kills and deaths,
+  with 2017 and 2019 agreeing exactly. Responses are snapshotted to
+  `pipeline/snapshots/codwiki/`, which is not committed.
 - Tournaments, placements, prize money, rosters, transfers and player bios come from
   [Liquipedia](https://liquipedia.net/callofduty) (CC-BY-SA 3.0) through the LPDB API,
   within the published rate limits (1 request / 5 s) and with an identifying

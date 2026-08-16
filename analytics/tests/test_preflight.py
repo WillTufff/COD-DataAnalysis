@@ -8,9 +8,13 @@ and a league where they swap identifies exactly as many as there are lineups.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
+import pytest
 
 from cdlhub_analytics.ratings import graphs, preflight
 from cdlhub_analytics.ratings.rapm import AdmittedMap
@@ -206,3 +210,104 @@ def test_the_verdict_answers_per_era_rather_than_once() -> None:
     # that rotates identifies more, and neither number is the other's.
     assert np.isclose(float(leagues["CWL"]["rank_share"]), 1 / 8)
     assert float(leagues["CDL"]["rank_share"]) > float(leagues["CWL"]["rank_share"])
+
+
+def _rotating(first_game: int, season: int, team: int, base: int) -> list[AdmittedMap]:
+    """One season with enough lineup churn to identify most of its columns."""
+    lineups = [
+        ((base, base + 1, base + 2, base + 3), (base + 4, base + 5, base + 6, base + 7)),
+        ((base, base + 1, base + 2, base + 8), (base + 4, base + 5, base + 6, base + 7)),
+        ((base, base + 1, base + 2, base + 3), (base + 4, base + 5, base + 6, base + 9)),
+        ((base, base + 1, base + 2, base + 8), (base + 4, base + 5, base + 6, base + 9)),
+    ]
+    return [
+        make_map(first_game + i, h, a, season=season, home_team=team, away_team=team + 1)
+        for i, (h, a) in enumerate(lineups * 15)
+    ]
+
+
+def test_an_eras_verdict_does_not_move_when_another_era_is_loaded() -> None:
+    """The property route 1 restores: an era answers for itself.
+
+    The stop rule turns on `rank_share`, and while the eras were collected by
+    league brand a season of a different archive could join one and carry its
+    share over the threshold. That is what the 2013-2016 load did to the CWL
+    era: 2016 is branded Call of Duty World League, comes from the wiki, and
+    lifted the CWL share from 0.43 to 0.52. An era is one archive now, and this
+    test adds a whole second era's maps and requires the first era's verdict to
+    be the one it gave alone.
+    """
+    frozen = fixed_lineups()
+    alone = preflight.Season(1, 2018, "CWL", "cwl_archive", "CWL")
+    verdict_alone = preflight.verdict(preflight.measure_admitted(frozen, {1: alone}), _curve(0.05))
+    assert verdict_alone["by_era"][0]["stops"] is True
+
+    # A second archive, and a season of it branded with the first archive's
+    # league — the exact shape that moved the CWL verdict.
+    seasons = {
+        1: alone,
+        2: preflight.Season(2, 2016, "CWL", "codwiki", "MLG"),
+        3: preflight.Season(3, 2015, "MLG", "codwiki", "MLG"),
+    }
+    together = preflight.verdict(
+        preflight.measure_admitted(
+            [*frozen, *_rotating(2000, 2, 300, 20), *_rotating(3000, 3, 500, 40)], seasons
+        ),
+        _curve(0.05),
+    )
+    by_era = {era["league"]: era for era in together["by_era"]}
+    assert by_era["CWL"] == verdict_alone["by_era"][0]
+    # And the other era is present, well identified, and keeps its own answer.
+    assert by_era["MLG"]["stops"] is False
+    assert by_era["MLG"]["years"] == [2015, 2016]
+
+
+def test_an_eras_rank_equals_the_sum_of_its_season_blocks() -> None:
+    """The era design is block diagonal by season, so the two agree exactly."""
+    seasons = {
+        1: preflight.Season(1, 2018, "CWL", "cwl_archive", "CWL"),
+        2: preflight.Season(2, 2019, "CWL", "cwl_archive", "CWL"),
+    }
+    games = [*_rotating(100, 1, 100, 1), *_rotating(200, 2, 300, 20)]
+    measured = preflight.measure_admitted(games, seasons)
+    blocks = measured.eras()["CWL"]
+    assert measured.era_spectra["CWL"].rank == sum(s.spectrum.rank for s in blocks)
+    assert measured.era_spectra["CWL"].player_columns == sum(
+        s.spectrum.player_columns for s in blocks
+    )
+
+
+# ------------------------------------------- the era map against the archive
+
+
+@pytest.fixture
+def archive_conn() -> Iterator[Any]:
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("DATABASE_URL", "postgres://cdlhub:cdlhub@localhost:54329/cdlhub")
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=2)
+    except Exception:  # noqa: BLE001 - any connection failure means no DB here
+        pytest.skip("no database reachable")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def test_no_era_in_the_archive_spans_two_sources(archive_conn: Any) -> None:
+    """Every era is one archive, so loading an archive cannot move another era.
+
+    The league brand does not partition the record: 2016 and 2018 are both Call
+    of Duty World League and come from different sources. An era built on the
+    brand therefore changes membership when a source is loaded, and its
+    identification verdict changes with it.
+    """
+    seasons = preflight.load_seasons(archive_conn)
+    with_maps = [s for s in seasons.values() if s.archive]
+    if not with_maps:
+        pytest.skip("no box scores loaded")
+    per_era: dict[str, set[str]] = {}
+    for season in with_maps:
+        per_era.setdefault(season.era_key, set()).add(season.archive)
+    assert all(len(sources) == 1 for sources in per_era.values()), per_era
+    assert len(per_era) == len({s.archive for s in with_maps})

@@ -25,7 +25,15 @@ import psycopg
 TITLE_IW = "IW"
 TITLE_WWII = "WWII"
 TITLE_BO4 = "BO4"
+# Chronological, and it is a gate as much as an order: `titles_tracking` reads
+# only titles named here, so a title the archive gains and this tuple does not
+# publishes no metric at all and does so silently. The four pre-2017 titles sat
+# in the database for a whole run before this line caught up with them.
 TITLE_ORDER = (
+    "BO2",
+    "GHO",
+    "AW",
+    "BO3",
     TITLE_IW,
     TITLE_WWII,
     TITLE_BO4,
@@ -39,6 +47,19 @@ TITLE_ORDER = (
 )
 
 MIN_NONZERO_ROWS = 20
+
+# The first season whose rating is published. Earlier seasons are loaded, fitted
+# and shown as maps on a player's page; what waits is the score that would rank
+# one of them against a modern season, because the rule that makes an
+# open-bracket field comparable to a closed league is not built yet.
+#
+# It lives here, next to the title vocabulary, because two very different places
+# need the same answer: the career-rank engine, which decides what to publish,
+# and the evaluation harness, which decides what to score. A forward test run on
+# seasons the site withholds is measuring a number nobody can see, and when the
+# 2013-2016 seasons first entered that panel they doubled it and halved the
+# published forward correlation.
+PUBLISHED_FROM_YEAR = 2017
 
 MODE_HARDPOINT = "hardpoint"
 MODE_SND = "search-and-destroy"

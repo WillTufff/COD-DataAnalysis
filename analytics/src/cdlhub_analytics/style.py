@@ -27,72 +27,53 @@ share", every metric loading the same way, and the "archetypes" come out as
 tiers. That is a rating, and this site already has one. So every feature is
 first residualised against the published composite rating, and what is
 clustered is what is left — how a player played at their level, not what level
-they played at. The rating turns out to explain 11.7% of the variance in these
-features, which is worth stating plainly: style and quality are very nearly
-orthogonal here, and almost nothing is lost by insisting on the distinction.
+they played at. The rating turns out to explain 11.0% to 16.8% of the variance in
+these features depending on the era, which is worth stating plainly: style and
+quality are very nearly orthogonal here, and almost nothing is lost by insisting
+on the distinction.
 
 The second is the era. Metric coverage is not flat across this archive — the
-kill feed exists for two titles of three, Hardpoint qualification runs from 50%
-of Infinite Warfare's players to 86% of WWII's, and Search and Destroy's
+kill feed exists for two titles of fourteen, Hardpoint qualification runs from
+50% of Infinite Warfare's players to 86% of WWII's, and Search and Destroy's
 per-10-minute metrics are unattainable in the titles whose rounds are too short
-to earn a deep streak. Take every metric that appears in all three seasons and
+to earn a deep streak. Take every metric that appears in every season and
 demand a complete row, and *no player-season in the archive qualifies*: the
 feature set that looks richest describes nobody. Worse, the rows that survive a
 looser cut are not a random sample — they skew to the seasons with better
 coverage and to the players who played more, so a cluster fitted on them can be
 an era wearing a costume. Columns are therefore admitted only if they are
-attainable in every season, and the published fit runs on the basis that keeps
-essentially the whole league (484 of 487 player-seasons, every season above
-99%) rather than the one with the most columns.
+attainable in every season of the era being fitted, and the published fit per
+era runs on the basis that keeps essentially the whole field rather than the one
+with the most columns. The numbers each basis reports live in the artifact and
+on /methodology#player-style; they move on every rerun and are not repeated
+here.
 
-**The answer is that there is no taxonomy.** On the published basis the gap
-statistic prefers k=1 — a single blob beats every partition from two to seven.
-The best silhouette any k achieves is 0.286 at k=2, and a single Gaussian with
-the same covariance and the same sample size scores 0.251 to 0.305 on the same
-test: the observed separation is what no separation looks like. Bootstrap
-stability at k=2 is high (Jaccard 0.961) and means nothing on its own, which is
-the trap this module exists to avoid — bisecting an elongated cloud along its
-long axis is enormously reproducible, and the same Gaussian null reproduces
-itself just as well (0.876 to 0.974). Every k from three up fails every test.
-The extended basis, with Hardpoint and Search and Destroy objective columns and
-336 player-seasons, agrees: its gap statistic does prefer k=2, but that k=2
-scores a silhouette of 0.203 against a null band of 0.174 to 0.216 and a
-stability of 0.920 against 0.876 to 0.967. Both numbers sit inside what no
-clusters look like, so the preference is not evidence and nothing is published
-from it.
+**The answer is that there is no taxonomy, on any basis this has been run on.**
+The gap statistic prefers k=1 — a single blob beats every partition from two to
+seven — and the best silhouette any k achieves sits inside the band a single
+Gaussian with the same covariance and sample size scores on the same test.
+Bootstrap stability at k=2 is high and means nothing on its own, which is the
+trap this module exists to avoid: bisecting an elongated cloud along its long
+axis is enormously reproducible, and the Gaussian null reproduces itself just as
+well. The extended bases agree with the core ones.
 
 **What is real is the axes.** Horn's parallel analysis — eigenvalues against
 the same matrix with every column permuted, which destroys correlation while
-preserving each metric's marginal shape — retains four components of the
-residual, together 59.9% of its variance. They are recognisable, and they are
-continuous. Read in raw metric terms, with the "lower is better" flip undone:
-
-* volume (31.6%): kills, blitz index, kill share, K/D, multikills and pace all
-  loading the same way — how much of the map a player's play takes up, at a
-  level the rating has already been removed from;
-* survival (14.0%): fewer deaths and fewer engagements together with more long
-  streaks and a better plus/minus — a player who picks fights rarely and lives,
-  against one who is in everything;
-* streak depth (7.4%): deep, six- and seven-kill streaks plus assists, against
-  K/D, headshot rate and four-streaks — occasional long runs rather than
-  steady efficiency;
-* risk (7.0%): eight-plus streaks and assists arriving together with more team
-  kills, more suicides and more deaths — the biggest highs bought with the
-  most self-inflicted damage.
-
-So a player is published as a position on four axes, not as a label. That is a
-weaker claim than "anchor" and it is the one the data supports; it is also the
-more useful one for a career page, because a position moves and a label does
-not.
+preserving each metric's marginal shape — retains a handful of components of the
+residual. They are recognisable and they are continuous: volume, survival, and
+where the basket is rich enough to carry them, streak depth and risk. A player
+is published as a position on those axes, not as a label. That is a weaker claim
+than "anchor" and it is the one the data supports; it is also the more useful one
+for a career page, because a position moves and a label does not.
 
 **A null is only as good as its power.** Every verdict here is stated against
 the no-cluster null it was measured on, with that null's own spread, so
 "no taxonomy" is always "no taxonomy separated by more than an unclustered
-cloud of this size and shape would show". With 484 subjects and four axes, a
+cloud of this size and shape would show". At these sample sizes a
 well-separated three-group structure is found easily — see
 tests/test_style.py, which plants one and requires this code to recover it.
 What this archive rules out is groups of that kind. It does not rule out roles
-too subtle for 21 box-score columns to see, and no such claim is made.
+too subtle for these columns to see, and no such claim is made.
 """
 
 from __future__ import annotations
@@ -280,32 +261,72 @@ FROM player_season_adjusted
 WHERE run_id = %(run)s AND mode_id IS NULL AND rating IS NOT NULL
 """
 
-SEASONS_SQL = "SELECT id, year, league FROM seasons ORDER BY year"
+# A season's league, and which box-score archive its maps came from. The archive
+# is what decides which columns exist, so it decides the era; the league alone
+# does not. `mode()` takes the archive that supplied the season, and a season
+# with no box score at all gets none and is dropped by the join below.
+SEASONS_SQL = """
+SELECT se.id, se.year, se.league,
+       mode() WITHIN GROUP (ORDER BY gps.data_source) AS source
+FROM seasons se
+JOIN events ev ON ev.season_id = se.id
+JOIN series s  ON s.event_id = ev.id
+JOIN games g   ON g.series_id = s.id
+JOIN game_player_stats gps ON gps.game_id = g.id
+GROUP BY se.id, se.year, se.league
+ORDER BY se.year
+"""
 
 
 @dataclass(frozen=True)
 class Era:
-    """One league's seasons. Style is fitted per era and never across the seam.
+    """One archive's seasons, inside one league. Never fitted across a seam.
 
     The metric layer's columns change wholesale where the archives meet — the
     CWL years carry the kill-feed and extras catalog, the CDL years the Cito box
     columns — so a single league-wide basis would be cut down to the handful of
     columns both sides happen to share.
+
+    The league does not locate that seam, and grouping by it put one on the
+    wrong side. A seam runs through the middle of the CWL league: 2016 is
+    transcribed from the wiki and carries thirteen metrics, 2017 onward is the
+    Activision archive and carries sixty. Grouped by league, 2016 cut the CWL
+    basis down to the columns it shares with the three years after it, and the
+    basis fell from five retained components to two.
+
+    So the grouping is the archive, which is the thing that decides the columns.
+    Each group is named for the league its first season was played in, which
+    gives back the three names the record already used — MLG, CWL, CDL — because
+    the archives and the leagues change at almost the same moments.
     """
 
     league: str
     season_ids: frozenset[int]
     year_of: dict[int, int]
+    source: str = ""
 
 
 def load_eras(conn: psycopg.Connection[tuple[object, ...]]) -> list[Era]:
-    by_league: dict[str, dict[int, int]] = {}
-    for sid, year, league in conn.execute(SEASONS_SQL):
-        by_league.setdefault(cast(str, league), {})[cast(int, sid)] = cast(int, year)
-    return [
-        Era(league, frozenset(years), dict(years))
-        for league, years in sorted(by_league.items(), key=lambda kv: min(kv[1].values()))
-    ]
+    by_source: dict[str, dict[int, tuple[int, str]]] = {}
+    for sid, year, league, source in conn.execute(SEASONS_SQL):
+        by_source.setdefault(cast(str, source), {})[cast(int, sid)] = (
+            cast(int, year),
+            cast(str, league),
+        )
+    out = []
+    for source, seasons in sorted(
+        by_source.items(), key=lambda kv: min(y for y, _ in kv[1].values())
+    ):
+        first = min(seasons.items(), key=lambda kv: (kv[1][0], kv[0]))
+        out.append(
+            Era(
+                league=first[1][1],
+                season_ids=frozenset(seasons),
+                year_of={sid: year for sid, (year, _league) in seasons.items()},
+                source=source,
+            )
+        )
+    return out
 
 
 def load_grid(

@@ -162,6 +162,83 @@ JOBS: list[dict[str, Any]] = [
         "flags": [{"name": "--skip-lpdb", "label": "Skip LPDB"}],
     },
     {
+        "id": "codwiki_reference",
+        "label": "Wiki pull: reference tables",
+        "cwd": "pipeline",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "pull", "reference"],
+        # The pull names its stage in a banner line, not in an event, and the
+        # names depend on the table and the window. Declaring them here would
+        # show a checklist that never ticks, so the log is the progress.
+        "stages": [],
+        "destructive": False,
+        "est_seconds": 900,
+    },
+    {
+        "id": "codwiki_playerstats",
+        "label": "Wiki pull: box scores 2013-2016",
+        "cwd": "pipeline",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "pull", "playerstats"],
+        "stages": [],
+        "destructive": False,
+        # One request every 20 seconds is the anonymous limit, and the window
+        # holds about 61,700 rows at 500 rows a request. Resumable: a rerun
+        # skips every event already on disk.
+        "est_seconds": 4200,
+    },
+    {
+        "id": "codwiki_overlap",
+        "label": "Wiki pull: 2017-2026 overlap (check only)",
+        "cwd": "pipeline",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "pull", "overlap"],
+        "stages": [],
+        "destructive": False,
+        # About 171,000 rows. These years are already held from cwl_archive and
+        # cito, so this window feeds the reconciliation and never loads.
+        "est_seconds": 8400,
+    },
+    {
+        "id": "codwiki_load",
+        "label": "Wiki load: box scores 2013-2016",
+        "cwd": "pipeline",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "load"],
+        "stages": [],
+        "destructive": False,
+        # Reads the snapshot on disk. Idempotent: a rerun converges, and a row
+        # held by another source is counted as a collision and left alone.
+        "est_seconds": 120,
+        "flags": [{"name": "--dry-run", "label": "Dry run (transform, roll back)"}],
+    },
+    {
+        "id": "codwiki_results",
+        "label": "Wiki load: placements, rosters and awards 2013-2016",
+        "cwd": "pipeline",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "results"],
+        "stages": [],
+        "destructive": False,
+        # Run after codwiki_load: a placement needs the events and the players
+        # the box-score load creates.
+        "est_seconds": 90,
+        "flags": [{"name": "--dry-run", "label": "Dry run (load, roll back)"}],
+    },
+    {
+        "id": "codwiki_reconcile",
+        "label": "Wiki reconcile: 2017-2026 overlap",
+        "cwd": "pipeline",
+        "argv": [
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "cdlhub_pipeline.codwiki",
+            "reconcile",
+            "--store",
+        ],
+        "stages": [],
+        "destructive": False,
+        # Reads the overlap snapshot and the database only. No request goes out.
+        "est_seconds": 20,
+    },
+    {
         "id": "quality",
         "label": "Quality gate",
         "cwd": "pipeline",

@@ -66,7 +66,6 @@ test.describe("rating surfaces hold rows", () => {
       await expect(page.getByRole("heading", { name: "Rating" })).toBeVisible();
       const skill = page.locator('[data-surface="skill"]');
       await expect(skill, `${s.league} skill surface`).toBeVisible();
-      const state = await skill.getAttribute("data-state");
       if (years.has(s.year)) {
         // Where SKILL covers the era it must hold rows, not a heading alone.
         expect(
@@ -74,28 +73,63 @@ test.describe("rating surfaces hold rows", () => {
           `${s.league} skill rows`,
         ).toBeGreaterThan(0);
       } else {
-        // And where it does not, the page must say so rather than show nothing.
-        expect(state, `${s.league} skill state`).toBe("absent");
+        // And where it does not, the page must say so rather than show
+        // nothing. A player is not confined to one era, so the sampled season
+        // being uncovered does not make the whole surface empty: what has to
+        // hold is that the surface names that season as one it does not carry.
         await expect(skill).toContainText("SKILL");
+        const uncovered = (await skill.getAttribute("data-uncovered")) ?? "";
+        expect(
+          uncovered.split(",").filter(Boolean),
+          `${s.league} skill uncovered years`,
+        ).toContain(String(s.year));
+        await expect(
+          skill.locator(`[data-era-gap]`),
+          `${s.league} skill era-gap sentence`,
+        ).toContainText(String(s.year));
+      }
+
+      // Every other era-conditional surface answers the same way: it either
+      // carries the sampled season or names it as one it does not carry.
+      for (const surface of ["career-rank", "role"]) {
+        const node = page.locator(`[data-surface="${surface}"]`);
+        await expect(node, `${s.league} ${surface} surface`).toBeVisible();
+        const covered = (await node.getAttribute("data-uncovered")) ?? "";
+        const missing = covered.split(",").filter(Boolean);
+        if (missing.includes(String(s.year))) {
+          await expect(
+            node.locator("[data-era-gap]"),
+            `${s.league} ${surface} era-gap sentence`,
+          ).toContainText(String(s.year));
+        }
       }
     }
   });
 
-  test("/methodology renders every published phase", async ({ page }) => {
-    await page.goto("/methodology");
-    for (const id of [
-      "primacy",
-      "player-rating",
-      "season-rapm",
-      "opponent-adjustment",
-      "match-context",
-      "segment-win-probability",
-      "evaluation",
-      "skill",
-      "role",
-      "error-control",
-      "validation",
-    ]) {
+  // /methodology is a shell with one route per section, so a section is
+  // reachable in two ways and both have to hold: its own URL renders it, and
+  // the tier navigation links to that URL. A section whose route works and
+  // whose link is gone is unreachable by a reader, and a link that points at a
+  // route with no content is a dead end. The default route shows the first
+  // section alone, so asserting eleven ids on /methodology tested nothing.
+  const PHASES = [
+    "primacy",
+    "player-rating",
+    "season-rapm",
+    "opponent-adjustment",
+    "match-context",
+    "segment-win-probability",
+    "evaluation",
+    "skill",
+    "role",
+    "error-control",
+    "validation",
+  ];
+
+  test("every published phase renders on its own route", async ({ page }) => {
+    for (const id of PHASES) {
+      const response = await page.goto(`/methodology/${id}`);
+      expect(response?.status(), `/methodology/${id} status`).toBe(200);
       const section = page.locator(`#${id}`);
       await expect(section, `#${id}`).toBeVisible();
       // A section with a heading and no number is a stub; every one of these
@@ -104,10 +138,26 @@ test.describe("rating surfaces hold rows", () => {
     }
   });
 
-  test("match context shows both eras and its ablation nulls", async ({
+  test("every published phase is reachable from the navigation", async ({
     page,
   }) => {
     await page.goto("/methodology");
+    // The index redirects to the first section, and the shell around it is the
+    // navigation every other section is reached through.
+    await expect(page).toHaveURL(/\/methodology\/[a-z-]+$/);
+    const nav = page.locator('nav[data-nav="methodology"]');
+    for (const id of PHASES) {
+      await expect(
+        nav.locator(`a[href="/methodology/${id}"]`),
+        `nav link for ${id}`,
+      ).toHaveCount(1);
+    }
+  });
+
+  test("match context shows both eras and its ablation nulls", async ({
+    page,
+  }) => {
+    await page.goto("/methodology/match-context");
     const section = page.locator("#match-context");
     await expect(section).toBeVisible();
     // The phase's whole argument is that most families did nothing, so the
@@ -124,7 +174,7 @@ test.describe("rating surfaces hold rows", () => {
   test("segment win probability shows all three modes and its null", async ({
     page,
   }) => {
-    await page.goto("/methodology");
+    await page.goto("/methodology/segment-win-probability");
     const section = page.locator("#segment-win-probability");
     await expect(section).toBeVisible();
     // Three modes, and the phase's own reason for fitting SnD first is that it

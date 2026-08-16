@@ -259,9 +259,18 @@ REPRODUCE = (
 # a declaration that is not expected to move at all, and folding one into the
 # other would mean re-pinning the declaration every time the page is refreshed.
 # Same treatment `gates.PUBLISHED_BASES` gets, for the same reason.
+# Re-read on 2026-08-16, after the 2013-2016 load. The panel sizes did not move —
+# 561 persistence pairs, a 267-transition forward panel, a 218-transition gate
+# panel, 9,257 forecast maps — because every one of them is floored at
+# `maprows.PUBLISHED_FROM_YEAR`. What moved is what those unchanged panels read:
+# the plus-minus is now fitted over four more seasons of maps and chooses its
+# penalties over all of them, and Glicko-2 carries four more years of history
+# into its first 2017 prediction. The SKILL floor is the one figure here that is
+# a threshold rather than a description, so it is not re-pinned; see
+# `skill_panel_remeasured`.
 PUBLISHED_FIGURES: dict[str, Any] = {
     "persistence_pairs": 561,
-    "persistence_delta_r": -0.2286,
+    "persistence_delta_r": -0.2316,
     "delta_r_tol": 5e-4,
     "forecast_maps": 9257,
     "brier_tol": 5e-5,
@@ -275,9 +284,26 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "mde80_clustered": 0.1749,
         "distance_to_clear": 0.433,
     },
+    # What the same computation returns now, and why it is beside the pinned
+    # number rather than replacing it.
+    #
+    # A threshold recomputed once the result is visible is not a threshold
+    # declared in advance, so 0.1749 stays the number the gate tests against.
+    # The panel it was computed on has not changed size — the same 267
+    # transitions over the same 90 players — but the plus-minus those
+    # transitions read has, because the fit now covers 2013-2016 as well and
+    # chooses its penalties over all of it. That is a larger archive, not a
+    # better result, and the release has to show the distance rather than
+    # quietly close it.
+    "skill_panel_remeasured": {
+        "on": "2026-08-16",
+        "why": "the 2013-2016 load moved the plus-minus the panel reads; the panel is unchanged",
+        "mde80_clustered": 0.1665,
+        "distance_to_clear": 0.4246,
+    },
     # The plus-minus read forward, at the resolution the read is valid at, with
     # the pooled figure the page corrects and the era figure that inflated it.
-    "plusminus_forward": {"n": 267, "r": 0.1974, "pooled_r": 0.2914, "era_r": 0.3641},
+    "plusminus_forward": {"n": 267, "r": 0.2012, "pooled_r": 0.3004, "era_r": 0.3773},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -287,13 +313,13 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # this panel computes for itself, 0.1623, and the 0.1749 pinned above stays
     # what it always was — the number written before the model, against a panel
     # the model turned out not to fill.
-    "skill_result": {"n": 218, "clusters": 75, "delta_r": -0.2416, "mde80": 0.1623},
+    "skill_result": {"n": 218, "clusters": 75, "delta_r": -0.2338, "mde80": 0.1623},
     "forecast_brier": {
         "rapm": 0.24609,
         "rapm_prior": 0.24675,
         "rating": 0.2478,
         "rating_zshrink": 0.24875,
-        "glicko": 0.25076,
+        "glicko": 0.24973,
         "kd": 0.25156,
     },
 }

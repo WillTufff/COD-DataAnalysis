@@ -499,6 +499,17 @@ export default async function PlayersPage({
             every gold-tier stat a player&rsquo;s page shows, summed across a
             career of at least three qualified seasons.
           </p>
+          <p className="mt-2 max-w-3xl text-sm text-ink-muted">
+            This board covers 2017 onward. The 2013&ndash;2016 seasons are in
+            the archive and on player pages, and their season scores are
+            withheld until the field they would be measured against is made
+            comparable to a league one, so a career that started before 2017 is
+            scored on its 2017-onward seasons only. See{" "}
+            <Link className="underline hover:text-ink-secondary" href="/methodology">
+              methodology
+            </Link>
+            .
+          </p>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>

@@ -17,6 +17,7 @@ export const MAX_EXPORT_ROWS = 10_000;
 export const EXPORT_ATTRIBUTION = {
   derived: "Derived season aggregates. Not a redistribution of any source's box scores.",
   sources: [
+    "Box scores 2013-2016, and placements, event rosters and awards for that window: Call of Duty Esports Wiki, CC-BY-SA 3.0.",
     "Box scores 2017-2019: Activision Publishing (cwl-data), BSD-3-Clause.",
     "Box scores 2020-2026: data via Cito, carrying Breaking Point match data, used with attribution.",
     "Tournaments, placements, rosters, transfers, bios: Liquipedia, CC-BY-SA 3.0.",

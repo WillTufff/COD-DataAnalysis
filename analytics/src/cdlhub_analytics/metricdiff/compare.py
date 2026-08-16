@@ -14,6 +14,7 @@ one is the failure this harness exists to end.
 from __future__ import annotations
 
 import heapq
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,13 @@ from .snapshot import Entry
 
 # Added and removed keys named in the report before it starts counting only.
 SAMPLE = 40
+
+# A season as a key writes it: the year, then the league, then the title. Every
+# published number is standardized inside its own season's cohort, so a season
+# entering the archive moves every number in it. That makes the diff after such
+# a load a change of population rather than a change of model, and the report
+# has to say so or the next reader treats a baseline reset as a regression.
+SEASON_IN_KEY = re.compile(r"/((?:19|20)\d{2}) [A-Za-z0-9]+ ")
 
 
 @dataclass
@@ -75,6 +83,9 @@ class Report:
     added: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     n_flips: int = 0
+    # Season years each side of the comparison names, for the baseline-reset note.
+    baseline_years: set[int] = field(default_factory=set)
+    current_years: set[int] = field(default_factory=set)
     _seq: int = 0
 
     def counts(self, key: str) -> FamilyCounts:
@@ -125,17 +136,52 @@ def merge(
 
     while left is not None or right is not None:
         if left is not None and (right is None or left[0] < right[0]):
+            _year(report.baseline_years, left[0])
             _removed(report, left[0])
             left = next(baseline, None)
         elif right is not None and (left is None or right[0] < left[0]):
+            _year(report.current_years, right[0])
             _added(report, right[0])
             right = next(current, None)
         else:
             assert left is not None and right is not None
+            _year(report.baseline_years, left[0])
+            _year(report.current_years, right[0])
             _compare(report, left[0], left[1], right[1], rtol, atol, top)
             left = next(baseline, None)
             right = next(current, None)
     return report
+
+
+def _year(into: set[int], key: str) -> None:
+    match = SEASON_IN_KEY.search(key)
+    if match is not None:
+        into.add(int(match.group(1)))
+
+
+def baseline_reset(report: Report) -> dict[str, Any]:
+    """Whether this diff describes a larger archive rather than a changed model.
+
+    Read from the seasons the two snapshots name, not from a date written down
+    here, so the note appears exactly on the runs it is true of.
+    """
+    gained = sorted(report.current_years - report.baseline_years)
+    lost = sorted(report.baseline_years - report.current_years)
+    if not gained and not lost:
+        return {"reset": False}
+    return {
+        "reset": True,
+        "seasons_gained": gained,
+        "seasons_lost": lost,
+        "what": (
+            "the archive changed which seasons it holds, so this diff is a baseline reset "
+            "and not a regression"
+        ),
+        "why": (
+            "every published number is standardized inside its own season's cohort, so every "
+            "season that gained or lost a cohort member moved, and no model changed to move it"
+        ),
+    }
 
 
 def _removed(report: Report, key: str) -> None:
@@ -249,6 +295,7 @@ def payload(
         "added_omitted": max(0, totals.added - len(report.added)),
         "removed_keys": report.removed,
         "removed_omitted": max(0, totals.removed - len(report.removed)),
+        "baseline_reset": baseline_reset(report),
     }
 
 

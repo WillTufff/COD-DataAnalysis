@@ -31,16 +31,23 @@ SOURCE_LOADERS = {
     "cwl_archive": "cwl_reset",
     "cito": "refresh",
     "lpdb": "refresh",
+    "codwiki": "codwiki_load",
 }
 SOURCE_LABELS = {
     "cwl_archive": "CWL archive",
     "cito": "Cito",
     "lpdb": "Liquipedia",
+    "codwiki": "CoD Esports Wiki",
 }
 FIT_JOB = "run_all"
 
 WEB_DIR = REPO_ROOT / "web"
-SNAPSHOTS_SUBDIR = {"cito": "cito", "lpdb": "lpdb", "cwl_archive": "cwl_archive"}
+SNAPSHOTS_SUBDIR = {
+    "cito": "cito",
+    "lpdb": "lpdb",
+    "cwl_archive": "cwl_archive",
+    "codwiki": "codwiki",
+}
 
 
 def _node(node_id: str, kind: str, label: str, **fields: Any) -> dict[str, Any]:

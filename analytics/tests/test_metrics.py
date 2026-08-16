@@ -1,5 +1,8 @@
 import json
 import math
+import os
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -535,3 +538,41 @@ def test_snd_round_shares_cover_zero_through_four() -> None:
     keys = {m.key for m in CATALOG}
     for n in range(5):
         assert f"snd_rounds_{n}k_share" in keys
+
+
+# ------------------------------------------- the title list against the archive
+
+
+@pytest.fixture
+def archive_conn() -> Iterator[Any]:
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("DATABASE_URL", "postgres://cdlhub:cdlhub@localhost:54329/cdlhub")
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=2)
+    except Exception:  # noqa: BLE001 - any connection failure means no DB here
+        pytest.skip("no database reachable")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def test_every_title_with_maps_is_named_in_the_title_order(archive_conn: Any) -> None:
+    """A title missing here publishes no metric, and nothing else says so.
+
+    `titles_tracking` walks TITLE_ORDER, so a title in the database and not in
+    that tuple is dropped by every metric at once. It happened: the four
+    pre-2017 titles loaded, ran through a whole fit, and produced zero rows in
+    `player_metric_season` while every count upstream of it looked right.
+    """
+    rows = archive_conn.execute(
+        "SELECT DISTINCT t.short_name FROM game_player_stats gps"
+        " JOIN games g ON g.id = gps.game_id"
+        " JOIN series s ON s.id = g.series_id"
+        " JOIN events e ON e.id = s.event_id"
+        " JOIN seasons se ON se.id = e.season_id"
+        " JOIN titles t ON t.id = se.title_id"
+    ).fetchall()
+    if not rows:
+        pytest.skip("no box scores loaded")
+    assert {str(r[0]) for r in rows} <= set(maprows.TITLE_ORDER)

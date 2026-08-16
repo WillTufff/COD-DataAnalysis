@@ -4180,11 +4180,15 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
             </tbody>
           </table>
           <p className="mt-2 text-xs text-ink-muted">
-            2017 covers CWL Championship only (the recovered archive begins
-            there); 2018–2019 are full seasons. “Extended stats” is the share
-            of player-map rows carrying the 2019-format extras (EKIA, accuracy,
-            time alive, streaks). The earlier spreadsheets did not record
-            them, so those cells stay empty.
+            The table starts in 2013, which is the first year with enough
+            transcribed scoreboards to measure anything. Three sources fill it:
+            the wiki through 2016, the Activision archive from 2017 to 2019,
+            and Cito from 2020 on. 2017 carries CWL Championship alone, because
+            the Activision archive begins there; 2018 and 2019 are full
+            seasons. Hill time needs a map clock, which the wiki rows do not
+            carry. “Extended stats” is the share of player-map rows carrying
+            the 2019-format extras (EKIA, accuracy, time alive, streaks). Only
+            the 2019 spreadsheets record those, so every other year is empty.
           </p>
         </div>
 
@@ -4997,8 +5001,24 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
         </h2>
         <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
           <p>
-            This site draws on three sources, and which one a number came from
+            This site draws on four sources, and which one a number came from
             changes what can be said about it.
+          </p>
+          <p>
+            Box scores for 2013&ndash;2016, and the placements, event rosters and
+            awards for that window, come from the{" "}
+            <a className="underline hover:text-ink" href="https://cod-esports.fandom.com">
+              Call of Duty Esports Wiki
+            </a>{" "}
+            (CC-BY-SA 3.0), through its Cargo API at one request every twenty
+            seconds. Derived data is shared back under the same licence. These
+            are community transcriptions of broadcast scoreboards, so they rank
+            below the two publisher-side sources and never overwrite a row
+            either of them holds. The wiki also covers 2017&ndash;2026, which is
+            what makes it checkable: 83,418 player-lines it and this project
+            both carry disagree on kills or deaths at{" "}
+            <strong className="text-ink">1.57%</strong>, and the 18,810 lines
+            from 2017 and 2019 agree exactly with the Activision archive.
           </p>
           <p>
             Box scores for 2017&ndash;2019 are Activision Publishing’s official

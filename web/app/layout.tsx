@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     template: "%s · cdlhub",
   },
   description:
-    "Era-adjusted stats, team strength ratings, and evidence-linked analysis for competitive Call of Duty, 2017–2026.",
+    "Era-adjusted stats, team strength ratings, and evidence-linked analysis for competitive Call of Duty, 2013–2026.",
 };
 
 const nav = [

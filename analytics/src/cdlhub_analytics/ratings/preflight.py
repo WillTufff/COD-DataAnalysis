@@ -90,15 +90,72 @@ class Season:
     season_id: int
     year: int
     league: str
+    # Which archive supplied this season's box scores, and the era that archive
+    # forms. A league brand can span two archives — 2016 is Call of Duty World
+    # League and comes from the wiki, 2017-2019 is the same brand and comes from
+    # the Activision archive — and how well a season identifies its own
+    # coefficients follows the archive, not the brand. Grouping the two together
+    # let a wiki season decide whether the Activision seasons earn a season
+    # coefficient, which is the property `era` exists to remove.
+    archive: str = ""
+    era: str = ""
 
     @property
     def label(self) -> str:
         return f"{self.year} {self.league}"
 
+    @property
+    def era_key(self) -> str:
+        """The era this season is measured inside. The league where unknown."""
+        return self.era or self.league
+
+
+SEASON_ARCHIVE_SQL = """
+SELECT se.id, se.year, se.league,
+       (SELECT mode() WITHIN GROUP (ORDER BY gps.data_source)
+          FROM events ev
+          JOIN series s ON s.event_id = ev.id
+          JOIN games g ON g.series_id = s.id
+          JOIN game_player_stats gps ON gps.game_id = g.id
+         WHERE ev.season_id = se.id) AS archive
+FROM seasons se
+ORDER BY se.id
+"""
+
+
+def era_labels(seasons: Iterable[tuple[int, int, str, str]]) -> dict[str, str]:
+    """One label per archive: the league its earliest season ran under.
+
+    Where two archives would claim the same league the label carries the span as
+    well, so no two eras share a name. Seasons with no archive keep their league
+    and form no era of their own.
+    """
+    by_archive: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    for _sid, year, league, archive in seasons:
+        if archive:
+            by_archive[archive].append((year, league))
+    first: dict[str, tuple[int, str]] = {a: min(v) for a, v in by_archive.items()}
+    claims = Counter(league for _year, league in first.values())
+    out: dict[str, str] = {}
+    for archive, (_year, league) in first.items():
+        if claims[league] == 1:
+            out[archive] = league
+        else:
+            years = [y for y, _l in by_archive[archive]]
+            out[archive] = f"{league} {min(years)}-{max(years)}"
+    return out
+
 
 def load_seasons(conn: psycopg.Connection[tuple[object, ...]]) -> dict[int, Season]:
-    rows = conn.execute("SELECT id, year, league FROM seasons ORDER BY id").fetchall()
-    return {cast(int, r[0]): Season(cast(int, r[0]), cast(int, r[1]), str(r[2])) for r in rows}
+    rows = [
+        (cast(int, r[0]), cast(int, r[1]), str(r[2]), str(r[3] or ""))
+        for r in conn.execute(SEASON_ARCHIVE_SQL).fetchall()
+    ]
+    labels = era_labels(rows)
+    return {
+        sid: Season(sid, year, league, archive, labels.get(archive, league))
+        for sid, year, league, archive in rows
+    }
 
 
 def _perplexity(weights: Iterable[float]) -> float:
@@ -295,6 +352,44 @@ def season_spectrum(games: Sequence[AdmittedMap], penalty: float = PENALTY_LAMBD
     return _spectrum(gram, len(games), len(players), side_size(games), penalty)
 
 
+def era_spectrum(games: Sequence[AdmittedMap], penalty: float = PENALTY_LAMBDA) -> Spectrum:
+    """The season-expanded design for one era's maps alone.
+
+    The verdict in `verdict()` turns on this era's rank as a share of this era's
+    player columns, and that share has to be a property of the era. Measuring it
+    on the whole record's design made it one: an era's answer moved when a
+    different archive was loaded, because the eras were collected by league
+    brand and one brand spanned two archives.
+
+    Every column belongs to exactly one season, so the era's Gram matrix is
+    block diagonal by season and this rank equals the sum of the season ranks.
+    That equality is the claim `season_spectrum` already rests on, and it is
+    checked in the fixture tests rather than assumed.
+    """
+    keys = sorted({(game.season_id, p) for game in games for p in game.players})
+    teams = sorted(
+        {(game.season_id, t) for game in games for t in (game.home_team_id, game.away_team_id)}
+    )
+    player_col = {key: i for i, key in enumerate(keys)}
+    team_col = {key: i for i, key in enumerate(teams)}
+    size = len(player_col) + len(team_col)
+    gram = np.zeros((size, size), dtype=float)
+    offset = len(player_col)
+    for game in games:
+        index = [player_col[(game.season_id, p)] for p in game.home_players]
+        sign = [1.0] * len(index)
+        index += [player_col[(game.season_id, p)] for p in game.away_players]
+        sign += [-1.0] * len(game.away_players)
+        index.append(offset + team_col[(game.season_id, game.home_team_id)])
+        sign.append(1.0)
+        index.append(offset + team_col[(game.season_id, game.away_team_id)])
+        sign.append(-1.0)
+        for i, si in zip(index, sign, strict=True):
+            for j, sj in zip(index, sign, strict=True):
+                gram[i, j] += si * sj
+    return _spectrum(gram, len(games), len(player_col), side_size(games), penalty)
+
+
 def career_spectrum(games: Sequence[AdmittedMap], penalty: float = PENALTY_LAMBDA) -> Spectrum:
     """The published design, measured the same way: one column per player, no season.
 
@@ -458,24 +553,32 @@ class Preflight:
     career: Spectrum
     career_graph: graphs.GraphStats
     design_hash: str
+    # One entry per era, measured on that era's maps and nothing else.
+    era_spectra: dict[str, Spectrum]
 
     def eras(self) -> dict[str, list[SeasonPreflight]]:
         grouped: dict[str, list[SeasonPreflight]] = defaultdict(list)
         for season in self.seasons:
-            grouped[season.season.league].append(season)
+            grouped[season.season.era_key].append(season)
         return dict(grouped)
 
     def era_payload(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for league, seasons in sorted(self.eras().items()):
             team_seasons = [ts for s in seasons for ts in s.team_seasons]
-            columns = sum(s.spectrum.columns for s in seasons)
-            rank = sum(s.spectrum.rank for s in seasons)
+            own = self.era_spectra[league]
+            columns = own.columns
+            rank = own.rank
             dominated = sum(s.spectrum.penalty_dominated_columns for s in seasons)
-            player_columns = sum(s.spectrum.player_columns for s in seasons)
+            player_columns = own.player_columns
             out.append(
                 {
                     "league": league,
+                    "leagues": sorted({s.season.league for s in seasons}),
+                    "years": sorted(s.season.year for s in seasons),
+                    "archive": next((s.season.archive for s in seasons if s.season.archive), ""),
+                    "rank_measured_on": "this era's maps alone, season-expanded",
+                    "player_columns": player_columns,
                     "seasons": len(seasons),
                     "maps": sum(s.maps for s in seasons),
                     "team_seasons": len(team_seasons),
@@ -572,6 +675,10 @@ def measure_admitted(
         sizes = {game.title: len(game.home_players) for game in games}
         lineup = LineupRule(sizes=sizes, admitted=admitted, dropped=Counter())
     edges, nodes = teammate_edges(games)
+    per_era: dict[str, list[AdmittedMap]] = defaultdict(list)
+    for game in games:
+        season = seasons.get(game.season_id)
+        per_era[season.era_key if season else "unknown"].append(game)
     return Preflight(
         games=len(games),
         lineup=lineup,
@@ -579,6 +686,7 @@ def measure_admitted(
         career=career_spectrum(games, penalty),
         career_graph=graphs.graph_stats(edges, nodes),
         design_hash=design_fingerprint(games),
+        era_spectra={key: era_spectrum(era_games, penalty) for key, era_games in per_era.items()},
     )
 
 
@@ -617,6 +725,8 @@ class EraVerdict:
     thin: bool
     rank_poor: bool
     recovery_fails: bool
+    years: tuple[int, ...] = ()
+    archive: str = ""
 
     @property
     def stops(self) -> bool:
@@ -634,6 +744,9 @@ class EraVerdict:
     def payload(self) -> dict[str, Any]:
         return {
             "league": self.league,
+            "years": list(self.years),
+            "archive": self.archive,
+            "rank_measured_on": "this era's maps alone, season-expanded",
             "median_effective_lineups": round(self.effective_lineups, 2),
             "rank_share": round(self.rank_share, 4),
             "recovery_within_team": round(self.recovery, 4) if self.recovery is not None else None,
@@ -663,7 +776,10 @@ def verdict(measured: Preflight, recovery_curve: Sequence[dict[str, Any]]) -> di
         seasons = measured.eras()[league]
         team_seasons = [ts for s in seasons for ts in s.team_seasons]
         effective = float(np.median([ts.effective_lineups for ts in team_seasons]))
-        player_columns = sum(s.spectrum.player_columns for s in seasons)
+        # Both halves come from this era's own design. Summing the season blocks
+        # gives the same rank, and the difference that matters is which seasons
+        # the era holds: an era is one archive, so loading another cannot move it.
+        player_columns = int(era["player_columns"])
         rank_share = int(era["rank"]) / player_columns if player_columns else 0.0
         recovered = recovery_at(recovery_curve, effective)
         eras.append(
@@ -675,6 +791,8 @@ def verdict(measured: Preflight, recovery_curve: Sequence[dict[str, Any]]) -> di
                 thin=effective < STOP_EFFECTIVE_LINEUPS,
                 rank_poor=rank_share < STOP_RANK_SHARE,
                 recovery_fails=recovered is not None and recovered < STOP_RECOVERY,
+                years=tuple(int(y) for y in cast(list[Any], era["years"])),
+                archive=str(era["archive"]),
             )
         )
 

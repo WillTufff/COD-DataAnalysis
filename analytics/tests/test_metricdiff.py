@@ -269,3 +269,30 @@ def test_provenance_recognises_the_leaf_not_the_path() -> None:
     assert compare.provenance("artifact/y/run_id")
     assert not compare.provenance("artifact/y/run_id/brier")
     assert not compare.provenance("metric.player/kd_z")
+
+
+def test_a_diff_across_a_load_reports_itself_as_a_baseline_reset() -> None:
+    """A season entering the archive moves every number standardized inside it.
+
+    The first diff after such a load looks exactly like a regression and is not
+    one, so the report names the seasons that changed rather than leaving the
+    reader to work it out.
+    """
+    baseline = [
+        ("metric.player/metric_layer@2.3.0/04/2018 CWL WWII/all/kd/value", 1.0),
+    ]
+    current = [
+        ("metric.player/metric_layer@2.3.0/04/2014 MLG GH/all/kd/value", 0.9),
+        ("metric.player/metric_layer@2.3.0/04/2018 CWL WWII/all/kd/value", 1.1),
+    ]
+    report = compare.merge(iter(baseline), iter(current))
+    reset = compare.baseline_reset(report)
+    assert reset["reset"] is True
+    assert reset["seasons_gained"] == [2014]
+    assert reset["seasons_lost"] == []
+
+
+def test_a_diff_over_the_same_seasons_is_not_a_baseline_reset() -> None:
+    entries = [("metric.player/metric_layer@2.3.0/04/2018 CWL WWII/all/kd/value", 1.0)]
+    report = compare.merge(iter(entries), iter([(entries[0][0], 1.4)]))
+    assert compare.baseline_reset(report) == {"reset": False}

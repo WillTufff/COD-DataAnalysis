@@ -289,3 +289,28 @@ def test_separation_counts_totals_that_clear_two_standard_deviations() -> None:
     block = payload["separation"]["composite.none.all"]
     assert block["n_clear_of_zero"] == 1
     assert block["n_with_interval"] == 2
+
+
+# ------------------------------------------------------- the MLG era, unscored
+
+MLG = {31: Season(31, 2013, "MLG"), 32: Season(32, 2014, "MLG"), 33: Season(33, 2015, "MLG")}
+WITH_MLG = {**SEASONS, **MLG}
+
+
+def test_a_league_with_no_scale_of_its_own_is_out_of_scope_not_cwl() -> None:
+    """The two-way test read every non-CDL season as a CWL one."""
+    assert career._scope_of(MLG[31]) == career.SCOPE_OUT
+    assert career._scope_of(CWL[1]) == career.SCOPE_CWL
+    assert career._scope_of(CDL[19]) == career.SCOPE_CDL
+
+
+def test_an_out_of_scope_season_is_summed_under_no_era() -> None:
+    rows = [value(1, 31, 3.0), value(1, 32, 3.0), value(1, 19, 2.0), value(2, 19, 1.0)]
+    for scope in (career.SCOPE_CWL, career.SCOPE_CDL, career.SCOPE_ALL):
+        out = career.aggregate(rows, WITH_MLG, career.PLUS_MINUS, career.CREDIT_NONE, scope)
+        assert all(sid not in MLG for row in out for sid in [row.peak_season_id] if sid), scope
+
+
+def test_the_all_scope_does_not_sweep_an_out_of_scope_season_back_in() -> None:
+    order = career._season_order(WITH_MLG, career.SCOPE_ALL)
+    assert set(order) == set(SEASONS)

@@ -13,6 +13,16 @@ export function SiteFooter() {
     <footer className="mt-16 border-t border-hairline print:hidden">
       <div className="mx-auto max-w-6xl space-y-1 px-6 py-6 text-xs text-ink-muted">
         <p>
+          Box scores, placements and awards, 2013&ndash;2016:{" "}
+          <a
+            className="underline hover:text-ink-secondary"
+            href="https://cod-esports.fandom.com"
+          >
+            Call of Duty Esports Wiki
+          </a>
+          , CC-BY-SA 3.0. Derived data shared under the same licence.
+        </p>
+        <p>
           Box scores and kill feeds, 2017&ndash;2019: Call of Duty World League
           archive data ©{" "}
           <a

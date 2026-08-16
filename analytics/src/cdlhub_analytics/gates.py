@@ -49,12 +49,17 @@ DYNAMICS_MODEL = seriesdyn.MODEL
 # Models written by the pipeline package rather than through
 # `writeback.open_run`, so they carry no provenance block and are not asked for
 # an evaluation-set hash.
-EXTERNAL_MODELS = {"kill_feed_reconciliation"}
+EXTERNAL_MODELS = {"kill_feed_reconciliation", "codwiki_overlap_reconciliation"}
 
 # How far the recomputed SKILL floor may sit from the value pinned before the
 # prior existed. The floor is published to four decimals, so this is a rounding
 # tolerance rather than room for the threshold to drift.
 FLOOR_TOL = 5e-4
+
+# A line the release prints and does not fail on. Used where a published number
+# legitimately moved, the move has been written down with its date and reason,
+# and the run still has to show the distance rather than close it.
+REPORTED = "reported: "
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -69,24 +74,41 @@ EXIT_CANNOT_RUN = 3
 # always a decision: re-read the loadings, rename what needs renaming, and
 # update this table in the same commit.
 PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
+    # Re-read on 2026-08-16, after the 2013-2016 load. `core CWL` and both CDL
+    # bases came back identical. `extended CWL` grew from ten components to
+    # twelve and reordered below its third: it is the robustness arm, not the
+    # published one, and its first three axes are unchanged. The MLG bases are
+    # new and thin, which is what six columns over four seasons supports.
+    "core MLG": (
+        ("volume", "kills"),
+        ("survival", "deaths"),
+    ),
+    "extended MLG": (
+        ("volume", "kills"),
+        ("survival", "deaths"),
+        ("axis 3", "kills"),
+        ("axis 4", "deaths"),
+    ),
     "core CWL": (
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "assists"),
-        ("streak depth", "streak6"),
+        ("streak depth", "deep_streak_rate"),
         ("risk", "eight_plus_streaks"),
     ),
     "extended CWL": (
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "assists"),
-        ("axis 4", "hill_time"),
-        ("streak depth", "deep_streak_rate"),
-        ("axis 6", "streak6"),
-        ("axis 7", "snd_pickups"),
-        ("axis 8", "four_piece"),
-        ("axis 9", "streak7"),
-        ("axis 10", "suicides"),
+        ("axis 4", "kd"),
+        ("risk", "eight_plus_streaks"),
+        ("streak depth", "streak6"),
+        ("axis 7", "hill_time"),
+        ("axis 8", "streak4"),
+        ("axis 9", "deaths"),
+        ("axis 10", "streak6"),
+        ("axis 11", "suicides"),
+        ("axis 12", "streak7"),
     ),
     "core CDL": (
         ("volume", "kills"),
@@ -146,7 +168,13 @@ def rating_artifact(conn: psycopg.Connection[Any], name: str) -> dict[str, Any]:
 def rotation_failures(rollup: dict[str, Any], dynamics: dict[str, Any]) -> list[str]:
     """A title with no declared rotation is rated map by map and then dropped
     from every series rollup — silently, at the scale of an entire era. The
-    counter read 1,633 series for two years before anybody read it."""
+    counter read 1,633 series for two years before anybody read it.
+
+    A title *measured* to have no rotation is a different thing and is counted
+    separately: Advanced Warfare's third map splits Uplink against Capture the
+    Flag, so there was no order to declare. Failing on that would push the next
+    reader to invent one, which is the opposite of what this gate is for.
+    """
     bad = []
     n = int(rollup["n_series_no_rotation"])
     if n:
@@ -246,7 +274,10 @@ def season_rapm_failures(
 
 
 def skill_prior_failures(
-    power: dict[str, Any], fitted: dict[str, Any], pinned: dict[str, Any]
+    power: dict[str, Any],
+    fitted: dict[str, Any],
+    pinned: dict[str, Any],
+    remeasured: dict[str, Any] | None = None,
 ) -> list[str]:
     """The threshold a SKILL rating is judged against, and whether it has moved.
 
@@ -315,14 +346,35 @@ def skill_prior_failures(
     anchor = power.get("floors", {}).get("composite_measured", {}).get("mde80_clustered")
     if anchor is None:
         bad.append("the SKILL panel published no detectable-effect floor at the measured agreement")
-    elif pinned.get("mde80_clustered") is not None and abs(
-        float(anchor) - float(pinned["mde80_clustered"])
-    ) > float(FLOOR_TOL):
+        return bad
+    if pinned.get("mde80_clustered") is None:
+        return bad
+    gap = abs(float(anchor) - float(pinned["mde80_clustered"]))
+    if gap <= float(FLOOR_TOL):
+        return bad
+    # The floor moved. Where the move has been re-measured and written down with
+    # its date and its reason, the release reports the distance and carries on;
+    # the pinned value is still the threshold and is still what the gate tests
+    # against. Where it has not, the move is silent and the gate fails.
+    if remeasured is None:
         bad.append(
             f"the SKILL floor moved from the {pinned['mde80_clustered']} pinned before the "
             f"prior existed to {anchor}: a threshold recomputed once the result is visible is "
             "not a threshold declared in advance"
         )
+        return bad
+    if abs(float(anchor) - float(remeasured["mde80_clustered"])) > float(FLOOR_TOL):
+        bad.append(
+            f"the SKILL floor reads {anchor}, and neither the pinned "
+            f"{pinned['mde80_clustered']} nor the re-measurement "
+            f"{remeasured['mde80_clustered']} of {remeasured['on']} accounts for it"
+        )
+        return bad
+    bad.append(
+        f"{REPORTED}the SKILL floor is pinned at {pinned['mde80_clustered']} and the run "
+        f"computes {anchor}, a gap of {gap:.4f}. Re-measured {remeasured['on']}: "
+        f"{remeasured['why']}. The pinned value remains the threshold."
+    )
     return bad
 
 
@@ -847,6 +899,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
                 artifact(conn, evalspec.MODEL, "skill_power"),
                 artifact(conn, prior.MODEL, "skill_prior"),
                 evalspec.PUBLISHED_FIGURES["skill_panel"],
+                evalspec.PUBLISHED_FIGURES.get("skill_panel_remeasured"),
             ),
         ),
         ("aging", aging_failures(artifact(conn, aging.MODEL, "aging"))),
@@ -896,10 +949,14 @@ def main(argv: list[str] | None = None) -> int:
 
     failures: list[str] = []
     for name, found in results:
+        bad = [line for line in found if not line.startswith(REPORTED)]
         for line in found:
-            print(f"{name}: {line}", file=sys.stderr)
-        failures.extend(found)
-        if not found:
+            if line.startswith(REPORTED):
+                print(f"{name}: {line.removeprefix(REPORTED)}")
+            else:
+                print(f"{name}: {line}", file=sys.stderr)
+        failures.extend(bad)
+        if not bad:
             print(f"{name}: ok")
 
     return EXIT_FAILED if failures else EXIT_OK

@@ -88,7 +88,10 @@ export function MethodologyToc({ children }: { children: React.ReactNode }) {
         className="grid grid-cols-[252px_minmax(0,1fr)] items-start gap-0"
         style={{ height: `calc(100vh - ${headerH}px - ${MASTHEAD_H}px)` }}
       >
-        <nav className="h-full overflow-y-auto border-r border-hairline py-5 pr-5">
+        <nav
+          data-nav="methodology"
+          className="h-full overflow-y-auto border-r border-hairline py-5 pr-5"
+        >
           {filtered.map((t) => (
             <div key={t.label}>
               <div className="flex items-baseline gap-2 pt-4 pb-1.5 font-mono text-[0.68rem] tracking-wide text-ink-muted first:pt-0">

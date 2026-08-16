@@ -32,11 +32,13 @@ import {
   getPlayerRapm,
   getPlayerRatingSeasons,
   getPlayerCareer,
+  getCareerRankSeasons,
   getPlayerCareerRank,
   getPlayerSkill,
   getPlayerSpans,
   getPlayerStints,
   getPlayerRole,
+  getRoleSeasons,
   getPlayerStyle,
   getPlayerStyleArtifact,
   getRole,
@@ -80,6 +82,36 @@ export async function generateStaticParams() {
 function fmtZ(z: number | null): string {
   if (z === null) return "—";
   return `${z >= 0 ? "+" : ""}${z.toFixed(2)}σ`;
+}
+
+// An era-conditional surface has to say what it does not carry. A section that
+// returns nothing for a 2014 season is indistinguishable from a section that
+// broke, and the reader who most needs the difference is the one on the thinnest
+// page. Every surface below therefore takes the years it actually published —
+// read from its own rows, never from a year written down here — and names the
+// player's seasons that fall outside them.
+function uncoveredYears(playerYears: number[], covered: number[]): number[] {
+  const has = new Set(covered);
+  return [...new Set(playerYears)].filter((y) => !has.has(y)).sort((a, b) => a - b);
+}
+
+function yearList(years: number[]): string {
+  if (years.length === 1) return String(years[0]);
+  if (years.length === 2) return `${years[0]} and ${years[1]}`;
+  return `${years.slice(0, -1).join(", ")} and ${years[years.length - 1]}`;
+}
+
+/** The sentence a surface prints for the seasons it cannot cover. */
+function EraGap({ years, children }: { years: number[]; children: ReactNode }) {
+  if (years.length === 0) return null;
+  return (
+    <p
+      className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted"
+      data-era-gap={years.join(",")}
+    >
+      Nothing here covers {yearList(years)}. {children}
+    </p>
+  );
 }
 
 // Standard normal CDF (Abramowitz & Stegun 7.1.26), used to place a cohort
@@ -945,16 +977,31 @@ function RapmSection({ rapm }: { rapm: PlayerRapm }) {
 function SkillSection({
   skill,
   coveredYears,
+  playerYears,
   lastYear,
 }: {
   skill: PlayerSkillSeason[];
   coveredYears: number[];
+  playerYears: number[];
   lastYear: number | null;
 }) {
   const covered = new Set(coveredYears);
+  const gap = uncoveredYears(playerYears, coveredYears);
+  const gapReason = (
+    <>
+      SKILL is a season plus-minus blended with a box-score prior, and both need
+      a season the fit covers. Those seasons carry a K/D against their own
+      cohort and nothing finer.
+    </>
+  );
   if (skill.length === 0) {
     return (
-      <section data-surface="skill" data-state="absent" className="mt-10">
+      <section
+        data-surface="skill"
+        data-state="absent"
+        data-uncovered={gap.join(",")}
+        className="mt-10"
+      >
         <h2 className="lower-third">
           How good now
           <span className="lt-note">SKILL — not published for this player</span>
@@ -966,17 +1013,24 @@ function SkillSection({
           The rating below answers a different question — what a season was
           worth — and it is the one this page leads with here.
         </p>
+        <EraGap years={gap}>{gapReason}</EraGap>
       </section>
     );
   }
   const meanWeight =
     skill.reduce((s, r) => s + r.weightPrior, 0) / skill.length;
   return (
-    <section data-surface="skill" data-state="present" className="mt-10">
+    <section
+      data-surface="skill"
+      data-state="present"
+      data-uncovered={gap.join(",")}
+      className="mt-10"
+    >
       <h2 className="lower-third">
         How good now
         <span className="lt-note">SKILL, by season</span>
       </h2>
+      <EraGap years={gap}>{gapReason}</EraGap>
       <div className="mt-3 border border-hairline bg-surface p-4">
         <SkillBlend
           seasons={skill.map((r) => ({
@@ -1227,17 +1281,57 @@ function CareerTotalsSection({ rows }: { rows: PlayerCareerRow[] }) {
 function CareerRankSection({
   summary,
   seasons,
+  coveredYears,
+  playerYears,
 }: {
   summary: PlayerCareerRankSummary | null;
   seasons: PlayerCareerRankSeason[];
+  coveredYears: number[];
+  playerYears: number[];
 }) {
-  if (summary === null || seasons.length === 0) return null;
+  const gap = uncoveredYears(playerYears, coveredYears);
+  const gapReason = (
+    <>
+      A season score ranks one season against every other, so it needs a field
+      the seasons share. The comparable-cohort rule that would put an
+      open-bracket field on the same scale as a franchised one is not built, so
+      those seasons are scored and withheld rather than published on a scale of
+      their own.
+    </>
+  );
+  if (summary === null || seasons.length === 0) {
+    return (
+      <section
+        data-surface="career-rank"
+        data-state="absent"
+        data-uncovered={gap.join(",")}
+        className="mt-10"
+      >
+        <h2 className="lower-third">
+          Career rank
+          <span className="lt-note">no published season score for this player</span>
+        </h2>
+        <EraGap years={gap}>{gapReason}</EraGap>
+        {gap.length === 0 && (
+          <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+            This player has no season the career-rank engine scored.
+          </p>
+        )}
+      </section>
+    );
+  }
   return (
-    <section className="mt-10">
+    <section
+      data-surface="career-rank"
+      data-state="present"
+      data-uncovered={gap.join(",")}
+      className="mt-10"
+    >
       <h2 className="lower-third">
         Career rank
         <span className="lt-note">the gold-tier metric basket, blended by season</span>
       </h2>
+      <EraGap years={gap}>{gapReason}</EraGap>
       <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
         <p className="font-mono text-sm">
           {summary.total.toFixed(1)}
@@ -1328,18 +1422,63 @@ function CareerRankSection({
 function RoleSection({
   rows,
   model,
+  coveredYears,
+  playerYears,
 }: {
   rows: RoleSeason[];
   model: RoleModel | null;
+  coveredYears: number[];
+  playerYears: number[];
 }) {
-  if (rows.length === 0) return null;
+  const gap = uncoveredYears(playerYears, coveredYears);
+  const gapReason = (
+    <>
+      The opening engagement is read from the kill feed, which names who died
+      first in a round. Those seasons are box scores alone — a line per player
+      per map, with no event inside the map — so there is no first fight to
+      find.
+    </>
+  );
+  // The span is the fit's own, so a season entering or leaving the kill feed
+  // moves the label with it.
+  const span =
+    coveredYears.length > 0
+      ? `${coveredYears[0]}\u2013${coveredYears[coveredYears.length - 1]}`
+      : "no season";
+  if (rows.length === 0) {
+    return (
+      <section
+        data-surface="role"
+        data-state="absent"
+        data-uncovered={gap.join(",")}
+        className="mt-10"
+      >
+        <h2 className="lower-third">
+          Opening engagement
+          <span className="lt-note">Search &amp; Destroy &middot; {span}</span>
+        </h2>
+        <EraGap years={gap}>{gapReason}</EraGap>
+        {gap.length === 0 && (
+          <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+            This player cleared no season of the opening-engagement floor.
+          </p>
+        )}
+      </section>
+    );
+  }
   const kd = model?.entryCost.find((c) => c.outcome === "kd") ?? null;
   return (
-    <section className="mt-10">
+    <section
+      data-surface="role"
+      data-state="present"
+      data-uncovered={gap.join(",")}
+      className="mt-10"
+    >
       <h2 className="lower-third">
         Opening engagement
-        <span className="lt-note">Search &amp; Destroy &middot; 2020&ndash;2026</span>
+        <span className="lt-note">Search &amp; Destroy &middot; {span}</span>
       </h2>
+      <EraGap years={gap}>{gapReason}</EraGap>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
@@ -1419,6 +1558,8 @@ function CareerTab({
   careerTotals,
   careerRank,
   skillYears,
+  roleYears,
+  careerRankYears,
   lastYear,
   allModes,
   playerInsights,
@@ -1437,10 +1578,15 @@ function CareerTab({
     seasons: PlayerCareerRankSeason[];
   };
   skillYears: number[];
+  roleYears: number[];
+  careerRankYears: number[];
   lastYear: number | null;
   allModes: SeasonAdjusted[];
   playerInsights: { id: number; kind: string; headline: string }[];
 }) {
+  // The seasons this player is rated in at all: the population every
+  // era-conditional surface below is measured against.
+  const playerYears = allModes.map((a) => a.year);
   return (
     <div>
       <section>
@@ -1462,11 +1608,17 @@ function CareerTab({
 
       <CareerTotalsSection rows={careerTotals} />
 
-      <CareerRankSection summary={careerRank.summary} seasons={careerRank.seasons} />
+      <CareerRankSection
+        summary={careerRank.summary}
+        seasons={careerRank.seasons}
+        coveredYears={careerRankYears}
+        playerYears={playerYears}
+      />
 
       <SkillSection
         skill={skill}
         coveredYears={skillYears}
+        playerYears={playerYears}
         lastYear={lastYear}
       />
 
@@ -1495,7 +1647,12 @@ function CareerTab({
         </section>
       )}
 
-      <RoleSection rows={role} model={roleModel} />
+      <RoleSection
+        rows={role}
+        model={roleModel}
+        coveredYears={roleYears}
+        playerYears={playerYears}
+      />
 
       {style && (
         <section className="mt-10">
@@ -1612,6 +1769,24 @@ function CareerTab({
           coverage is the share of this player&rsquo;s map rows with complete
           kill and death data. Stats the archive lacks are shown as
           &ldquo;—&rdquo;.
+        </p>
+        <p>
+          A season before 2017 shows fewer cards, and that is the record rather
+          than this player. Those box scores are transcribed from broadcast
+          scoreboards by the{" "}
+          <a
+            className="underline hover:text-ink-secondary"
+            href="https://cod-esports.fandom.com"
+          >
+            Call of Duty Esports Wiki
+          </a>{" "}
+          and carry a narrower set of columns and no map clock, so every
+          per-10-minute metric is absent and the per-map form is what is
+          published. See{" "}
+          <Link className="underline hover:text-ink-secondary" href="/methodology">
+            methodology
+          </Link>{" "}
+          for the measured error rate of that source.
         </p>
       </HowToRead>
     </div>
@@ -1911,6 +2086,8 @@ export default async function PlayerPage({
     modeCatalog,
     careerTotals,
     careerRank,
+    roleYears,
+    careerRankYears,
   ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
@@ -1938,6 +2115,10 @@ export default async function PlayerPage({
       careerRankRun
         ? getPlayerCareerRank(careerRankRun.id, player.id)
         : Promise.resolve({ summary: null, seasons: [] }),
+      roleRun ? getRoleSeasons(roleRun.id) : Promise.resolve([]),
+      careerRankRun
+        ? getCareerRankSeasons(careerRankRun.id)
+        : Promise.resolve([]),
     ]);
   const skillYears = skillSeasons.map((s) => s.year);
   const metricCards = buildMetricCards(metricValues, metricCatalog, modeCatalog);
@@ -2018,6 +2199,8 @@ export default async function PlayerPage({
                   careerTotals={careerTotals}
                   careerRank={careerRank}
                   skillYears={skillYears}
+                  roleYears={roleYears}
+                  careerRankYears={careerRankYears}
                   lastYear={
                     allModes.length > 0
                       ? Math.max(...allModes.map((a) => a.year))

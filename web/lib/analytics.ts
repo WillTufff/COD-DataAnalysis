@@ -296,7 +296,7 @@ export type ArchiveStats = {
   events: number;
   firstYear: number;
   lastYear: number;
-  /** e.g. "2017–2026" — read off the data so a new season never leaves stale copy. */
+  /** e.g. "2013–2026" — read off the data so a new season never leaves stale copy. */
   span: string;
 };
 
@@ -327,7 +327,7 @@ export async function getArchiveStats(): Promise<ArchiveStats> {
 
 // ---------- Coverage labels ----------
 
-/** e.g. "2017–2026", or a single year when a span covers one season. */
+/** e.g. "2013–2026", or a single year when a span covers one season. */
 export function formatYearSpan(firstYear: number, lastYear: number): string {
   return firstYear === lastYear ? `${firstYear}` : `${firstYear}–${lastYear}`;
 }
@@ -357,7 +357,7 @@ export async function getLeagueSpans(): Promise<LeagueSpan[]> {
   return leagueSpanRows(rows);
 }
 
-/** e.g. "CWL 2017–2019 · CDL 2020–2026", or "archive" for an entity with none. */
+/** e.g. "MLG 2013–2015 · CWL 2016–2019 · CDL 2020–2026", or "archive" for an entity with none. */
 export function formatLeagueSpans(spans: LeagueSpan[]): string {
   if (spans.length === 0) return "archive";
   return spans
@@ -3739,6 +3739,22 @@ export async function getPlayerCareerRank(
   };
 }
 
+/** The seasons the career-rank engine published a score for.
+ *
+ *  A season it scored and then withheld is not in here, which is the point: the
+ *  page has to be able to name the seasons that carry no score without knowing
+ *  the year the engine withholds from. */
+export async function getCareerRankSeasons(runId: number): Promise<number[]> {
+  const rows = await db.execute(sql`
+    SELECT DISTINCT s.year
+    FROM player_season_rank r
+    JOIN seasons s ON s.id = r.season_id
+    WHERE r.run_id = ${runId}
+    ORDER BY s.year
+  `);
+  return (rows as unknown as { year: number }[]).map((r) => Number(r.year));
+}
+
 // ---------- Series dynamics ----------
 
 // Every observed rate carries two benchmarks: `rating` is independence at the
@@ -4232,6 +4248,18 @@ export async function getPlayerRole(
       ),
     )
     .orderBy(seasons.year);
+}
+
+/** The seasons the role fit published, which is where the kill feed exists. */
+export async function getRoleSeasons(roleRunId: number): Promise<number[]> {
+  const rows = await db.execute(sql`
+    SELECT DISTINCT s.year
+    FROM player_role_season r
+    JOIN seasons s ON s.id = r.season_id
+    WHERE r.run_id = ${roleRunId}
+    ORDER BY s.year
+  `);
+  return (rows as unknown as { year: number }[]).map((r) => r.year);
 }
 
 // ---------- Map meta: what the map pool was, season by season ----------

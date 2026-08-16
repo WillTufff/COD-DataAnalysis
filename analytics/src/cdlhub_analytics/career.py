@@ -83,6 +83,9 @@ CREDIT_DEVIATION_PLUS_TEAM = "deviation_plus_team"
 SCOPE_ALL = "all"
 SCOPE_CDL = "cdl"
 SCOPE_CWL = "cwl"
+# A season belonging to neither published era. It is never summed, and
+# SCOPE_ALL does not reach it.
+SCOPE_OUT = "out"
 
 # The share of a team-season effect credited to one player under the second
 # credit rule. Four slots identify the column together and nothing in the record
@@ -318,7 +321,8 @@ def aggregate(
     in_scope = [
         row
         for row in values
-        if _scope_of(seasons[row.season_id]) == era_scope or era_scope == SCOPE_ALL
+        if _scope_of(seasons[row.season_id]) == era_scope
+        or (era_scope == SCOPE_ALL and _scope_of(seasons[row.season_id]) != SCOPE_OUT)
     ]
     if not in_scope:
         return []
@@ -389,7 +393,25 @@ def _team_share(
 
 
 def _scope_of(season: Season) -> str:
-    return SCOPE_CDL if season.league.upper() == "CDL" else SCOPE_CWL
+    """Which era's scale a season is summed on, or `out` for one with none.
+
+    Written as a two-way test while the record held two leagues, which quietly
+    made every non-CDL season a CWL season. The 2013-2015 MLG seasons would
+    then be summed against a CWL replacement level and reported under the CWL
+    label, so the era row would say something about a league those seasons were
+    not played in. They are out of scope here until the comparable-cohort rule
+    gives them a scale of their own.
+
+    Read from the era rather than the league brand. 2016 is branded Call of Duty
+    World League and comes from the wiki, so summing it on the CWL scale would
+    mix one archive's replacement level into another's.
+    """
+    league = season.era_key.upper()
+    if league == "CDL":
+        return SCOPE_CDL
+    if league == "CWL":
+        return SCOPE_CWL
+    return SCOPE_OUT
 
 
 def _season_order(seasons: dict[int, Season], era_scope: str) -> dict[int, int]:
@@ -397,7 +419,8 @@ def _season_order(seasons: dict[int, Season], era_scope: str) -> dict[int, int]:
     inside = [
         season
         for season in seasons.values()
-        if era_scope == SCOPE_ALL or _scope_of(season) == era_scope
+        if _scope_of(season) == era_scope
+        or (era_scope == SCOPE_ALL and _scope_of(season) != SCOPE_OUT)
     ]
     return {
         season.season_id: i

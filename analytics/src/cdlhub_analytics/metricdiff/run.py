@@ -126,11 +126,21 @@ def headline(report: dict[str, Any]) -> str:
             f"{current['n_entries']:,} published numbers ({report['reason']})"
         )
     totals = report["totals"]
-    return (
+    line = (
         f"metric_diff run {report['run_id']}: {totals['compared']:,} numbers compared, "
         f"{totals['moved']:,} moved, {totals['flipped']:,} flipped, "
         f"{totals['added']:,} new, {totals['removed']:,} gone"
     )
+    reset = report.get("baseline_reset", {})
+    if reset.get("reset"):
+        gained = ", ".join(str(y) for y in reset["seasons_gained"]) or "none"
+        lost = ", ".join(str(y) for y in reset["seasons_lost"]) or "none"
+        line += (
+            f"\n  baseline reset, not a regression: seasons gained {gained}, lost {lost}. "
+            "Every number is standardized inside its own season's cohort, so every season "
+            "that changed membership moved without any model changing."
+        )
+    return line
 
 
 def population_line(population: dict[str, Any]) -> str:

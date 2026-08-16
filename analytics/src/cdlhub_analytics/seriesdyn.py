@@ -61,7 +61,7 @@ from typing import Any, cast
 import numpy as np
 import psycopg
 
-from .ratings.maplevel import BLEND_K, ROTATION, K, State
+from .ratings.maplevel import BLEND_K, NO_FIXED_ROTATION, ROTATION, K, State
 from .regress import FloatArray, fit_logistic_l2
 from .resample import order as content_order
 from .resample import stream as resample_stream
@@ -324,6 +324,10 @@ class Frozen:
     rotation_ps: dict[int, tuple[float, ...]]
     played_ps: dict[int, tuple[float, ...]]
     n_no_rotation: int
+    # Series whose title is measured to have no rotation, kept apart from the
+    # ones whose title simply declares none. Defaulted so a fixture that
+    # predates the split still builds.
+    n_no_fixed_rotation: int = 0
 
 
 def freeze(
@@ -345,11 +349,14 @@ def freeze(
     rotation_ps: dict[int, tuple[float, ...]] = {}
     played_ps: dict[int, tuple[float, ...]] = {}
     n_no_rotation = 0
+    n_no_fixed_rotation = 0
 
     for s in series:
         l1, l2 = lin.get(s.team1, s.team1), lin.get(s.team2, s.team2)
         rotation = ROTATION.get(s.title)
-        if rotation is None:
+        if rotation is None and s.title in NO_FIXED_ROTATION:
+            n_no_fixed_rotation += 1
+        elif rotation is None:
             n_no_rotation += 1
         else:
             rotation_ps[s.id] = tuple(state.predict("blend", l1, l2, mode) for mode in rotation)
@@ -357,7 +364,12 @@ def freeze(
         for m in s.maps:
             state.update(l1, l2, m.mode, m.team1_won)
 
-    return Frozen(rotation_ps=rotation_ps, played_ps=played_ps, n_no_rotation=n_no_rotation)
+    return Frozen(
+        rotation_ps=rotation_ps,
+        played_ps=played_ps,
+        n_no_rotation=n_no_rotation,
+        n_no_fixed_rotation=n_no_fixed_rotation,
+    )
 
 
 def _logit(p: float) -> float:
@@ -1178,6 +1190,7 @@ def build_artifacts(
         "n_series_loaded": len(series),
         "dropped": dropped,
         "n_no_rotation": frozen.n_no_rotation,
+        "n_no_fixed_rotation": frozen.n_no_fixed_rotation,
         "bootstrap_b": BOOTSTRAP_B,
         "map1": _conditional_map1(observed, expected, idx),
         "rates": _rates(observed, expected, idx),

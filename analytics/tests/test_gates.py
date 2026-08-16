@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import psycopg
 
+from cdlhub_analytics import gates
 from cdlhub_analytics.errorcontrol import Q_THRESHOLD
 from cdlhub_analytics.gates import (
     PUBLISHED_BASES,
@@ -836,3 +837,45 @@ def test_role_gate_refuses_a_claim_that_one_era_carries_both_halves() -> None:
     split = {"recovery_era": "2020-2026", "cost_era": "2020-2026"}
     failures = role_failures(_role_payload(era_split=split))
     assert any("same era" in line for line in failures)
+
+
+# ---------------------------------------------- the SKILL floor, re-measured
+
+
+def _skill_power(floor: float, distance: float = 0.4) -> dict[str, Any]:
+    return {
+        "available": True,
+        "floors": {"composite_measured": {"mde80_clustered": floor}},
+        "distance_to_clear": distance,
+    }
+
+
+_PINNED = {"mde80_clustered": 0.1749, "distance_to_clear": 0.433}
+_REMEASURED = {
+    "on": "2026-08-16",
+    "why": "the 2013-2016 load moved the plus-minus the panel reads",
+    "mde80_clustered": 0.1665,
+    "distance_to_clear": 0.4246,
+}
+
+
+def test_a_moved_floor_with_no_re_measurement_fails() -> None:
+    found = skill_prior_failures(_skill_power(0.1665), {}, _PINNED)
+    assert len(found) == 1
+    assert not found[0].startswith(gates.REPORTED)
+
+
+def test_a_moved_floor_that_matches_the_re_measurement_is_reported_not_failed() -> None:
+    """The pinned value stays the threshold and the gap is printed, not closed."""
+    found = skill_prior_failures(_skill_power(0.1665), {}, _PINNED, _REMEASURED)
+    assert len(found) == 1
+    assert found[0].startswith(gates.REPORTED)
+    assert "0.1749" in found[0]
+    assert "0.1665" in found[0]
+    assert "2026-08-16" in found[0]
+
+
+def test_a_floor_neither_number_accounts_for_still_fails() -> None:
+    found = skill_prior_failures(_skill_power(0.09), {}, _PINNED, _REMEASURED)
+    assert len(found) == 1
+    assert not found[0].startswith(gates.REPORTED)

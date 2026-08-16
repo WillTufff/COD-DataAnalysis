@@ -42,7 +42,7 @@ import numpy as np
 import psycopg
 
 from ..backtest import Prediction
-from ..maprows import MapRow
+from ..maprows import PUBLISHED_FROM_YEAR, MapRow
 from ..resample import order as content_order
 from ..resample import stream
 from . import evalspec, holdout, placebo, rapm, simleague, skillbase, statespace
@@ -181,7 +181,14 @@ def build_panel(
     rating, kd = _season_tables(conn, rating_run_id, era_run_id)
     modal_team, events, titles = _context(rows)
     seasons, _modes = pr.label_context(conn)
-    ordered = sorted(seasons, key=lambda s: seasons[s]["year"])
+    # The panel is the published population. A season the site withholds is not
+    # scored here either, or the harness reports a correlation over numbers no
+    # reader can look up.
+    ordered = [
+        s
+        for s in sorted(seasons, key=lambda s: seasons[s]["year"])
+        if seasons[s]["year"] >= PUBLISHED_FROM_YEAR
+    ]
     transitions = list(zip(ordered, ordered[1:], strict=False))
     qualified_first: dict[int, int] = {}
     for pid, season in sorted(rating):
@@ -633,18 +640,23 @@ def reproduction(
     # shipped with two screens of the same document disagreeing about the same
     # population because nothing was comparing them.
     skill = printed["skill_panel"]
+    # The floor and the distance to it are read against the dated
+    # re-measurement, not against the value pinned before the prior existed.
+    # The pinned value stays the threshold the gate tests; this comparison is
+    # asking whether the page shows what the run computes today.
+    remeasured = printed.get("skill_panel_remeasured", skill)
     for what, got, want in (
         ("SKILL panel transitions", power.get("n_eligible"), skill["n"]),
         ("SKILL panel players", power.get("clusters"), skill["clusters"]),
         (
             "SKILL panel detectable gap",
             power.get("floors", {}).get("composite_measured", {}).get("mde80_clustered"),
-            skill["mde80_clustered"],
+            remeasured["mde80_clustered"],
         ),
         (
             "SKILL panel distance to clear",
             power.get("distance_to_clear"),
-            skill["distance_to_clear"],
+            remeasured["distance_to_clear"],
         ),
     ):
         page.append(

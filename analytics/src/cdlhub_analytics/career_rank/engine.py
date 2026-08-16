@@ -13,6 +13,7 @@ from typing import Any, cast
 import psycopg
 
 from .. import style, writeback
+from ..maprows import PUBLISHED_FROM_YEAR
 from ..ratings.preflight import load_seasons
 from . import awards, blend, breadth, evalpop, roster_strength
 
@@ -26,9 +27,18 @@ VERSION = "1.0.0"
 # `metricdiff.run.REPORT_ARTIFACT`'s naming, not a name of its own invention.
 ARTIFACT_NAME = "career_rank"
 
+# The season score standardizes a player against everyone who cleared the map
+# floor in their season and title, which is only a fair comparison where the
+# field is comparable. `maprows.PUBLISHED_FROM_YEAR` holds the floor for the
+# whole project, so what this model publishes and what the evaluation harness
+# scores cannot drift apart. `seasons_withheld` publishes the count this run
+# held back.
+PUBLISH_FROM_YEAR = PUBLISHED_FROM_YEAR
+
 
 def params() -> dict[str, Any]:
     return {
+        "publish_from_year": PUBLISH_FROM_YEAR,
         "basket_size": len(breadth.gold_basket()),
         "min_seasons_floor": evalpop.MIN_SEASONS,
         "award_top_tier_points": awards.TOP_TIER_POINTS,
@@ -62,8 +72,12 @@ def build(
     scored: list[blend.SeasonScore] = []
     season_score_by_key: dict[tuple[int, int], float] = {}
     season_sd_by_key: dict[tuple[int, int], float] = {}
+    withheld = 0
     for sb in season_breadth:
         if restrict_to is not None and sb.player_id not in restrict_to:
+            continue
+        if seasons[sb.season_id].year < PUBLISH_FROM_YEAR:
+            withheld += 1
             continue
         credit = award_credits.get((sb.player_id, sb.season_id))
         final = awards.apply(sb.score, credit)
@@ -114,6 +128,12 @@ def build(
         "evaluation_population": evalpop.stamp(),
         "restricted": restrict_to is not None,
         "n_players_scored": len(out),
+        "publish_from_year": PUBLISH_FROM_YEAR,
+        "seasons_withheld": withheld,
+        "seasons_withheld_rule": (
+            "a season before the floor is scored and not published: the field it "
+            "would be standardized inside is not yet comparable to a league one"
+        ),
         "basket_size": len(basket),
         "career": blend.artifact([r.career for r in out]),
         # Every scored player, not just the top ten: the metric-diff harness

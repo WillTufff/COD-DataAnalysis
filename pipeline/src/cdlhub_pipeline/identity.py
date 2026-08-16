@@ -34,6 +34,10 @@ class Aliases:
     # code); null marks a page deliberately out of scope
     lpdb_events: dict[str, str | None] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self._folded_teams = {k.lower(): v for k, v in self.teams.items()}
+        self._folded_players = {k.lower(): v for k, v in self.players.items()}
+
     @classmethod
     def load(cls) -> Aliases:
         raw = json.loads(resources.files("cdlhub_pipeline").joinpath("aliases.json").read_text())
@@ -80,10 +84,17 @@ class Aliases:
         return str(nearest["name"])
 
     def team(self, name: str) -> str:
-        return self.teams.get(name, name)
+        """The canonical name, matched without regard to case.
+
+        Sources disagree on the case of a brand: the wiki writes `compLexity
+        Gaming` where the alias file writes `Complexity Gaming`. An exact match
+        misses that and the loader then creates a second team row, which splits
+        one roster's results across two teams.
+        """
+        return self._folded_teams.get(name.lower(), name)
 
     def player(self, handle: str) -> str:
-        return self.players.get(handle, handle)
+        return self._folded_players.get(handle.lower(), handle)
 
     def org_of(self, team_name: str) -> str | None:
         """The organisation a canonical team name belongs to, if any.

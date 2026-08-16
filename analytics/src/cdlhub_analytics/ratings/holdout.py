@@ -52,7 +52,7 @@ import psycopg
 
 from ..backtest import Prediction, evaluate
 from ..era import MIN_MAPS
-from ..maprows import Coverage, MapRow
+from ..maprows import PUBLISHED_FROM_YEAR, Coverage, MapRow
 from ..regress import fit_logistic_l2
 from ..resample import order as content_order
 from . import hierarchical as hier
@@ -166,7 +166,16 @@ def persistence(
     kd = {(cast(int, r[0]), cast(int, r[1])): (cast(int, r[2]), cast(float, r[3])) for r in rows}
 
     seasons, _modes = pr.label_context(conn)
-    order = sorted(seasons, key=lambda s: seasons[s]["year"])
+    # The published population, and only it. A season whose score the site
+    # withholds is not scored here either: admitting the 2013-2016 seasons
+    # doubled this panel and halved the forward correlation it reports, which
+    # would have read as a finding about the rating rather than a change of
+    # population.
+    order = [
+        s
+        for s in sorted(seasons, key=lambda s: seasons[s]["year"])
+        if seasons[s]["year"] >= PUBLISHED_FROM_YEAR
+    ]
     transitions = list(zip(order, order[1:], strict=False))
 
     cols, used_per_transition = persistence_columns(rating, kd, transitions)
@@ -389,6 +398,17 @@ def roster_forecast(
         rows, coverage = pr.load(conn)
     usable = [r for r in rows if pr.usable(r)]
 
+    # One population rule for every published figure. More maps genuinely help a
+    # map-outcome forecast, and this panel gives them up anyway: a reader
+    # comparing two numbers on the page has to be able to assume they describe
+    # the same players, and one constant then lifts every published figure at
+    # once when the comparable-cohort rule lands.
+    season_year = {sid: int(s["year"]) for sid, s in pr.label_context(conn)[0].items()}
+    withheld = sorted(
+        {r.season_id for r in usable if season_year.get(r.season_id, 0) < PUBLISHED_FROM_YEAR}
+    )
+    usable = [r for r in usable if season_year.get(r.season_id, 0) >= PUBLISHED_FROM_YEAR]
+
     games_series = _series_of_games(conn)
     glicko = _glicko_pre(conn, glicko_run_id) if glicko_run_id else {}
 
@@ -482,6 +502,8 @@ def roster_forecast(
 
     return {
         "version": version,
+        "published_from_year": PUBLISHED_FROM_YEAR,
+        "seasons_withheld": len(withheld),
         "min_train_maps": MIN_TRAIN_MAPS,
         "skipped_no_history": skipped_no_history,
         "skipped_no_roster": skipped_no_roster,
