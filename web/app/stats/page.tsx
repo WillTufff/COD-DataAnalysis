@@ -293,7 +293,7 @@ export default async function StatsPage({
         the next column does not — those cells are greyed, never dropped.
         Percentile and z-score are within that cohort. Full definitions are on
         the{" "}
-        <Link href="/methodology#metrics" className="underline">
+        <Link href="/methodology/metrics" className="underline">
           methodology
         </Link>{" "}
         page.

@@ -39,9 +39,9 @@ function evidenceHref(item: FeedItem): string {
       ? `/teams/${item.subjectSlug}`
       : `/players/${item.subjectSlug}`;
   }
-  if (item.kind === "what_wins") return "/methodology#player-rating";
-  if (item.kind === "model_null") return "/methodology#winprob";
-  if (item.kind === "mode_null") return "/methodology#map-elo";
+  if (item.kind === "what_wins") return "/methodology/player-rating";
+  if (item.kind === "model_null") return "/methodology/winprob";
+  if (item.kind === "mode_null") return "/methodology/map-elo";
   return "/methodology";
 }
 

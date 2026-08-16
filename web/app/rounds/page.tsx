@@ -155,7 +155,7 @@ function ClockCaption({ timeline }: { timeline: RoundTimeline }) {
       Probabilities are the published table read on the rounds that fitted it, so
       the second and third panels describe this archive rather than forecast a
       new one; the out-of-sample test is on{" "}
-      <Link href="/methodology#round-win-probability" className="underline">
+      <Link href="/methodology/round-win-probability" className="underline">
         methodology
       </Link>
       . Three things are left out: the axis stops at{" "}
@@ -468,7 +468,7 @@ export default async function RoundsPage({
       <p className="mt-12 max-w-3xl text-xs text-ink-muted">
         Only player-maps whose feed death count reconciles with the box score feed these
         panels; the residual is excluded, not patched. Full definitions are on the{" "}
-        <Link href="/methodology#rounds" className="underline">
+        <Link href="/methodology/rounds" className="underline">
           methodology
         </Link>{" "}
         page.

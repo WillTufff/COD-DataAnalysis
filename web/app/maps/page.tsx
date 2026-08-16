@@ -172,7 +172,7 @@ export default async function MapsPage({
         carries information: Hardpoint and Control are races to a fixed cap, so
         every winning score is the same number, and how far the loser got is
         what says whether a map plays close.{" "}
-        <Link className="underline" href="/methodology#attribution">
+        <Link className="underline" href="/methodology/attribution">
           Sources and provenance
         </Link>.
       </p>

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { Calibration } from "@/components/charts/Calibration";
 import { EstimateForest } from "@/components/charts/EstimateForest";
@@ -36,6 +36,7 @@ import {
   getRosterForecast,
   getRoundWinProb,
   getAging,
+  getCareerRankArtifact,
   getCareerValue,
   getSegmentWinProb,
   getSeasonEras,
@@ -59,6 +60,7 @@ import {
   getSkillPrior,
   getSkillSeasons,
   latestAgingRun,
+  latestCareerRankRun,
   latestCareerRun,
   latestEvaluationRun,
   latestOpenskillRun,
@@ -75,12 +77,6 @@ import {
 import { kindLabel } from "@/lib/insightKinds";
 import { RATINGS, primacyReason } from "@/lib/primacy";
 import { modeLabel } from "@/lib/modes";
-
-// The archive is frozen and the models only change on a rerun, so this page is
-// prerendered and revalidated on a timer rather than queried per request.
-export const revalidate = 3600;
-
-export const metadata: Metadata = { title: "Methodology" };
 
 // The segment table is keyed by the kind of segment, which is the shape of the
 // record rather than a mode name a reader would recognise.
@@ -349,7 +345,11 @@ const EVENT_LOSSES: {
   },
 ];
 
-export default async function MethodologyPage() {
+// Builds every section's JSX once, keyed by the id the sidebar and the
+// dynamic route both use. All 26 sections still come from one data pass —
+// the derived values below are reused across several sections — but each
+// section is now its own tree so a route can render exactly one of them.
+export async function getMethodologySections(): Promise<Record<string, ReactNode>> {
   const [
     eloRun,
     glickoRun,
@@ -575,6 +575,10 @@ export default async function MethodologyPage() {
   // and not the other renders the half it has.
   const careerRun = await latestCareerRun();
   const career = careerRun ? await getCareerValue(careerRun.id) : null;
+  const careerRankRun = await latestCareerRankRun();
+  const careerRank = careerRankRun
+    ? await getCareerRankArtifact(careerRankRun.id)
+    : null;
   const agingRun = await latestAgingRun();
   const aging = agingRun ? await getAging(agingRun.id) : null;
   const agingOverall = aging?.populations["composite.overall"] ?? null;
@@ -674,24 +678,7 @@ export default async function MethodologyPage() {
       ? (modelGaps.models.winprob_v1.accuracy - modelGaps.models.glicko2.accuracy) * 100
       : null;
 
-  return (
-    // Site grid (6xl) for left-edge alignment with the header; prose keeps
-    // its own narrower reading measure inside.
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <div className="max-w-3xl">
-      <p className="eyebrow text-accent">
-        Model specifications and backtests
-      </p>
-      <h1 className="mt-1 font-display text-5xl font-bold uppercase tracking-tight">
-        Methodology
-      </h1>
-      <p className="mt-3 text-sm text-ink-secondary">
-        Each model writes its output as a versioned, immutable run tagged with
-        the code commit that produced it, so any figure on the site traces back
-        to one rerun. The backtests below evaluate the models on historical play
-        only.
-      </p>
-
+  const secEra = (
       <section id="era" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Era adjustment
@@ -751,7 +738,9 @@ export default async function MethodologyPage() {
           </p>
         </div>
       </section>
+      );
 
+      const secElo = (
       <section id="elo" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Team ratings: Elo & Glicko-2
@@ -789,8 +778,9 @@ export default async function MethodologyPage() {
           </p>
         </div>
       </section>
+      );
 
-      {mapElo && (
+      const secMapElo = mapElo && (
         <section id="map-elo" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Map Elo, and one rating per mode
@@ -1145,9 +1135,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
-      {seriesDyn && (
+      const secSeriesDynamics = seriesDyn && (
         <section id="series-dynamics" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Series dynamics
@@ -1315,9 +1305,9 @@ export default async function MethodologyPage() {
             </div>
           )}
         </section>
-      )}
+      );
 
-      {(() => {
+      const secPlayerStyle = (() => {
         if (!styleArt) return null;
         // One fit per era: the metric layer's columns change wholesale at the
         // archive seam, so the numbers below are quoted for the earliest
@@ -1510,9 +1500,9 @@ export default async function MethodologyPage() {
             </div>
           </section>
         );
-      })()}
+      })();
 
-      {roleRun && (
+      const secRole = roleRun && (
         <section id="role" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Role at the opening engagement
@@ -1631,8 +1621,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
+      const secPrimacy = (
       <section id="primacy" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Which rating is the rating
@@ -1711,7 +1702,9 @@ export default async function MethodologyPage() {
           </p>
         </div>
       </section>
+      );
 
+      const secPlayerRating = (
       <section id="player-rating" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Open player rating
@@ -2619,9 +2612,10 @@ export default async function MethodologyPage() {
           </div>
         )}
       </section>
+      );
 
 
-      {seasonRapm && seasonRapm.available && (
+      const secSeasonRapm = seasonRapm && seasonRapm.available && (
         <section id="season-rapm" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Season plus-minus
@@ -2810,9 +2804,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
-      {opponentAdjustment && (
+      const secOpponentAdjustment = opponentAdjustment && (
         <section id="opponent-adjustment" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Opponent adjustment
@@ -2934,9 +2928,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
-      {matchContext && (
+      const secMatchContext = matchContext && (
         <section id="match-context" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Match context
@@ -3106,9 +3100,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
-      {evaluationManifest && evaluationPrimary && (
+      const secEvaluation = evaluationManifest && evaluationPrimary && (
         <section id="evaluation" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             The evaluation harness
@@ -3254,9 +3248,9 @@ export default async function MethodologyPage() {
             )}
           </div>
         </section>
-      )}
+      );
 
-      {skillPrior && (
+      const secSkill = skillPrior && (
         <section id="skill" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             SKILL
@@ -3357,9 +3351,9 @@ export default async function MethodologyPage() {
             )}
           </div>
         </section>
-      )}
+      );
 
-      {career && (
+      const secCareerValue = career && (
         <section id="career-value" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Career value
@@ -3440,9 +3434,86 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
-      {aging?.available && (
+      const secCareerRank = careerRank && (
+        <section id="career-rank" className="mt-12">
+          <h2 className="font-display text-2xl font-semibold uppercase">
+            Career rank
+          </h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+            <p>
+              A second, independent all-time axis. Career value sums a rating
+              fitted against map outcome. Career rank instead sums a{" "}
+              <strong className="text-ink">breadth score</strong>: the
+              coverage-weighted mean percentile across every gold-tier stat a
+              player&rsquo;s page shows that season ({careerRank.basket_size}{" "}
+              metrics), weighted by each mode&rsquo;s share of that
+              season&rsquo;s maps, with the per-map twin of any per-10 pair
+              dropped so a rate and its timed form never double count the same
+              signal. Award status (First/Second Team, MVPs, Rookie of the
+              Year) adds a fixed number of percentile points on top, capped at
+              100.
+            </p>
+            <p>
+              A season needs at least two qualifying stats to score at all, the
+              same floor the player page itself uses to decide whether a card
+              renders. A career needs at least three qualified seasons to get
+              an overall row; below that floor, season scores still compute
+              but no total is published. Of {careerRank.career.n_players}{" "}
+              players scored, {careerRank.career.n_qualified} clear that
+              floor.
+            </p>
+            <p>
+              <strong className="text-ink">
+                CWL years count at full weight, unlike the plus-minus axis
+                above.
+              </strong>{" "}
+              The plus-minus stores one pooled coefficient per player per CWL
+              era because that axis&rsquo; season unit is a fitted
+              coefficient shared across three years. The breadth score is
+              computed fresh per year from that year&rsquo;s own box scores, so
+              there is no shared estimate to guard against triple-counting,
+              and 2017, 2018 and 2019 each count as their own season here.
+            </p>
+            <p>
+              Two team-strength numbers are published beside every season
+              score, never folded into it: net of teammates (own season VALUE
+              minus the mean VALUE of the modal-team roster around the
+              player) and opponent strength (the mean VALUE of the teams
+              actually faced that season, weighted by maps). Neither corrects
+              the score.{" "}
+              <a href="#opponent-adjustment" className="underline">
+                Opponent adjustment
+              </a>{" "}
+              found that correction a null at the season grain, so both are
+              shown as context, published the same way a total&rsquo;s
+              standard deviation is published without being folded in.
+            </p>
+            <p>
+              The opponent-strength proxy (a team&rsquo;s own season VALUE,
+              approximated as the mean VALUE of its modal-team players, since
+              the project has no independent team rating) was checked against
+              an outside signal before shipping: it correlates with season map
+              win rate at Pearson r = 0.77 and Spearman r = 0.81 over 200
+              team-seasons with at least 10 maps.
+            </p>
+            <p>
+              Every total carries a standard deviation, the same convention
+              career value follows. It comes from how much the gold-tier
+              basket disagreed with itself that season. A wide spread of
+              percentiles across the metrics produces a wide season SD; a
+              tight spread produces a narrow one. The career total combines
+              those season SDs as independent variances, the same
+              simplification career value&rsquo;s own total_sd makes, and it
+              understates the true width because the underlying metric fits
+              share a cohort across years.
+            </p>
+          </div>
+        </section>
+      );
+
+      const secAging = aging?.available && (
         <section id="aging" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Aging
@@ -3532,8 +3603,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
+      const secWinprob = (
       <section id="winprob" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Series win probability (winprob_v1)
@@ -3661,7 +3733,9 @@ export default async function MethodologyPage() {
           )}
         </div>
       </section>
+      );
 
+      const secBacktests = (
       <section id="backtests" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Backtest report cards
@@ -3786,7 +3860,9 @@ export default async function MethodologyPage() {
           )}
         </div>
       </section>
+      );
 
+      const secInsights = (
       <section id="insights" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">Insights</h2>
         <p className="mt-3 text-sm leading-relaxed text-ink-secondary">
@@ -3820,8 +3896,9 @@ export default async function MethodologyPage() {
           </ul>
         )}
       </section>
+      );
 
-      {errorControl && (
+      const secErrorControl = errorControl && (
         <section id="error-control" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             What a finding is worth
@@ -3945,9 +4022,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
-      {(convergent || faceValidity || retrodiction || shock) && (
+      const secValidation = (convergent || faceValidity || retrodiction || shock) && (
         <section id="validation" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Four checks the ratings could have failed
@@ -4054,8 +4131,9 @@ export default async function MethodologyPage() {
             )}
           </div>
         </section>
-      )}
+      );
 
+      const secCoverage = (
       <section id="coverage" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Archive coverage
@@ -4161,7 +4239,9 @@ export default async function MethodologyPage() {
           denominator.
         </p>
       </section>
+      );
 
+      const secRounds = (
       <section id="rounds" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Structured event tier
@@ -4251,8 +4331,9 @@ export default async function MethodologyPage() {
           matches only about 69% of the time.
         </p>
       </section>
+      );
 
-      {roundWp && (
+      const secRoundWinProbability = roundWp && (
         <section id="round-win-probability" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Round win probability
@@ -4560,9 +4641,9 @@ export default async function MethodologyPage() {
             </div>
           )}
         </section>
-      )}
+      );
 
-      {segmentWp && (
+      const secSegmentWinProbability = segmentWp && (
         <section id="segment-win-probability" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
             Segment win probability
@@ -4763,8 +4844,9 @@ export default async function MethodologyPage() {
             </p>
           </div>
         </section>
-      )}
+      );
 
+      const secMetrics = (
       <section id="metrics" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Metric glossary
@@ -4906,7 +4988,9 @@ export default async function MethodologyPage() {
           </div>
         )}
       </section>
+      );
 
+      const secAttribution = (
       <section id="attribution" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
           Data & attribution
@@ -4983,7 +5067,35 @@ export default async function MethodologyPage() {
           </p>
         </div>
       </section>
-      </div>
-    </main>
-  );
+      );
+
+  return {
+    era: secEra,
+    elo: secElo,
+    "map-elo": secMapElo,
+    "series-dynamics": secSeriesDynamics,
+    "player-style": secPlayerStyle,
+    role: secRole,
+    primacy: secPrimacy,
+    "player-rating": secPlayerRating,
+    "season-rapm": secSeasonRapm,
+    "opponent-adjustment": secOpponentAdjustment,
+    "match-context": secMatchContext,
+    evaluation: secEvaluation,
+    skill: secSkill,
+    "career-value": secCareerValue,
+    "career-rank": secCareerRank,
+    aging: secAging,
+    winprob: secWinprob,
+    backtests: secBacktests,
+    insights: secInsights,
+    "error-control": secErrorControl,
+    validation: secValidation,
+    coverage: secCoverage,
+    rounds: secRounds,
+    "round-win-probability": secRoundWinProbability,
+    "segment-win-probability": secSegmentWinProbability,
+    metrics: secMetrics,
+    attribution: secAttribution,
+  };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 export type ArcPoint = {
@@ -17,7 +18,7 @@ export type ArcPoint = {
 // derived here. An earlier version used ±1.96/√maps, which assumed a player's
 // per-map K/D varied exactly as much as season K/Ds vary between players; per-map
 // variance is the larger of the two, so that band was too tight on the one chart
-// whose entire subject is uncertainty. See /methodology#era.
+// whose entire subject is uncertainty. See /methodology/era.
 export function CareerArc({ points }: { points: ArcPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -195,9 +196,9 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
         season and title (all modes). Shaded band is the 95% interval on that
         z-score, from the sampling error of the season&rsquo;s K/D across the maps
         it was earned on. Spec in{" "}
-        <a href="/methodology#era" className="underline">
+        <Link href="/methodology/era" className="underline">
           methodology
-        </a>
+        </Link>
         .
       </figcaption>
     </figure>

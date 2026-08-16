@@ -113,7 +113,7 @@ export default async function FindingsPage({
           Retracted ({retracted ? total : otherSide})
         </Link>
         <Link
-          href="/methodology#error-control"
+          href="/methodology/error-control"
           className="border border-hairline px-2.5 py-1 text-ink-muted transition-colors hover:text-ink-secondary"
         >
           How a finding earns a q-value

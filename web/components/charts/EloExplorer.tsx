@@ -614,7 +614,7 @@ export function EloExplorer({
         )}{" "}
         The 1500 line is league average by construction. Spec in{" "}
         <a
-          href={showBand ? "/methodology#glicko2" : "/methodology#elo"}
+          href={showBand ? "/methodology/elo" : "/methodology/elo"}
           className="underline"
         >
           methodology
