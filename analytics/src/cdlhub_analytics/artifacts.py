@@ -71,6 +71,29 @@ def resolve(stored: str) -> Path:
     return path if path.is_absolute() else root() / path
 
 
+# What a superseded cut keeps in the new pointer's history. `size` differs per
+# population (maps or players), so the caller names its own size key.
+HISTORY_KEYS = ("cut", "sha256", "frozen_at", "path")
+
+
+def cut_history(previous: dict[str, object] | None, size_key: str) -> list[dict[str, object]]:
+    """The history a new cut carries: every earlier cut, oldest first.
+
+    A re-cut replaces which population a version is scored against, so the
+    label it replaced has to stay readable from the pointer alone. Each entry
+    keeps the label, the hash, the date and the file, which is enough to score
+    an old version on an old cut again.
+    """
+    if previous is None:
+        return []
+    earlier = previous.get("history")
+    out: list[dict[str, object]] = list(earlier) if isinstance(earlier, list) else []
+    entry = {key: previous.get(key) for key in HISTORY_KEYS}
+    entry[size_key] = previous.get(size_key)
+    out.append(entry)
+    return out
+
+
 def prune_snapshots(keep: int = KEEP) -> int:
     """Delete all but the newest `keep` snapshots, and any half-written one.
 

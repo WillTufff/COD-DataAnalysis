@@ -269,6 +269,12 @@ REPRODUCE = (
 # a threshold rather than a description, so it is not re-pinned; see
 # `skill_panel_remeasured`.
 PUBLISHED_FIGURES: dict[str, Any] = {
+    # Two figures the page stated that no artifact carried, added 2026-08-17.
+    # Both are now computed every run — the first by `validation.retrodiction`,
+    # the second by `career_rank.roster_strength.proxy_check` — and pinned here
+    # so a move has to be read and written down rather than published quietly.
+    "retrodiction_cells_before": 5091,
+    "team_strength_proxy": {"n_team_seasons": 292, "pearson": 0.7608, "spearman": 0.793},
     "persistence_pairs": 561,
     "persistence_delta_r": -0.2316,
     "delta_r_tol": 5e-4,
@@ -303,7 +309,12 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     },
     # The plus-minus read forward, at the resolution the read is valid at, with
     # the pooled figure the page corrects and the era figure that inflated it.
-    "plusminus_forward": {"n": 267, "r": 0.2012, "pooled_r": 0.3004, "era_r": 0.3773},
+    #
+    # Re-pinned 2026-08-17. The identity pass merged `Zerg` into `Deleo` and
+    # `Envy` into `Team Envy`, and the wiki load gained 157 event-roster rows, so
+    # the lineups the plus-minus is fitted on moved. Every figure below that
+    # reads the fit moved with them; nothing about the method changed.
+    "plusminus_forward": {"n": 267, "r": 0.2078, "pooled_r": 0.301, "era_r": 0.3755},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -313,13 +324,13 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # this panel computes for itself, 0.1623, and the 0.1749 pinned above stays
     # what it always was — the number written before the model, against a panel
     # the model turned out not to fill.
-    "skill_result": {"n": 218, "clusters": 75, "delta_r": -0.2338, "mde80": 0.1623},
+    "skill_result": {"n": 218, "clusters": 75, "delta_r": -0.2183, "mde80": 0.1623},
     "forecast_brier": {
         "rapm": 0.24609,
         "rapm_prior": 0.24675,
         "rating": 0.2478,
         "rating_zshrink": 0.24875,
-        "glicko": 0.24973,
+        "glicko": 0.24999,
         "kd": 0.25156,
     },
 }

@@ -729,6 +729,10 @@ def retrodiction(
         "stability_floor": STABILITY_FLOOR,
         "by_holdout": results,
         "worst_spearman": worst,
+        # How many cells the one-sided property was actually checked on, summed
+        # over the holdouts. The page states this count, so the run publishes it
+        # rather than leaving a number on the page that no artifact carries.
+        "cells_before_total": sum(int(r.get("cells_before", 0)) for r in results),
         "one_sided_violations": leaked,
         "passes_floor": None if worst is None else bool(worst >= STABILITY_FLOOR),
         "verdict": verdict,

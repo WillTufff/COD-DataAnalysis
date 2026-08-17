@@ -1,16 +1,15 @@
-"""Net-of-teammates and opponent-strength, per `ai/career-rank-preregistration.md`
-section 2. Two separate stats, never blended, per the owner's decision.
+"""Net-of-teammates and opponent-strength: two separate stats, never blended.
 
 **Deviation from the pre-registration text, made for a reason recorded here.**
-The doc names `roster_stints` as the join. `roster_stints` is event-window,
-not match-exact — [[cwl-stint-envelope-artifact]] already flags it as an
-artifact that fakes concurrent rosters. `career.py` solved the identical
+The pre-registration names `roster_stints` as the join. `roster_stints` is
+event-window, not match-exact, so it reports rosters as concurrent that were
+never on the field together. `career.py` solved the identical
 "who was on this player's team this season" problem with `modal_teams`,
 built from `game_player_stats` box scores instead: the team a player
 actually played the most maps for. That is the join used here too, for the
 same reason `career.py` uses it — it is a measurement, not a stated
-availability window. This does not change what section 2 asks for (a
-teammate's own season VALUE, averaged), only how "teammate" is resolved.
+availability window. This does not change what is asked for (a teammate's
+own season VALUE, averaged), only how "teammate" is resolved.
 """
 
 from __future__ import annotations
@@ -114,11 +113,11 @@ def build_team_season_value(
     rating, so a team's own season VALUE is approximated as the mean of its
     modal-team players' VALUE — stated here rather than silently assumed.
 
-    Spot-checked against an independent signal (season map win rate) before
-    this engine used it: Pearson r = 0.77, Spearman r = 0.81 over 200
-    team-season pairs with >= 10 maps (2026-08-15, run of this method
-    against team win rate derived from `games.winner_team_id`). Strong
-    enough to trust as a real proxy, not a coincidence of the join.
+    The proxy is checked against an independent signal every run rather than
+    once: `proxy_check` correlates it with season map win rate, taken from
+    `games.winner_team_id`, and the result goes into the artifact the site
+    reads. A number published on a page and measured once is a number nobody
+    can audit.
     """
     teams = modal_teams(conn)
     by_team_season: dict[tuple[int, int], list[float]] = defaultdict(list)
@@ -129,13 +128,94 @@ def build_team_season_value(
     return {key: sum(vals) / len(vals) for key, vals in by_team_season.items()}
 
 
+# A team-season enters the proxy check at this many maps or more. Below it the
+# win rate is mostly the schedule, and the check would measure noise.
+PROXY_CHECK_MIN_MAPS = 10
+
+_TEAM_MAP_RESULTS_SQL = """
+SELECT e.season_id,
+       side.team_id,
+       count(*)                                                   AS maps,
+       sum((g.winner_team_id = side.team_id)::int)                AS wins
+FROM games g
+JOIN series s ON s.id = g.series_id
+JOIN events e ON e.id = s.event_id
+CROSS JOIN LATERAL (VALUES (s.team1_id), (s.team2_id)) AS side(team_id)
+WHERE g.winner_team_id IS NOT NULL
+  AND side.team_id IS NOT NULL
+  AND e.season_id IS NOT NULL
+GROUP BY 1, 2
+"""
+
+
+def _ranks(values: list[float]) -> list[float]:
+    """Ranks with ties averaged, so a tie does not order itself arbitrarily."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        shared = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = shared
+        i = j + 1
+    return ranks
+
+
+def _correlation(left: list[float], right: list[float]) -> float | None:
+    n = len(left)
+    if n < 3:
+        return None
+    mean_l, mean_r = sum(left) / n, sum(right) / n
+    cov = sum((a - mean_l) * (b - mean_r) for a, b in zip(left, right, strict=True))
+    var_l = sum((a - mean_l) ** 2 for a in left)
+    var_r = sum((b - mean_r) ** 2 for b in right)
+    if var_l <= 0.0 or var_r <= 0.0:
+        return None
+    return float(cov / (var_l**0.5 * var_r**0.5))
+
+
+def proxy_check(
+    conn: Conn,
+    team_season_value: dict[tuple[int, int], float],
+    min_maps: int = PROXY_CHECK_MIN_MAPS,
+) -> dict[str, object]:
+    """How well the team-strength proxy agrees with season map win rate.
+
+    The project has no independent team rating, so the proxy is the mean VALUE
+    of a team's modal-team players. Win rate is not part of that construction
+    at any point, which is what makes it a check rather than a restatement.
+    """
+    pairs: list[tuple[float, float]] = []
+    for season_id, team_id, maps, wins in conn.execute(_TEAM_MAP_RESULTS_SQL).fetchall():
+        if int(cast(int, maps)) < min_maps:
+            continue
+        value = team_season_value.get((cast(int, team_id), cast(int, season_id)))
+        if value is None:
+            continue
+        pairs.append((value, int(cast(int, wins)) / int(cast(int, maps))))
+    values = [p[0] for p in pairs]
+    rates = [p[1] for p in pairs]
+    pearson = _correlation(values, rates)
+    spearman = _correlation(_ranks(values), _ranks(rates))
+    return {
+        "signal": "season map win rate from games.winner_team_id",
+        "min_maps": min_maps,
+        "n_team_seasons": len(pairs),
+        "pearson": None if pearson is None else round(pearson, 4),
+        "spearman": None if spearman is None else round(spearman, 4),
+    }
+
+
 def opponent_strength(
     conn: Conn, team_season_value: dict[tuple[int, int], float]
 ) -> list[OpponentStrength]:
     """Mean opposing-team season VALUE across a player's maps that season.
 
-    Display only, per the pre-registration doc: [[p2-opponent-adjustment-status]]
-    found opponent correction a null at the season grain, so this does not
+    Display only. The opponent-adjustment phase measured opponent correction
+    as a null at the season grain, so this does not
     correct anything — it reports how hard the season's slate of opponents
     was. `team_season_value` is the proxy from `build_team_season_value`,
     computed once and passed in so it is shared with `net_of_teammates`.

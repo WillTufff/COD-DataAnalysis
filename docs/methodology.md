@@ -90,6 +90,16 @@ quantity, and nothing is averaged across the seam. The kill-feed tier (trades,
 clutch reconstruction, man-advantage, engagement distance) is 2017-2018 only, and
 always was.
 
+**And in Black Ops 7 they do not count deaths the same way.** Measured against the wiki's
+independent transcription of the same maps, our deaths run one lower on 450 of 7,520 paired
+lines while kills agree on 99.7% of them. Aggregated to the team-map the reason is plain:
+our deaths equal the opposing team's kills on 92.9% of team-maps, and the wiki's exceed
+them on a quarter. So the CDL-era source counts a death an enemy kill caused, and the wiki
+counts every death, self-inflicted ones included. The source's `suicides` column is empty
+for that title, so those deaths are recorded nowhere here. A 2026 kill-death ratio computed
+on this page is therefore a little kinder than one computed from the wiki, by about one
+death per sixteen player-maps.
+
 **A trade is not the same thing as the kill feed, and this page used to conflate them.**
 The feed is what allows a trade to be *reconstructed*: two death timestamps, two teams, a
 window between them. That is 2017-2018 and nothing has changed about it. But trade economy
@@ -1788,25 +1798,26 @@ identifiable roster.
 
 | Predictor | Brier | Log loss | Accuracy | vs. coin flip |
 |---|---|---|---|---|
-| **RAPM** | **0.24609** | 0.6946 | 59.0% [57.9, 60.0] | **−0.0039** [−0.0077, −0.0002] |
-| RAPM, rating-centered | 0.24675 | 0.6968 | **59.2%** [58.2, 60.2] | −0.0033 [−0.0069, +0.0004] |
-| Roster composite rating | 0.24780 | 0.6916 | 56.6% [55.6, 57.6] | −0.0022 [−0.0052, +0.0009] |
-| Same rating, z-and-shrink | 0.24875 | 0.6946 | 56.6% [55.6, 57.6] | −0.0013 [−0.0043, +0.0018] |
-| Glicko-2 team rating | 0.24973 | 0.7045 | 59.1% [58.2, 60.2] | −0.0003 [−0.0043, +0.0038] |
-| Roster K/D | 0.25156 | 0.7032 | 56.5% [55.6, 57.5] | +0.0016 [−0.0015, +0.0046] |
+| **RAPM** | **0.24609** | 0.6946 | 59.0% [57.9, 59.9] | **−0.0039** [−0.0077, +0.0000] |
+| RAPM, rating-centered | 0.24675 | 0.6968 | **59.2%** [58.2, 60.2] | −0.0032 [−0.0071, +0.0008] |
+| Roster composite rating | 0.24780 | 0.6916 | 56.6% [55.5, 57.6] | −0.0022 [−0.0053, +0.0010] |
+| Same rating, z-and-shrink | 0.24875 | 0.6946 | 56.6% [55.6, 57.6] | −0.0013 [−0.0045, +0.0019] |
+| Glicko-2 team rating | 0.24999 | 0.7053 | 59.2% [58.2, 60.2] | −0.0000 [−0.0041, +0.0039] |
+| Roster K/D | 0.25156 | 0.7032 | 56.5% [55.5, 57.6] | +0.0016 [−0.0016, +0.0047] |
 | Coin flip at 0.5 | 0.25000 | 0.6931 | — | — |
 
-**One of these beats the coin flip on an interval that excludes zero: plain RAPM, at
-−0.0039 [−0.0077, −0.0002].** An earlier version of this page reported three, on a
-smaller population; on the current one the composite rating's own gap is −0.0022
-[−0.0052, +0.0009] and spans zero, which is the reading the CWL archive gave before it and
-the more conservative of the two.
+**None of these separates from the coin flip. RAPM comes closest, at −0.0039 [−0.0077,
++0.0000], and its interval reaches zero.** An earlier version of this page read RAPM's
+interval as excluding zero, on a fit drawn before the 2026-08-17 identity pass merged two
+player rows and two team rows; the maps are the same 9,257 and the reading moved from
+"resolves, barely" to "does not resolve". The composite rating's own gap is −0.0022
+[−0.0053, +0.0010] and spans zero, which is what the CWL archive said before it.
 
-The qualifier is the same one as everywhere else here: the gap that resolves does not clear
-its own 80%-power threshold. RAPM's −0.0039 sits under the 0.0053 that 9,257 maps can
-resolve. That is the shape of an effect that is real and small. "Roster strength forecasts
-map wins slightly better than a coin flip" is what this table supports. "By enough to be
-worth acting on" is not.
+The qualifier is the same one as everywhere else here, and it now applies to every row.
+RAPM's −0.0039 sits under the 0.0053 that 9,257 maps can resolve, so the size of the effect
+was already below what this test can see. "Roster strength forecasts map wins slightly
+better than a coin flip" is the direction every predictor points; this table does not
+establish it.
 
 One contrast does clear both tests, and it is the one that most directly answers what the
 composite rating is for: **against roster K/D, the rating wins by −0.0038
@@ -2689,7 +2700,7 @@ carry one. On its own panel the smallest resolvable gap is 0.1623.
 
 | Predictor | Δ*r* vs K/D z | 95% interval | Detectable at | Beats the baseline? |
 |---|---|---|---|---|
-| SKILL | **−0.2338** | [−0.3484, −0.0917] | 0.1623 | no |
+| SKILL | **−0.2183** | [−0.3269, −0.0838] | 0.1623 | no |
 | Composite | −0.2666 | [−0.4139, −0.1154] | 0.1623 | no |
 | `openskill` | −0.6711 | [−0.9200, −0.3721] | 0.2029 | no |
 
@@ -2737,13 +2748,16 @@ Coverage is published per season beside the correlation, because a reader compar
 2024 is comparing 68% of a season against all of one.
 
 **Against the awards.** Two sources carry individual awards: Liquipedia for 2017 onward and
-the wiki for 2013-2016. 77 of them name a player for a whole season. Scored against the top
+the wiki for 2013-2016. 88 of them name a player for a whole season. Scored against the top
 *n* of that season's VALUE table, where *n* is the number of players the season actually
-selected, **23 of 62 land in the top n against 6.4 expected by chance.**
+selected, **29 of 88 land in the top n against 7.8 expected by chance.**
 
 | Season | Selected | Scored | Field | In top n | Expected |
 |---|---|---|---|---|---|
 | 2016 | 18 | 17 | 217 | 1 | 1.41 |
+| 2017 | 8 | 8 | 128 | 1 | 0.50 |
+| 2018 | 8 | 8 | 165 | 0 | 0.39 |
+| 2019 | 10 | 10 | 204 | 5 | 0.49 |
 | 2020 | 5 | 5 | 76 | 4 | 0.33 |
 | 2021 | 4 | 4 | 63 | 2 | 0.25 |
 | 2022 | 8 | 8 | 63 | 2 | 1.02 |
@@ -2752,10 +2766,15 @@ selected, **23 of 62 land in the top n against 6.4 expected by chance.**
 | 2025 | 8 | 7 | 62 | 3 | 0.90 |
 | 2026 | 8 | 7 | 76 | 5 | 0.74 |
 
+The 2017-2019 rows are new. Liquipedia holds no all-league team before 2020, so the CWL
+years had no first-team credit while the CDL years had it, and the wiki's 26 CWL All-Star
+selections now fill that hole. Nothing is counted twice: the two sources hold no award kind
+in common there.
+
 An award is a vote. It tracks team success and airtime, so a disagreement is evidence about
 the ballot as readily as about the rating, and none of this is fitted against.
 
-**Five of the 77 referents are missing, and four of them are one player.** The 2020 team
+**Five of the 88 referents are missing, and four of them are one player.** The 2020 team
 selected five players; every season since has selected four. Scrappy holds a first-team
 selection in four seasons and carries no rating under the name the award was given to: the
 box score sits under `Scrap` and the roster history under `Scrappy`, and nothing links them.
@@ -2772,9 +2791,9 @@ rookie cohort: Gwinn 2nd of 11, RenKoR 3rd of 12, Nium 3rd of 21, and Pred 10th 
 
 **With a season removed.** Take one CDL season out of the plus-minus fit, refit, and see how
 much the remaining seasons reorder. The weakest of six holdouts reorders the later cells at
-Spearman 0.991, against a floor of 0.8 set in advance. Removing a season also cannot touch
+Spearman 0.997, against a floor of 0.8 set in advance. Removing a season also cannot touch
 any cell before it, because the one-sided family solves through each cell and no further, and
-the check confirms that on all 2,517 earlier cells rather than assuming it. Read this as a
+the check confirms that on all 5,091 earlier cells rather than assuming it. Read this as a
 weak test passed: one season is 7 to 9% of the admitted maps, and a fit that survives losing
 it has not been asked a hard question.
 
@@ -2937,22 +2956,27 @@ be nearly empty, so each is fitted separately and published separately:
 
 | Basis | Era | Columns | Player-seasons | Worst season retained |
 |---|---|---|---|---|
-| core MLG | 2013–2016 | 6 | 377 | 0% |
+| core 2013-2016 | 2013–2016 | 6 | 377 | 0% |
 | core CWL | 2017–2019 | 26 | 483 | 92.1% |
 | core CDL | 2020–2026 | 7 | 457 | 100% |
-| extended MLG | 2013–2016 | 12 | 266 | 0% |
+| extended 2013-2016 | 2013–2016 | 12 | 266 | 0% |
 | extended CWL | 2017–2019 | 76 | 318 | 41.0% |
 | extended CDL | 2020–2026 | 33 | 428 | 83.1% |
+
+**The first era is named by its span rather than by a league.** The other two eras each
+cover one league, so each takes that league's name. The 2013-2016 archive covers three MLG
+seasons and 2016, which ran as Call of Duty World League, so no league name fits it without
+naming one of its seasons wrongly. The span names all four correctly.
 
 The three core bases are the published ones. They are not comparable to each other and are
 not compared: 26 columns of streaks, multikills, headshots and pace against 7 columns of
 kills, deaths, damage, engagements and share is a different question asked three times, not
 one question asked of three eras. The CDL basis is thin because most of what the CWL archive
 measured (streak depth, headshot rate, accuracy, suicides, per-10-minute anything) is
-simply not in the CDL-era source, and the MLG basis is thinner still.
+simply not in the CDL-era source, and the wiki-era basis is thinner still.
 
-**One season of the MLG era retains nothing, and that is stated rather than smoothed.**
-2014 contributes no player-season to either MLG basis: its rows carry a different set of
+**One season of the wiki era retains nothing, and that is stated rather than smoothed.**
+2014 contributes no player-season to either 2013-2016 basis: its rows carry a different set of
 non-zero columns from 2013, 2015 and 2016, and a column has to be attainable in every
 season of the era to be admitted. So "2013–2016" on this page means 2013, 2015 and 2016,
 and the axes below are fitted on 377 player-seasons drawn from those three.
@@ -2974,12 +2998,12 @@ silhouette is 0.366, which looks like real separation until the null band is rea
 slaying columns produce an elongated cloud, and an elongated cloud bisects cleanly whether
 or not anything is in it.
 
-The MLG basis is the thinnest and answers the same way. Its best partition is k=6 at a
-silhouette of 0.338, inside a null band of 0.315 to 0.352, and the gap statistic still
+The 2013-2016 basis is the thinnest and answers the same way. Its best partition is k=6 at a
+silhouette of 0.337, inside a null band of 0.315 to 0.352, and the gap statistic still
 prefers one cluster. Six columns over three seasons is the least this test has ever been
 given, and it finds what the other two find.
 
-All three extended bases agree. The extended MLG k=2 scores a silhouette of 0.265 against
+All three extended bases agree. The extended 2013-2016 k=2 scores a silhouette of 0.264 against
 a null band of 0.240 to 0.307; the extended CWL k=2 scores 0.194 against 0.171 to 0.215
 and a stability of 0.929 against 0.885 to 0.953; the extended CDL k=2 scores 0.256 against
 0.215 to 0.279 and 0.963 against 0.863 to 0.979. All inside what no clusters look like, so
@@ -2988,13 +3012,13 @@ nothing is published from any of them.
 **What is real is the axes.** Horn's parallel analysis (each eigenvalue against the 95th
 percentile of the same matrix with every column independently permuted, which destroys
 correlation while preserving each metric's own distribution) retains two components on the
-MLG basis, together 83.8% of the residual variance, five on the CWL basis, together 66.0%,
+2013-2016 basis, together 83.8% of the residual variance, five on the CWL basis, together 66.0%,
 and two on the CDL basis, together 89.5%. Read in raw metric terms:
 
 | Basis | Axis | Name | Share | Loads on |
 |---|---|---|---|---|
-| MLG | 1 | volume | 49.5% | kills, K/D, plus/minus and engagements, all the same way |
-| MLG | 2 | survival | 34.3% | more deaths against fewer engagements, with a better plus/minus and K/D |
+| 2013-2016 | 1 | volume | 49.5% | kills, K/D, plus/minus and engagements, all the same way |
+| 2013-2016 | 2 | survival | 34.3% | more deaths against fewer engagements, with a better plus/minus and K/D |
 | CWL | 1 | volume | 30.3% | kills, blitz index, kill share, K/D, multikills and plus/minus, all the same way |
 | CWL | 2 | survival | 15.4% | more deaths and fewer engagements, with a better plus/minus and K/D |
 | CWL | 3 | *axis 3* | 8.5% | assists, against team kills and kill share |
@@ -3003,7 +3027,7 @@ and two on the CDL basis, together 89.5%. Read in raw metric terms:
 | CDL | 1 | volume | 58.4% | kills, kill share, K/D, plus/minus and damage, all the same way |
 | CDL | 2 | survival | 31.1% | more deaths against fewer engagements, with a better plus/minus and K/D |
 
-The MLG basis carries the same two axes the CDL basis does, on six columns instead of
+The 2013-2016 basis carries the same two axes the CDL basis does, on six columns instead of
 seven, which is what a thin basket recovers: how much a player did, and how much they
 survived doing it.
 
@@ -3227,8 +3251,10 @@ The opponent-strength proxy needs its own honesty check. The project has no inde
 team rating, so a team's own season strength is approximated as the mean VALUE of its
 modal-team players. That proxy was checked against an outside signal before this
 shipped: season map win rate, taken from `games.winner_team_id`. It correlates with the
-proxy at Pearson r = 0.77 and Spearman r = 0.81 over 200 team-seasons with at least 10
-maps, strong enough to trust as a real signal and not a coincidence of the join.
+proxy at Pearson r = 0.76 and Spearman r = 0.79 over 292 team-seasons with at least 10
+maps, strong enough to trust as a real signal and not a coincidence of the join. Both
+numbers are computed on every run and stored in the artifact this page reads, so the check
+is repeated rather than remembered.
 
 **Every total carries a standard deviation**, the same convention career value follows.
 It comes from how much the gold-tier basket disagreed with itself that season: not a

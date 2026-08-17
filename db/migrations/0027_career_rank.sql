@@ -47,8 +47,8 @@ COMMENT ON COLUMN player_career_rank.qualified IS
 
 COMMENT ON TABLE player_season_rank IS
   'career_rank engine output: one breadth score per player-season, award '
-  'credit already added and capped at 100. See ai/career-rank-preregistration.md.';
+  'credit already added and capped at 100.';
 
 COMMENT ON TABLE player_career_rank IS
   'career_rank engine output: peak/best-three/total over player_season_rank. '
-  'See ai/career-rank-preregistration.md.';
+  'One row per player, over the frozen evaluation population.';

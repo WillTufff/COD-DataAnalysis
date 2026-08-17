@@ -311,3 +311,55 @@ def test_no_era_in_the_archive_spans_two_sources(archive_conn: Any) -> None:
         per_era.setdefault(season.era_key, set()).add(season.archive)
     assert all(len(sources) == 1 for sources in per_era.values()), per_era
     assert len(per_era) == len({s.archive for s in with_maps})
+
+
+# ------------------------------------------------------------- the era's name
+
+
+def test_an_archive_that_spans_two_leagues_is_named_by_its_span() -> None:
+    """The wiki archive holds three MLG seasons and one CWL season.
+
+    Naming it `MLG` states that 2016 ran under MLG, which it did not. The span
+    states only what every season in it shares: when it ran.
+    """
+    labels = preflight.era_labels(
+        [
+            (1, 2013, "MLG", "codwiki"),
+            (2, 2014, "MLG", "codwiki"),
+            (3, 2016, "CWL", "codwiki"),
+            (4, 2018, "CWL", "cwl_archive"),
+            (5, 2020, "CDL", "cito"),
+        ]
+    )
+    assert labels == {"codwiki": "2013-2016", "cwl_archive": "CWL", "cito": "CDL"}
+
+
+def test_no_two_eras_share_a_name() -> None:
+    labels = preflight.era_labels(
+        [
+            (1, 2013, "MLG", "codwiki"),
+            (2, 2016, "CWL", "codwiki"),
+            (3, 2017, "MLG", "other"),
+            (4, 2019, "CWL", "other"),
+        ]
+    )
+    assert len(set(labels.values())) == len(labels)
+
+
+def test_no_era_name_misstates_the_league_of_a_season_it_covers(archive_conn: Any) -> None:
+    """An era named for a league every one of its seasons ran under, or not
+    named for a league at all."""
+    seasons = preflight.load_seasons(archive_conn)
+    with_maps = [s for s in seasons.values() if s.archive]
+    if not with_maps:
+        pytest.skip("no box scores loaded")
+    leagues: dict[str, set[str]] = {}
+    for season in with_maps:
+        leagues.setdefault(season.era_key, set()).add(season.league)
+    for era, covered in leagues.items():
+        assert era not in {league for lg in leagues.values() for league in lg} - covered, (
+            f"era '{era}' is named for a league it does not cover: {sorted(covered)}"
+        )
+        if len(covered) > 1:
+            assert era not in covered, f"era '{era}' names one of the {len(covered)} leagues in it"
+    assert len(set(leagues)) == len(leagues)

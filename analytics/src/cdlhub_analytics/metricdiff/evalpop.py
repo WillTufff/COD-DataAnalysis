@@ -104,6 +104,15 @@ def frozen() -> dict[str, Any] | None:
     return cast(dict[str, Any], loaded) if isinstance(loaded, dict) else None
 
 
+def _labels_on_record(pointer: dict[str, Any] | None) -> set[str]:
+    """Every label the pointer knows about: the frozen one and its history."""
+    if pointer is None:
+        return set()
+    history = pointer.get("history")
+    earlier = [e.get("cut") for e in history] if isinstance(history, list) else []
+    return {str(label) for label in [pointer.get("cut"), *earlier] if label}
+
+
 def read_set(cut: str) -> Iterator[str]:
     with gzip.open(set_path(cut), "rt", encoding="utf-8") as handle:
         for line in handle:
@@ -113,7 +122,18 @@ def read_set(cut: str) -> Iterator[str]:
 
 
 def freeze(conn: Conn, cut: str) -> dict[str, Any]:
-    """Cut the population under `cut` and make it the frozen one."""
+    """Cut the population under `cut` and make it the frozen one.
+
+    The label it replaces goes into `supersedes` and the full chain into
+    `history`, so no cut this project ever scored a version against is lost.
+    A label already on record is refused: reusing one would overwrite the set
+    an earlier version was scored on.
+    """
+    previous = frozen()
+    if cut in _labels_on_record(previous):
+        raise ValueError(
+            f"evaluation population '{cut}' is already on record; a re-cut takes a new label"
+        )
     keys, by_season = eligible(conn)
     path = set_path(cut)
     with gzip.open(path, "wt", encoding="utf-8") as handle:
@@ -127,6 +147,8 @@ def freeze(conn: Conn, cut: str) -> dict[str, Any]:
         "frozen_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "by_season": dict(sorted(by_season.items())),
         "path": artifacts.relative(path),
+        "supersedes": previous.get("cut") if previous else None,
+        "history": artifacts.cut_history(previous, "n_maps"),
     }
     (directory() / POINTER).write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8")
     return pointer

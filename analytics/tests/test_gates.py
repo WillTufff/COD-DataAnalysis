@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import psycopg
+import pytest
 
 from cdlhub_analytics import gates
 from cdlhub_analytics.errorcontrol import Q_THRESHOLD
@@ -31,6 +32,7 @@ from cdlhub_analytics.gates import (
     site_read_failures,
     skill_prior_failures,
 )
+from cdlhub_analytics.ratings import evalspec
 
 # ------------------------------------------------------------------- rotation
 
@@ -879,3 +881,61 @@ def test_a_floor_neither_number_accounts_for_still_fails() -> None:
     found = skill_prior_failures(_skill_power(0.09), {}, _PINNED, _REMEASURED)
     assert len(found) == 1
     assert not found[0].startswith(gates.REPORTED)
+
+
+# MARK: the two figures the page states
+
+
+def test_an_unpinned_page_figure_is_reported_and_does_not_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", None)
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "team_strength_proxy", None)
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {"team_strength_proxy_check": {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81}},
+    )
+
+    assert found
+    assert all(line.startswith(gates.REPORTED) for line in found)
+
+
+def test_a_page_figure_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2600},
+        {"team_strength_proxy_check": {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81}},
+    )
+
+    assert len(found) == 1
+    assert "run 2600, page 2517" in found[0]
+
+
+def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+
+    assert (
+        gates.page_figure_failures(
+            {"cells_before_total": 2517},
+            {
+                "team_strength_proxy_check": {
+                    "n_team_seasons": 200,
+                    "pearson": 0.7702,
+                    "spearman": 0.81,
+                }
+            },
+        )
+        == []
+    )

@@ -72,10 +72,10 @@ RACE: dict[str, int] = {KIND_SND: 6, KIND_CONTROL: 3}
 # Hardpoint is a race to 250 points rather than to a round count.
 HILL_TARGET = 250
 
-# The state buckets for Hardpoint, declared in ai/p3b-segment-winprob.md before
-# the fit ran so that no width is chosen against the answer. A lead of 30 at
-# 100-70 is not a lead of 30 at 240-210, so the state carries the team's own
-# score as well as the gap between the two.
+# The state buckets for Hardpoint, declared before the fit ran so that no width
+# is chosen against the answer. A lead of 30 at 100-70 is not a lead of 30 at
+# 240-210, so the state carries the team's own score as well as the gap between
+# the two.
 SCORE_BUCKET = 25
 DIFF_BUCKET = 20
 DIFF_CLIP = 100
@@ -163,7 +163,7 @@ class SegmentMap:
 class LoadReport:
     """What the anomaly rules threw away, counted so the write-up can print it.
 
-    Every field here is a rule from ai/p3b-segment-winprob.md §P3b-2 doing its
+    Every field here is a pre-declared anomaly rule doing its
     job. A silent drop is the failure mode this project has already been bitten
     by, so each one is counted rather than filtered.
     """

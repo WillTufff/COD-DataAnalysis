@@ -33,6 +33,8 @@ from typing import Any, cast
 import psycopg
 
 from . import aging, career, errorcontrol, metrics, role, seriesdyn, style, validation
+from .career_rank import engine as career_rank
+from .career_rank import evalpop as career_evalpop
 from .db import connect
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
@@ -77,13 +79,13 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
     # Re-read on 2026-08-16, after the 2013-2016 load. `core CWL` and both CDL
     # bases came back identical. `extended CWL` grew from ten components to
     # twelve and reordered below its third: it is the robustness arm, not the
-    # published one, and its first three axes are unchanged. The MLG bases are
-    # new and thin, which is what six columns over four seasons supports.
-    "core MLG": (
+    # published one, and its first three axes are unchanged. The wiki-era
+    # bases are new and thin, which is what six columns over four seasons supports.
+    "core 2013-2016": (
         ("volume", "kills"),
         ("survival", "deaths"),
     ),
-    "extended MLG": (
+    "extended 2013-2016": (
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "kills"),
@@ -765,6 +767,63 @@ def population_failures(
     return bad
 
 
+def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, Any]) -> list[str]:
+    """Two figures the page states, held against the run that computes them.
+
+    Both were printed on /methodology with no artifact behind them: the count of
+    cells the one-sided property was checked on, and how well the team-strength
+    proxy agrees with map win rate. A number a page asserts and no run computes
+    cannot be audited, which is the failure this whole harness exists to catch.
+    They are compared here, and a move fails: read it, write it down, and update
+    the page in the same commit.
+    """
+    bad: list[str] = []
+    checks: list[tuple[str, Any, Any, float]] = [
+        (
+            "cells the one-sided property was checked on",
+            retrodiction.get("cells_before_total"),
+            evalspec.PUBLISHED_FIGURES.get("retrodiction_cells_before"),
+            0.0,
+        )
+    ]
+    proxy = career_rank.get("team_strength_proxy_check") or {}
+    pinned = evalspec.PUBLISHED_FIGURES.get("team_strength_proxy") or {}
+    for key, tol in (("n_team_seasons", 0.0), ("pearson", 5e-3), ("spearman", 5e-3)):
+        checks.append((f"team-strength proxy {key}", proxy.get(key), pinned.get(key), tol))
+    for what, got, _want in [(c[0], c[1], c[2]) for c in checks if c[2] is None]:
+        bad.append(f"{REPORTED}{what} is not pinned yet; the run computes {got}")
+    for what, got, want, tol in checks:
+        if want is None:
+            continue
+        if got is None:
+            bad.append(f"{what}: the run published nothing, page says {want}")
+        elif abs(float(got) - float(want)) > tol:
+            bad.append(
+                f"published figure drifted from /methodology — {what}: run {got}, page {want}"
+            )
+    return bad
+
+
+def career_population_failures(drift: dict[str, Any]) -> list[str]:
+    """The career engine's population is held fixed the same way the map one is.
+
+    Drift here is reported rather than failed: a career that qualifies after a
+    load is expected, and the engine follows it only at an explicit re-cut.
+    Having no cut at all is a failure, because then nothing is held fixed.
+    """
+    if not drift.get("frozen"):
+        return ["no career population has been cut (career_rank --freeze CUT)"]
+    if not drift.get("readable", True):
+        return [f"career population '{drift.get('cut')}': {drift.get('reason')}"]
+    if drift.get("matches"):
+        return []
+    return [
+        f"{REPORTED}career population '{drift['cut']}' holds {drift['n_players']:,} players "
+        f"and {drift['eligible_now']:,} qualify now "
+        f"(+{drift['n_added']:,} / -{drift['n_removed']:,}, not applied)"
+    ]
+
+
 def evaluation_stamps(conn: psycopg.Connection[Any]) -> list[tuple[str, str | None]]:
     """Per model, the evaluation-set hash its newest run recorded."""
     rows = conn.execute(
@@ -924,6 +983,14 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             "evaluation population",
             population_failures(
                 artifact(conn, METRIC_DIFF_MODEL, POPULATION_ARTIFACT), evaluation_stamps(conn)
+            ),
+        ),
+        ("career population", career_population_failures(career_evalpop.drift(conn))),
+        (
+            "page figures",
+            page_figure_failures(
+                validation_payloads(conn).get("validation_retrodiction", {}),
+                artifact(conn, career_rank.MODEL, career_rank.ARTIFACT_NAME),
             ),
         ),
     ]

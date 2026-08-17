@@ -88,6 +88,8 @@ import numpy as np
 import psycopg
 from numpy.typing import NDArray
 
+from .ratings.preflight import era_labels
+
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int_]
 
@@ -99,7 +101,8 @@ VERSION = "1.1.0"
 # so one league-wide basis would be reduced to the few columns both eras share.
 # Each era is fitted on its own complete rectangle instead; a player-season
 # belongs to exactly one era, so the published axis rows never collide.
-# Bases are named for the league they were fitted on.
+# Bases are named for the era they were fitted on: the league where every
+# season in the archive ran under it, and the span where they did not.
 
 # A basis below this many complete-case player-seasons is not fitted at all.
 MIN_BASIS_N = 50
@@ -295,9 +298,9 @@ class Era:
     basis fell from five retained components to two.
 
     So the grouping is the archive, which is the thing that decides the columns.
-    Each group is named for the league its first season was played in, which
-    gives back the three names the record already used — MLG, CWL, CDL — because
-    the archives and the leagues change at almost the same moments.
+    Each group takes its name from `preflight.era_labels`, the one rule this
+    project names an era by: the league where every season in the archive ran
+    under it, and the span where they did not.
     """
 
     league: str
@@ -307,20 +310,21 @@ class Era:
 
 
 def load_eras(conn: psycopg.Connection[tuple[object, ...]]) -> list[Era]:
+    rows = [
+        (cast(int, sid), cast(int, year), cast(str, league), cast(str, source))
+        for sid, year, league, source in conn.execute(SEASONS_SQL)
+    ]
+    labels = era_labels(rows)
     by_source: dict[str, dict[int, tuple[int, str]]] = {}
-    for sid, year, league, source in conn.execute(SEASONS_SQL):
-        by_source.setdefault(cast(str, source), {})[cast(int, sid)] = (
-            cast(int, year),
-            cast(str, league),
-        )
+    for sid, year, league, source in rows:
+        by_source.setdefault(source, {})[sid] = (year, league)
     out = []
     for source, seasons in sorted(
         by_source.items(), key=lambda kv: min(y for y, _ in kv[1].values())
     ):
-        first = min(seasons.items(), key=lambda kv: (kv[1][0], kv[0]))
         out.append(
             Era(
-                league=first[1][1],
+                league=labels[source],
                 season_ids=frozenset(seasons),
                 year_of={sid: year for sid, (year, _league) in seasons.items()},
                 source=source,

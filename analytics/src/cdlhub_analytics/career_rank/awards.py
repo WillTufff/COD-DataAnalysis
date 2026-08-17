@@ -1,6 +1,5 @@
-"""Award weight, per `ai/career-rank-preregistration.md` section 4 (owner-
-confirmed 2026-08-15): folded into the season score, not shown only as a
-label. A `player_id`-null award row is unresolved, never a loss.
+"""Award weight, pre-registered and owner-confirmed 2026-08-15: folded into the
+season score, not shown only as a label. A `player_id`-null award row is unresolved, never a loss.
 """
 
 from __future__ import annotations

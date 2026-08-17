@@ -124,26 +124,36 @@ ORDER BY se.id
 
 
 def era_labels(seasons: Iterable[tuple[int, int, str, str]]) -> dict[str, str]:
-    """One label per archive: the league its earliest season ran under.
+    """One label per archive, and a label may not misstate a season's league.
 
-    Where two archives would claim the same league the label carries the span as
-    well, so no two eras share a name. Seasons with no archive keep their league
-    and form no era of their own.
+    An archive whose seasons all ran under one league takes that league's name.
+    An archive that spans two leagues takes its span instead: the wiki archive
+    holds three MLG seasons and 2016, which was Call of Duty World League, so
+    calling it `MLG` names 2016 as something it was not. A span names every
+    season it covers correctly and none of them wrongly.
+
+    Where two archives would still claim the same name, both carry their span.
+    Seasons with no archive keep their league and form no era of their own.
     """
     by_archive: dict[str, list[tuple[int, str]]] = defaultdict(list)
     for _sid, year, league, archive in seasons:
         if archive:
             by_archive[archive].append((year, league))
-    first: dict[str, tuple[int, str]] = {a: min(v) for a, v in by_archive.items()}
-    claims = Counter(league for _year, league in first.values())
-    out: dict[str, str] = {}
-    for archive, (_year, league) in first.items():
-        if claims[league] == 1:
-            out[archive] = league
-        else:
-            years = [y for y, _l in by_archive[archive]]
-            out[archive] = f"{league} {min(years)}-{max(years)}"
-    return out
+    spans = {a: _span(v) for a, v in by_archive.items()}
+    proposed: dict[str, str] = {}
+    for archive, seen in by_archive.items():
+        leagues = {league for _year, league in seen}
+        proposed[archive] = leagues.pop() if len(leagues) == 1 else spans[archive]
+    claims = Counter(proposed.values())
+    return {
+        archive: name if claims[name] == 1 else f"{name} {spans[archive]}"
+        for archive, name in proposed.items()
+    }
+
+
+def _span(seen: list[tuple[int, str]]) -> str:
+    years = [year for year, _league in seen]
+    return f"{min(years)}-{max(years)}" if min(years) != max(years) else str(min(years))
 
 
 def load_seasons(conn: psycopg.Connection[tuple[object, ...]]) -> dict[int, Season]:

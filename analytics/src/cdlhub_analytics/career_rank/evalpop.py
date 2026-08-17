@@ -91,8 +91,28 @@ def read_set(cut: str) -> list[int]:
         return [int(line.strip()) for line in handle if line.strip()]
 
 
+def _labels_on_record(pointer: dict[str, Any] | None) -> set[str]:
+    """Every label the pointer knows about: the frozen one and its history."""
+    if pointer is None:
+        return set()
+    history = pointer.get("history")
+    earlier = [e.get("cut") for e in history] if isinstance(history, list) else []
+    return {str(label) for label in [pointer.get("cut"), *earlier] if label}
+
+
 def freeze(conn: Conn, cut: str) -> dict[str, Any]:
-    """Cut the population under `cut` and make it the frozen one."""
+    """Cut the population under `cut` and make it the frozen one.
+
+    The label it replaces goes into `supersedes` and the full chain into
+    `history`, so no cut this engine was ever tuned against is lost. A label
+    already on record is refused: reusing one would overwrite the set an
+    earlier version was scored on.
+    """
+    previous = frozen()
+    if cut in _labels_on_record(previous):
+        raise ValueError(
+            f"evaluation population '{cut}' is already on record; a re-cut takes a new label"
+        )
     counts = eligible(conn)
     player_ids = sorted(counts)
     path = set_path(cut)
@@ -107,6 +127,8 @@ def freeze(conn: Conn, cut: str) -> dict[str, Any]:
         "frozen_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "season_count_histogram": _histogram(counts),
         "path": artifacts.relative(path),
+        "supersedes": previous.get("cut") if previous else None,
+        "history": artifacts.cut_history(previous, "n_players"),
     }
     (directory() / POINTER).write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8")
     return pointer

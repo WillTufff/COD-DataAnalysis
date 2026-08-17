@@ -1,7 +1,6 @@
 """Orchestrator: build every career-rank row, scoped to the frozen evaluation
-population until an explicit full-archive run. Locked against
-`ai/career-rank-preregistration.md`; task 8 (full archive) reuses this
-unchanged.
+population until an explicit full-archive run. Locked against the
+pre-registration; the full-archive task reuses this unchanged.
 """
 
 from __future__ import annotations
@@ -126,6 +125,7 @@ def build(
         "model": MODEL,
         "version": VERSION,
         "evaluation_population": evalpop.stamp(),
+        "team_strength_proxy_check": roster_strength.proxy_check(conn, team_season_value),
         "restricted": restrict_to is not None,
         "n_players_scored": len(out),
         "publish_from_year": PUBLISH_FROM_YEAR,

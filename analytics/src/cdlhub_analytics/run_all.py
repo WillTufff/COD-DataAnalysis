@@ -1327,7 +1327,7 @@ def main(argv: list[str] | None = None) -> int:
         # gold-tier metric basket (plus award credit) instead of over VALUE or
         # SKILL. Full archive, not the frozen evaluation population — the
         # frozen set exists to keep the formula honest during development
-        # (see ai/career-rank-preregistration.md), not to gate what the site
+        # against the pre-registration, not to gate what the site
         # publishes.
         progress.stage("career_rank")
         cr_rows, cr_payload, cr_run = career_rank.write(conn)

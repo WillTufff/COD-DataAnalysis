@@ -1,6 +1,6 @@
 """Breadth score: the gold-tier metric grid rolled into one number per season.
 
-Pre-registered in `ai/career-rank-preregistration.md` section 1. The basket is
+Pre-registered before the fit ran. The basket is
 exactly the metrics `buildMetricCards` renders on the player page — gold tier,
 minus the kill-feed categories (IW/WWII only, see the kill-feed reconciliation
 note in the metrics module) and the round-card keys, with the same per-map/

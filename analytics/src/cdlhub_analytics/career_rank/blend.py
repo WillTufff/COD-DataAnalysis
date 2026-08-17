@@ -1,5 +1,5 @@
 """Career blend: peak / best-three / total over the award-weighted breadth
-score, per `ai/career-rank-preregistration.md` sections 3, 5 and 6.
+score, per the pre-registration.
 
 CWL years count at full per-year weight, same sequence as CDL — a deliberate
 departure from `career.py`'s plus-minus era pooling, justified in the
