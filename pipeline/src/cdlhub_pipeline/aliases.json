@@ -16,11 +16,18 @@
     "TDylan": "Dylan",
     "Alex": "Alexx"
   },
+  "_comment_scoped": "'players_by_source' is a per-archive spelling map, applied only to the archive it is listed under. A handle that means one person in one source and another person elsewhere cannot be merged globally: 'Zerg' is Deleo Devitt in the CWL archive and is a different handle in the wiki record.",
+  "players_by_source": {
+    "cwl_archive": {
+      "Zerg": "Deleo"
+    }
+  },
   "teams": {
     "Team EnVyUs": "Team Envy",
     "Complexity Gaming": "Complexity",
     "Luminosity Gaming": "Luminosity",
-    "ExcelerateGG": "Excelerate"
+    "ExcelerateGG": "Excelerate",
+    "Envy": "Team Envy"
   },
   "orgs": {
     "eRa Eternity": [
@@ -593,6 +600,10 @@
       "Naux"
     ],
     [
+      "Methodz",
+      "MethodZsick"
+    ],
+    [
       "Nelson",
       "Nolson"
     ],
@@ -620,5 +631,117 @@
       "Zer0",
       "Zerg"
     ]
+  ],
+  "_comment_bios": "'player_pages' pins which Liquipedia page may supply a handle's biography. Liquipedia distinguishes pages by case ('Methodz' is Anthony Zinni, 'MethodZ' is Jorge Bancells), so a handle whose folded form matches several pages binds to none until it is pinned here. null means no page may bind: the handle is quarantined and any biography an earlier load left on it is cleared. 'real_names' overrides the name a bound page supplies, for the few where two independent pages agree against it.",
+  "player_pages": {
+    "Methodz": "Methodz",
+    "MethodZsick": "MethodZ",
+    "Vortex": null,
+    "Realize": null,
+    "Melo": null
+  },
+  "real_names": {
+    "Royalty": "Matthew Faithfull"
+  },
+  "_comment_teams_unresolved": "Team-name pairs the wiki load found that may each be one team, with what the record measures for each. Nothing reads this at load time. A pair moves into 'teams' only when a shared roster across the two names settles it and their windows do not overlap; until then both names stand, because merging two teams is a guess about a result.",
+  "teams_unresolved": [
+    {
+      "pair": [
+        "aXon",
+        "Axon Gaming"
+      ],
+      "reason": "neither name carries a roster or a box score; nothing to compare"
+    },
+    {
+      "pair": [
+        "Carnage Gaming",
+        "Carnage Esports"
+      ],
+      "reason": "Carnage Gaming carries no roster; no shared player"
+    },
+    {
+      "pair": [
+        "EZG",
+        "EZG eSports"
+      ],
+      "reason": "EZG carries no roster; no shared player"
+    },
+    {
+      "pair": [
+        "FaTe",
+        "Team FaTe"
+      ],
+      "reason": "Team FaTe carries no roster; no shared player"
+    },
+    {
+      "pair": [
+        "Giants",
+        "Giants Gaming"
+      ],
+      "reason": "one shared player, Tojor, across 2016 and 2019; one player is a transfer as easily as a rename"
+    },
+    {
+      "pair": [
+        "Lethal Gaming",
+        "Team Lethal"
+      ],
+      "reason": "windows overlap through 2016 and both placed at MLG Anaheim Open 2016; two teams, not one"
+    },
+    {
+      "pair": [
+        "Liquid Gaming",
+        "Team Liquid"
+      ],
+      "reason": "no shared player across the 2015 and 2016 rosters"
+    },
+    {
+      "pair": [
+        "Team NextGen",
+        "Team NeXt Gen"
+      ],
+      "reason": "neither name carries a roster or a box score; nothing to compare"
+    },
+    {
+      "pair": [
+        "Next Threat",
+        "Nex-TT-hreat"
+      ],
+      "reason": "Next Threat carries no wiki roster; no shared player"
+    },
+    {
+      "pair": [
+        "Orbit",
+        "Orbit eSport"
+      ],
+      "reason": "windows overlap through 2014 and no player is shared between the two rosters"
+    },
+    {
+      "pair": [
+        "Primal",
+        "Primal Gaming"
+      ],
+      "reason": "Primal Gaming carries no roster; no shared player"
+    },
+    {
+      "pair": [
+        "Sigma Gaming",
+        "Team Sigma"
+      ],
+      "reason": "Team Sigma carries no roster; no shared player"
+    },
+    {
+      "pair": [
+        "Sigma Gaming",
+        "Sigma eSports"
+      ],
+      "reason": "no shared player between the 2014 and 2016 rosters"
+    },
+    {
+      "pair": [
+        "SiNister",
+        "Team SiNister"
+      ],
+      "reason": "SiNister carries no roster; no shared player"
+    }
   ]
 }

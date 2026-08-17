@@ -68,10 +68,13 @@ def test_jobs_needs_no_database(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_every_destructive_job_is_marked() -> None:
+    """A `--reset` job wipes a source's rows. `identity_apply` is the one job
+    that destroys without one: it merges rows and drops the model output of
+    every player and team it touches."""
+    reset = {job["id"] for job in JOBS if any("--reset" in arg for arg in job["argv"])}
     destructive = {job["id"] for job in JOBS if job["destructive"]}
-    assert destructive == {
-        job["id"] for job in JOBS if any("--reset" in arg for arg in job["argv"])
-    }
+    assert reset <= destructive
+    assert destructive - reset == {"identity_apply"}
 
 
 def test_every_events_job_emits_the_stages_the_catalog_declares() -> None:
@@ -1129,3 +1132,216 @@ def test_a_page_reads_what_the_functions_it_imports_read(
         {"route": "/", "tables": ["insights"]},
         {"route": "/teams", "tables": ["players", "team_ratings"]},
     ]
+
+
+# MARK: replaying decisions onto the database
+
+
+@pytest.fixture
+def rollback_conn() -> Iterator[Any]:
+    """A live connection whose transaction is always rolled back.
+
+    The replay tool is SQL: it merges rows across ten tables and clears columns
+    on others, and a fixture cannot tell whether that SQL is right. So it runs
+    against the real schema and nothing is kept.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("DATABASE_URL", "postgres://cdlhub:cdlhub@localhost:54329/cdlhub")
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=2)
+    except Exception:  # noqa: BLE001 - any connection failure means no DB here
+        pytest.skip("no database reachable")
+    try:
+        yield conn
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def _make_player(conn: Any, handle: str) -> int:
+    row = conn.execute(
+        "INSERT INTO players (handle) VALUES (%s) RETURNING id", (handle,)
+    ).fetchone()
+    return int(row[0])
+
+
+def _make_team(conn: Any, name: str) -> int:
+    row = conn.execute("INSERT INTO teams (name) VALUES (%s) RETURNING id", (name,)).fetchone()
+    return int(row[0])
+
+
+def _a_game(conn: Any) -> tuple[int, int]:
+    """One existing game and its series, to hang synthetic box scores on."""
+    row = conn.execute("SELECT id, series_id FROM games ORDER BY id LIMIT 1").fetchone()
+    if row is None:
+        pytest.skip("no games loaded")
+    return int(row[0]), int(row[1])
+
+
+def test_a_scoped_merge_moves_only_the_named_archives_rows(
+    rollback_conn: Any, aliases: Path
+) -> None:
+    conn = rollback_conn
+    winner = _make_player(conn, "ZzTestWinner")
+    loser = _make_player(conn, "ZzTestLoser")
+    team = _make_team(conn, "ZzTestTeam")
+    game_id, _series = _a_game(conn)
+    other = conn.execute("SELECT id FROM games ORDER BY id DESC LIMIT 1").fetchone()
+    conn.execute(
+        "INSERT INTO game_player_stats (game_id, player_id, team_id, kills, data_source)"
+        " VALUES (%s, %s, %s, 10, 'cwl_archive')",
+        (game_id, loser, team),
+    )
+    conn.execute(
+        "INSERT INTO game_player_stats (game_id, player_id, team_id, kills, data_source)"
+        " VALUES (%s, %s, %s, 11, 'codwiki')",
+        (int(other[0]), loser, team),
+    )
+    aliases.write_text(
+        json.dumps({"players_by_source": {"cwl_archive": {"ZzTestLoser": "ZzTestWinner"}}}),
+        encoding="utf-8",
+    )
+
+    report = ops_identity.apply_decisions(conn)
+
+    moved = conn.execute(
+        "SELECT data_source FROM game_player_stats WHERE player_id = %s", (winner,)
+    ).fetchall()
+    stayed = conn.execute(
+        "SELECT data_source FROM game_player_stats WHERE player_id = %s", (loser,)
+    ).fetchall()
+    assert [r[0] for r in moved] == ["cwl_archive"]
+    assert [r[0] for r in stayed] == ["codwiki"]
+    assert report["player_merges"][0]["loser_row"].startswith("kept")
+
+
+def test_a_merge_that_has_already_run_moves_nothing(rollback_conn: Any, aliases: Path) -> None:
+    conn = rollback_conn
+    _make_player(conn, "ZzTestWinner")
+    aliases.write_text(json.dumps({"players": {"ZzTestMissing": "ZzTestWinner"}}), encoding="utf-8")
+
+    report = ops_identity.apply_decisions(conn)
+
+    assert report["player_merges"] == []
+
+
+def test_a_global_merge_deletes_the_row_it_emptied(rollback_conn: Any, aliases: Path) -> None:
+    conn = rollback_conn
+    winner = _make_player(conn, "ZzTestWinner")
+    loser = _make_player(conn, "ZzTestLoser")
+    team = _make_team(conn, "ZzTestTeam")
+    game_id, _series = _a_game(conn)
+    conn.execute(
+        "INSERT INTO game_player_stats (game_id, player_id, team_id, kills, data_source)"
+        " VALUES (%s, %s, %s, 10, 'cwl_archive')",
+        (game_id, loser, team),
+    )
+    aliases.write_text(json.dumps({"players": {"ZzTestLoser": "ZzTestWinner"}}), encoding="utf-8")
+
+    report = ops_identity.apply_decisions(conn)
+
+    assert conn.execute("SELECT 1 FROM players WHERE id = %s", (loser,)).fetchone() is None
+    assert (
+        conn.execute(
+            "SELECT count(*) FROM game_player_stats WHERE player_id = %s", (winner,)
+        ).fetchone()[0]
+        == 1
+    )
+    assert report["player_merges"][0]["loser_row"] == "deleted"
+
+
+def test_a_row_the_winner_already_holds_is_dropped_not_moved(
+    rollback_conn: Any, aliases: Path
+) -> None:
+    conn = rollback_conn
+    winner = _make_player(conn, "ZzTestWinner")
+    loser = _make_player(conn, "ZzTestLoser")
+    team = _make_team(conn, "ZzTestTeam")
+    game_id, _series = _a_game(conn)
+    for pid, kills in ((winner, 9), (loser, 4)):
+        conn.execute(
+            "INSERT INTO game_player_stats (game_id, player_id, team_id, kills, data_source)"
+            " VALUES (%s, %s, %s, %s, 'cwl_archive')",
+            (game_id, pid, team, kills),
+        )
+    aliases.write_text(json.dumps({"players": {"ZzTestLoser": "ZzTestWinner"}}), encoding="utf-8")
+
+    report = ops_identity.apply_decisions(conn)
+
+    kept = conn.execute(
+        "SELECT kills FROM game_player_stats WHERE game_id = %s AND player_id = %s",
+        (game_id, winner),
+    ).fetchall()
+    assert [r[0] for r in kept] == [9]
+    assert report["player_merges"][0]["dropped_as_duplicate"] == {"game_player_stats": 1}
+
+
+def test_a_team_alias_moves_every_reference_and_deletes_the_name(
+    rollback_conn: Any, aliases: Path
+) -> None:
+    conn = rollback_conn
+    winner = _make_team(conn, "ZzTestTeamWinner")
+    loser = _make_team(conn, "ZzTestTeamLoser")
+    player = _make_player(conn, "ZzTestPlayer")
+    game_id, _series = _a_game(conn)
+    conn.execute(
+        "INSERT INTO game_player_stats (game_id, player_id, team_id, kills, data_source)"
+        " VALUES (%s, %s, %s, 3, 'codwiki')",
+        (game_id, player, loser),
+    )
+    aliases.write_text(
+        json.dumps({"teams": {"ZzTestTeamLoser": "ZzTestTeamWinner"}}), encoding="utf-8"
+    )
+
+    report = ops_identity.apply_decisions(conn)
+
+    assert conn.execute("SELECT 1 FROM teams WHERE id = %s", (loser,)).fetchone() is None
+    assert (
+        conn.execute(
+            "SELECT team_id FROM game_player_stats WHERE game_id = %s AND player_id = %s",
+            (game_id, player),
+        ).fetchone()[0]
+        == winner
+    )
+    assert report["team_merges"][0]["moved"]["game_player_stats.team_id"] == 1
+
+
+def test_a_quarantined_handle_loses_the_biography_it_was_given(
+    rollback_conn: Any, aliases: Path
+) -> None:
+    conn = rollback_conn
+    pid = _make_player(conn, "ZzTestPinned")
+    conn.execute(
+        "UPDATE players SET real_name = %s, country = 'ES', liquipedia_page = %s WHERE id = %s",
+        ("Somebody Else", "ZzTestOtherPage", pid),
+    )
+    aliases.write_text(json.dumps({"player_pages": {"ZzTestPinned": None}}), encoding="utf-8")
+
+    report = ops_identity.apply_decisions(conn)
+
+    row = conn.execute(
+        "SELECT real_name, country, liquipedia_page FROM players WHERE id = %s", (pid,)
+    ).fetchone()
+    assert row == (None, None, None)
+    assert report["pages_cleared"][0]["handle"] == "ZzTestPinned"
+
+
+def test_a_real_name_override_wins_over_what_a_page_supplied(
+    rollback_conn: Any, aliases: Path
+) -> None:
+    conn = rollback_conn
+    pid = _make_player(conn, "ZzTestNamed")
+    conn.execute("UPDATE players SET real_name = %s WHERE id = %s", ("Matteo Wrong", pid))
+    aliases.write_text(
+        json.dumps({"real_names": {"ZzTestNamed": "Matthew Right"}}), encoding="utf-8"
+    )
+
+    first = ops_identity.apply_decisions(conn)
+    second = ops_identity.apply_decisions(conn)
+
+    assert (
+        conn.execute("SELECT real_name FROM players WHERE id = %s", (pid,)).fetchone()[0]
+        == "Matthew Right"
+    )
+    assert first["real_names"] == [{"handle": "ZzTestNamed", "real_name": "Matthew Right"}]
+    assert second["real_names"] == []

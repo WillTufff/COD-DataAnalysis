@@ -39,6 +39,9 @@ from ..identity import Aliases
 from .schema_probe import SCHEMA_NONE, death_schema, iter_games
 
 SOURCE = "cwl-structured"
+# The kill feed and the box scores are one archive in two forms, so a
+# source-scoped alias listed for the box scores applies here too.
+ARCHIVE_SOURCE = "cwl_archive"
 
 # Event time is normalized to milliseconds. WWII carries ``time_ms`` already in
 # ms; IW carries ``time`` in deciseconds (measured: event clock runs ~10x the
@@ -143,7 +146,8 @@ class Importer:
                 r = rosters[source_uid] = Roster(game_id=game_id)
             r.pid_to_team[pid] = team_id
             for spelling in {handle, *aliases_of.get(pid, set())}:
-                for form in (spelling, self.aliases.player(spelling)):
+                scoped = self.aliases.player(spelling, ARCHIVE_SOURCE)
+                for form in (spelling, self.aliases.player(spelling), scoped):
                     r.handle_to_pid[form.lower()] = pid
                 for source in sources_of.get(spelling.lower(), ()):
                     r.handle_to_pid[source.lower()] = pid

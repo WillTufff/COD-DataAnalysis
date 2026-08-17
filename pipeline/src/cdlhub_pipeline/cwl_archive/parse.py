@@ -218,6 +218,11 @@ class ParsedEvent:
     lines: list[ArchiveStatLine] = field(default_factory=list)
 
 
+# The value the loader stamps on every row parsed here, and the scope a
+# source-scoped alias is listed under.
+DATA_SOURCE = "cwl_archive"
+
+
 def parse_archive(archive_dir: Path, aliases: Aliases) -> list[ParsedEvent]:
     """Parse every manifest CSV, applying identity normalization."""
     out: list[ParsedEvent] = []
@@ -228,7 +233,7 @@ def parse_archive(archive_dir: Path, aliases: Aliases) -> list[ParsedEvent]:
             for row in csv.DictReader(fh):
                 line = parse_row(row)
                 line.team = aliases.team(line.team)
-                line.player = aliases.player(line.player)
+                line.player = aliases.player(line.player, DATA_SOURCE)
                 parsed.lines.append(line)
         out.append(parsed)
     return out

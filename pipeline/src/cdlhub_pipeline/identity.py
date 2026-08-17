@@ -33,10 +33,24 @@ class Aliases:
     # LPDB tournament pagename -> local event name (season comes from the game
     # code); null marks a page deliberately out of scope
     lpdb_events: dict[str, str | None] = field(default_factory=dict)
+    # data_source -> archive spelling -> canonical handle, applied to that
+    # source alone
+    players_by_source: dict[str, dict[str, str]] = field(default_factory=dict)
+    # canonical handle -> the Liquipedia page allowed to supply its biography,
+    # or None where the handle is quarantined and no page may
+    player_pages: dict[str, str | None] = field(default_factory=dict)
+    # canonical handle -> the real name that overrides what a page supplies
+    real_names: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._folded_teams = {k.lower(): v for k, v in self.teams.items()}
         self._folded_players = {k.lower(): v for k, v in self.players.items()}
+        self._folded_by_source = {
+            source: {k.lower(): v for k, v in spellings.items()}
+            for source, spellings in self.players_by_source.items()
+        }
+        self._folded_pages = {k.lower(): v for k, v in self.player_pages.items()}
+        self._folded_real_names = {k.lower(): v for k, v in self.real_names.items()}
 
     @classmethod
     def load(cls) -> Aliases:
@@ -49,6 +63,12 @@ class Aliases:
             cito_slug_rosters=dict(raw.get("cito_slug_rosters", {})),
             lpdb_teams=dict(raw.get("lpdb_teams", {})),
             lpdb_events=dict(raw.get("lpdb_events", {})),
+            players_by_source={
+                source: dict(spellings)
+                for source, spellings in raw.get("players_by_source", {}).items()
+            },
+            player_pages=dict(raw.get("player_pages", {})),
+            real_names=dict(raw.get("real_names", {})),
         )
 
     def cito_split(self, slug: str, season_year: int) -> dict[str, set[str]] | None:
@@ -93,8 +113,34 @@ class Aliases:
         """
         return self._folded_teams.get(name.lower(), name)
 
-    def player(self, handle: str) -> str:
-        return self._folded_players.get(handle.lower(), handle)
+    def player(self, handle: str, source: str | None = None) -> str:
+        """The canonical handle, matched without regard to case.
+
+        A source-scoped entry wins over the global map and applies to that
+        archive alone. `Zerg` is Deleo Devitt in the CWL archive and is not
+        that person anywhere else, so the merge cannot be global.
+        """
+        folded = handle.lower()
+        if source:
+            scoped = self._folded_by_source.get(source, {})
+            if folded in scoped:
+                return scoped[folded]
+        return self._folded_players.get(folded, handle)
+
+    def page_pin(self, handle: str) -> tuple[bool, str | None]:
+        """Whether this handle is pinned, and to which Liquipedia page.
+
+        `(False, None)` means unpinned: the biography match decides. `(True,
+        None)` means quarantined: no page may supply this handle a biography.
+        """
+        folded = handle.lower()
+        if folded not in self._folded_pages:
+            return False, None
+        return True, self._folded_pages[folded]
+
+    def real_name(self, handle: str) -> str | None:
+        """The name that overrides what a page supplies, where one is declared."""
+        return self._folded_real_names.get(handle.lower())
 
     def org_of(self, team_name: str) -> str | None:
         """The organisation a canonical team name belongs to, if any.

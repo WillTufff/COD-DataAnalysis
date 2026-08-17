@@ -739,20 +739,25 @@ class LpdbLoader:
             self.report["transfers_loaded"] += 1
 
     def load_player_bios(self, rows: list[dict[str, Any]]) -> None:
-        by_handle: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            for h in [row.get("id") or "", *(row.get("alternateid") or "").split(",")]:
-                h = h.strip().lower()
-                if h:
-                    by_handle.setdefault(h, row)
-        handles_by_pid: dict[int, list[str]] = defaultdict(list)
-        for h, pid in sorted(self._players.items()):
-            handles_by_pid[pid].append(h)
+        """Bind each player to at most one Liquipedia biography.
+
+        Liquipedia tells two people apart by the case of one letter — `Methodz`
+        is Anthony Zinni and `MethodZ` is Jorge Bancells — so a folded index
+        collapses them and hands one player the other's name, country and
+        birthdate. 47 handles in this pull fold together. The match is therefore
+        by exact spelling first; a folded match binds only where it is
+        unambiguous, and an ambiguous handle binds nothing until `player_pages`
+        pins it. A pinned `null` binds nothing on purpose.
+        """
+        exact, folded = self._bio_index(rows)
+        handles_by_pid = self._db_handles()
         unmapped: set[str] = set()
         for pid, handles in sorted(handles_by_pid.items()):
-            bio = next((by_handle[h] for h in handles if h in by_handle), None)
+            bio, why = self._bio_for(handles, exact, folded)
             if bio is None:
                 self.report["players_without_bio"].append(handles[0])
+                if why:
+                    self.report.setdefault("bios_not_bound", []).append(f"{handles[0]}: {why}")
                 continue
             nationality = (bio.get("nationality") or "").lower()
             country = COUNTRY_CODES.get(nationality)
@@ -780,41 +785,110 @@ class LpdbLoader:
                     pid,
                 ),
             )
+            override = self.aliases.real_name(handles[0])
+            if override:
+                self.conn.execute(
+                    "UPDATE players SET real_name = %s WHERE id = %s", (override, pid)
+                )
             self.conn.execute(
                 "UPDATE players SET liquipedia_page = %s WHERE id = %s "
-                "AND liquipedia_page IS NULL "
+                "AND liquipedia_page IS DISTINCT FROM %s "
                 "AND NOT EXISTS (SELECT 1 FROM players WHERE liquipedia_page = %s)",
-                (bio["pagename"], pid, bio["pagename"]),
+                (bio["pagename"], pid, bio["pagename"], bio["pagename"]),
             )
             self.report["bios_updated"].append(handles[0])
             self.counts["player_bios"] += 1
         self.report["unmapped_nationalities"] = sorted(unmapped)
 
+    def _bio_index(
+        self, rows: list[dict[str, Any]]
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        """Biographies by exact spelling, and by folded spelling for fallback."""
+        exact: dict[str, dict[str, Any]] = {}
+        folded: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            for h in [row.get("id") or "", *(row.get("alternateid") or "").split(",")]:
+                h = h.strip()
+                if not h:
+                    continue
+                exact.setdefault(h, row)
+                folded[h.lower()].append(row)
+        return exact, folded
+
+    def _db_handles(self) -> dict[int, list[str]]:
+        """Every spelling a player is known by here, their own handle first."""
+        out: dict[int, list[str]] = defaultdict(list)
+        for pid, handle in self.conn.execute("SELECT id, handle FROM players").fetchall():
+            out[cast(int, pid)].append(cast(str, handle))
+        for pid, alias in self.conn.execute(
+            "SELECT player_id, alias FROM player_aliases ORDER BY alias"
+        ).fetchall():
+            if cast(str, alias) not in out[cast(int, pid)]:
+                out[cast(int, pid)].append(cast(str, alias))
+        return out
+
+    def _bio_for(
+        self,
+        handles: list[str],
+        exact: dict[str, dict[str, Any]],
+        folded: dict[str, list[dict[str, Any]]],
+    ) -> tuple[dict[str, Any] | None, str]:
+        """The one biography this player may take, and why it took none."""
+        pinned, page = self.aliases.page_pin(handles[0])
+        if pinned:
+            if page is None:
+                return None, "quarantined: no page may supply this handle"
+            found = next(
+                (bio for bio in folded.get(page.lower(), []) if bio.get("pagename") == page), None
+            )
+            return (found, "") if found else (None, f"pinned to '{page}', which this pull has no")
+        for handle in handles:
+            if handle in exact:
+                return exact[handle], ""
+        for handle in handles:
+            candidates = folded.get(handle.lower(), [])
+            pages = {str(bio.get("pagename")) for bio in candidates}
+            if len(pages) == 1:
+                return candidates[0], ""
+            if len(pages) > 1:
+                return None, f"'{handle}' matches {len(pages)} pages: {', '.join(sorted(pages))}"
+        return None, ""
+
     def cleanup_orphan_players(self) -> None:
         """Remove player rows nothing references: a stint-created player whose
         stints vanished after an alias/role-filter change would otherwise
-        linger forever."""
+        linger forever.
+
+        The tables to check are read from the foreign keys rather than listed.
+        A hand-written list drifts: `event_rosters` arrived with the wiki load
+        and was not in it, so this deleted a player the new table still
+        referenced and the whole load failed on the constraint.
+        """
+        references = self.conn.execute(_REFERENCES_PLAYERS_SQL).fetchall()
+        clauses = " ".join(
+            f"AND NOT EXISTS (SELECT 1 FROM {cast(str, table)} x "
+            f"WHERE x.{cast(str, column)} = p.id)"
+            for table, column in references
+        )
         rows = self.conn.execute(
-            """
-            DELETE FROM players p
-            WHERE NOT EXISTS (SELECT 1 FROM game_player_stats     x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM roster_stints         x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM transfers             x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM player_aliases        x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM kill_events           x
-                              WHERE x.victim_id = p.id OR x.killer_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM career_curves         x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM player_metric_season  x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM player_rapm           x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM player_season_adjusted x WHERE x.player_id = p.id)
-              AND NOT EXISTS (SELECT 1 FROM player_style_season   x WHERE x.player_id = p.id)
-            RETURNING p.handle
-            """
+            f"DELETE FROM players p WHERE true {clauses} RETURNING p.handle"
         ).fetchall()
         self.report["orphan_players_removed"] = sorted(cast(str, r[0]) for r in rows)
         self.counts["orphan_players_removed"] = len(rows)
         for handle in self.report["orphan_players_removed"]:
             self._players.pop(handle.lower(), None)
+
+
+# Every column that points at `players`, so a new table cannot be forgotten.
+_REFERENCES_PLAYERS_SQL = """
+SELECT c.conrelid::regclass::text AS table_name,
+       a.attname                  AS column_name
+FROM pg_constraint c
+JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+WHERE c.contype = 'f' AND c.confrelid = 'players'::regclass
+ORDER BY 1, 2
+"""
 
 
 def load(conn: psycopg.Connection[tuple[object, ...]]) -> tuple[dict[str, int], dict[str, Any]]:

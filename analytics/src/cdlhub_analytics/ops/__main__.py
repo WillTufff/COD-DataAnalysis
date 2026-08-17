@@ -127,6 +127,19 @@ JOBS: list[dict[str, Any]] = [
         "est_seconds": 990,
     },
     {
+        "id": "identity_apply",
+        "label": "Apply identity decisions to the database",
+        "cwd": "analytics",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_analytics.ops", "identity", "--apply"],
+        "stages": [],
+        # It merges rows and clears biographies that belong to somebody else,
+        # and it drops the model rows of every player it touches. Back up first,
+        # and run `run_all` after it.
+        "destructive": True,
+        "events": False,
+        "est_seconds": 20,
+    },
+    {
         "id": "metric_diff",
         "label": "Metric diff (snapshot and compare)",
         "cwd": "analytics",
@@ -338,6 +351,16 @@ def _with_conn(dsn: str, fn: Any) -> dict[str, Any]:
     return dict(result)
 
 
+def _apply_identity(conn: Conn) -> dict[str, Any]:
+    """The one command here that writes to the database.
+
+    Everything else in this module reads. This replays the decisions in
+    `aliases.json` in place, so a decision reaches the record without a
+    reimport; the commit happens when the connection closes cleanly.
+    """
+    return identity.apply_decisions(conn)
+
+
 def _parser() -> argparse.ArgumentParser:
     # The global options are repeated on every subcommand so they are accepted
     # on either side of it; SUPPRESS keeps the unused copy from clobbering the
@@ -387,6 +410,11 @@ def _parser() -> argparse.ArgumentParser:
     decision = identity_cmd.add_mutually_exclusive_group()
     decision.add_argument("--merge", nargs=2, metavar=("SOURCE", "CANONICAL"))
     decision.add_argument("--keep-separate", nargs=2, metavar=("LEFT", "RIGHT"))
+    decision.add_argument(
+        "--apply",
+        action="store_true",
+        help="replay every decision in aliases.json onto the database",
+    )
 
     artifact_cmd = sub.add_parser("artifact", parents=[common])
     artifact_cmd.add_argument("run_id", type=int)
@@ -429,6 +457,8 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         return _with_conn(dsn, lambda c: sources.report(c, snapshots))
     if args.command == "identity":
         applied: dict[str, Any] | None = None
+        if args.apply:
+            return _with_conn(dsn, _apply_identity)
         if args.merge:
             applied = identity.merge(*args.merge)
         elif args.keep_separate:

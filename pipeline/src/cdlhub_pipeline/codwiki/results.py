@@ -14,10 +14,14 @@ Major or Minor, or when the box-score load already created it. That is 208
 events. Every event we hold has result rows, so the second half of the rule
 never loses one.
 
-**The window ends at 2017.** Awards for 2017 onward are already held from LPDB
-under different page names, and loading the wiki's copy would count one MVP
-twice. They are reported, not loaded, which is the same rule the box scores
-follow.
+**The window ends at 2017, with one named exception.** Awards for 2017 onward
+are already held from LPDB under different page names, and loading the wiki's
+copy would count one MVP twice. They are reported, not loaded, which is the
+same rule the box scores follow. The exception is `CWL All-Star`: LPDB holds no
+all-league team before 2020 at all, so excluding these would give the CWL years
+no first-team credit while the CDL years have it, which is an era difference in
+the record rather than in the sport. Nothing can be counted twice, because
+there is no LPDB row of that kind to collide with.
 
 A team, a player or an event that cannot be resolved is counted and named. None
 is guessed.
@@ -89,6 +93,29 @@ def _prize(row: dict[str, Any]) -> float | None:
         return float(raw.replace(",", ""))
     except ValueError:
         return None
+
+
+# The one award kind loaded outside the window: see the module docstring.
+ALL_LEAGUE_OUTSIDE_WINDOW = {"CWL All-Star"}
+
+# The wiki title name for each season these selections cover, against the name
+# our `titles` table uses. Kept here rather than in `TITLE_SEASONS`, which
+# decides which box scores load and must not gain a year.
+ALL_LEAGUE_TITLES = {
+    "Infinite Warfare": "Infinite Warfare",
+    "World War II": "WWII",
+    "Black Ops 4": "Black Ops 4",
+}
+
+# Our event for each wiki page these selections sit on. A page with no local
+# event takes the season alone: an all-league team is a season honour, and
+# inventing an event to hang it on would put a tournament in the record that
+# this project holds no maps for.
+ALL_LEAGUE_EVENTS = {
+    "CWL/2017 Season/Global Pro League/Stage 1": None,
+    "CWL/2018 Season/Pro League/Stage 2": "CWL Pro League 2018 Stage 2",
+    "CWL/2019 Season/Pro League": "CWL Pro League 2019",
+}
 
 
 def award_kind(raw: str) -> str:
@@ -291,6 +318,26 @@ class ResultsLoader:
                 # event, so the count is rows written and not rows offered.
                 self.report.counts["event_rosters"] += cur.rowcount
 
+    def all_league_target(self, page: str, title: str) -> tuple[int | None, int | None]:
+        """The season and event an out-of-window all-league selection attaches to."""
+        our_title = ALL_LEAGUE_TITLES.get(title)
+        if our_title is None or page not in ALL_LEAGUE_EVENTS:
+            return None, None
+        row = self.conn.execute(
+            "SELECT s.id FROM seasons s JOIN titles t ON t.id = s.title_id WHERE t.name = %s",
+            (our_title,),
+        ).fetchone()
+        if row is None:
+            return None, None
+        season = cast(int, row[0])
+        name = ALL_LEAGUE_EVENTS[page]
+        if name is None:
+            return season, None
+        found = self.conn.execute(
+            "SELECT id FROM events WHERE season_id = %s AND name = %s", (season, name)
+        ).fetchone()
+        return season, (cast(int, found[0]) if found else None)
+
     def load_awards(self, rows: list[dict[str, Any]], meta: dict[str, Any]) -> None:
         for row in rows:
             page = str(row.get("TournamentPage") or "")
@@ -298,10 +345,20 @@ class ResultsLoader:
             if entry is None:
                 self.report.skipped["award without an event"] += 1
                 continue
-            event = self.event_id(page, entry)
-            season = self.season_id(str(entry.get("Game") or ""))
-            if event is None or season is None:
-                continue
+            title = str(entry.get("Game") or "")
+            if str(row.get("Type")) in ALL_LEAGUE_OUTSIDE_WINDOW and not _in_window(
+                entry.get("Date")
+            ):
+                season, event = self.all_league_target(page, title)
+                if season is None:
+                    self.report.skipped["all-league selection with no season"] += 1
+                    continue
+            else:
+                event = self.event_id(page, entry)
+                season = self.season_id(title)
+                if event is None or season is None:
+                    self.report.skipped["award with no event or season"] += 1
+                    continue
             handle = str(row.get("PlayerName") or "").strip()
             raw = str(row.get("Type") or "").strip()
             player = self.player_id(str(row.get("PlayerLink") or handle))
@@ -362,7 +419,10 @@ def load(conn: psycopg.Connection[tuple[object, ...]], aliases: Aliases) -> dict
     ranking_lists = [a for a in awards_all if RANKING_TYPE.match(str(a.get("Type") or ""))]
     real = [a for a in awards_all if not RANKING_TYPE.match(str(a.get("Type") or ""))]
     awards = [
-        a for a in real if _in_window((meta.get(str(a.get("TournamentPage"))) or {}).get("Date"))
+        a
+        for a in real
+        if _in_window((meta.get(str(a.get("TournamentPage"))) or {}).get("Date"))
+        or str(a.get("Type")) in ALL_LEAGUE_OUTSIDE_WINDOW
     ]
 
     loader.load_placements(results, meta)
