@@ -1084,39 +1084,61 @@ them auditable:
    0.15 of the cohort's estimated true-skill spread. The published `rating_sd` is
    the posterior SD, on every row including the per-mode ones.
 
-**What the rating covers, and what it costs across the seam.** Step 1 fits 28 cohorts:
-nine CWL, one per (title × mode), and nineteen CDL: Hardpoint, Search and Destroy and
-Control for every season from 2021, and Hardpoint and Search for 2020 and 2026, whose
-third map (Domination, Overload) has no feature set of its own.
+**What the rating covers, and what it costs across the seam.** Step 1 fits 44 cohorts, one
+per (season × mode): every mode every season played, with no exceptions and none withheld.
 
-It fitted sixteen until recently, and how the twelve missing ones went missing matters.
-A per-10-minute rate reads two things, a numerator and
-the map clock, and only the numerator was declared as a source. So a CDL Hardpoint cohort
-reported itself available on kills, assembled, and then emptied one zero denominator at a
-time. The CDL box scores carry no map duration, leaving Search and Destroy, which is
-denominated per round, as the only CDL cohort that survived. Every 2020-2026 composite was
-a Search and Destroy rating wearing an all-modes label, and nothing in the pipeline said
-so. The denominator is now a declared source like any other, and a rate that needs a clock
-resolves per title: per ten minutes where the clock exists, per map where it does not.
+It fitted sixteen two phases ago and 36 one phase ago, and how each batch went missing
+matters, because all three had the same shape. A feature declares the columns it reads. A
+cohort keeps the features whose columns it has. A cohort with too few features is not
+rated. So a mode does not fail loudly when the archive expresses a quantity in a form the
+feature set did not name — it fails silently, and the season above it publishes an
+all-modes rating over whatever survived.
+
+Three forms of that, all now repaired. *A denominator the source does not carry.* Only the
+numerator was declared, so a CDL Hardpoint cohort reported itself available on kills,
+assembled, and emptied one zero denominator at a time; the CDL box scores carry no map
+clock, which left Search and Destroy as the only CDL cohort standing. Every 2020-2026
+composite was a Search and Destroy rating wearing an all-modes label. Search and Destroy
+itself was denominated per round and nothing else, and no pre-2017 title counts rounds, so
+all four of them lost the mode outright — a third of that era's maps, on cohorts whose
+kills, deaths and bomb plays were all present. *A numerator one source splits and another
+does not.* Ghosts records bomb plants on 79% of its rows and defuses on 6%, so a feature
+reading plants + defuses dropped the only objective column that cohort has. *A mode nobody
+named.* Domination, Blitz and Overload had no entry in the feature-set dictionary at all,
+and a dictionary lookup that misses returns no features rather than an error, so 2014 was
+never rated and 2020 and 2026 published two modes out of three.
+
+A feature slot is now an ordered list of forms and the cohort decides which one it can
+fill: per ten minutes where the clock exists and per map where it does not, per round
+where rounds are counted and per map where they are not, the paired numerator where both
+columns are there and the single one where only one is. Two release gates hold the repair
+in place — one fails the run when a mode with maps in the archive has no feature set, the
+other when a (season × mode) with box scores produces no cohort.
 
 The seam still costs something, and it is now visible instead of hidden. What each cohort
 fits on is recorded per cohort in the `mode_weights` artifact, so this table is generated
 , not transcribed:
 
-| Era | Hardpoint | Search and Destroy | Control |
+| Era | Hardpoint | Search and Destroy | Third map |
 |---|---|---|---|
+| 2013-2016 | kills, deaths, and hill time or the round score, per map | kills, deaths, and plants + defuses or plants alone, per map | captures, returns, uplink points, or Blitz and Domination captures |
 | CWL | kills, deaths, hill time, hill captures, time per life, per 10 min | per round, with the kill feed where there is one | kills, deaths, captures, first-blood net |
-| CDL | kills, deaths, hill time, per map | per round | kills, deaths, per map |
+| CDL | kills, deaths, hill time, per map | per round | kills, deaths, and assists where the season records them |
 
-The CDL rows are thinner because the source is thinner: hill captures and Control captures
-are not in the Cito box scores at all, and a coverage measurement, not a
-declaration is what drops them. That leaves CDL Control fitted on kills and deaths alone,
-a slaying rating with a Control label, and the one cohort on this page whose
-[beyond-the-gunfight ratio](#how-much-of-the-weights-is-signal) cannot be computed because
-it has no non-slaying feature to compute it from. A CWL-era rating still blends three
-richer cohorts than a CDL-era one does. (This describes the published version. The 2.2.0
-feature set, fitted and compared but not published, gives 2022-2025 Control a non-slaying
-column and therefore a ratio (see [four feature sets, compared](#what-the-rating-measures-four-feature-sets-compared).)
+The rows thin out where the source thins out, and a coverage measurement rather than a
+declaration is what drops each column. The 2013-2016 titles carry a scoreboard and no
+clock, no round tally and no intangibles, so their cohorts fit on three columns; Black Ops
+2 and Advanced Warfare record no hill time on any row, and the round score is the only
+reading of Hardpoint objective play they have. Hill captures and Control captures are not
+in the Cito box scores at all. Two CDL third maps have no objective column in any source —
+2020 Domination and 2026 Overload — and rate on kills, deaths and assists.
+
+One cohort on this page still has no non-slaying feature and therefore no
+[beyond-the-gunfight ratio](#how-much-of-the-weights-is-signal): 2021 Control. Black Ops
+Cold War records no assists, no Control round counts and no first bloods, so two columns
+is what that box score supports. 2022-2025 Control had the same shape until assists were
+admitted as the fallback for the Control intangibles the CDL source does not carry — the
+box-score feature set had been giving those seasons a column the per-mode set took away.
 
 Its validation is walk-forward within each (season × mode): every event's maps are
 predicted using weights trained only on earlier events. That number establishes one
@@ -1236,12 +1258,14 @@ re-estimation, not a re-ranking.
 new estimator and the old one are both run through the roster forecast in
 [two tests the rating can fail](#two-tests-the-rating-can-fail): identical maps,
 identical weights, identical prefixes, differing only in the step being tested. The
-posterior wins by −0.00095 of Brier [−0.00180, −0.00010] over 9,257 maps, an interval that
-excludes zero and a gap that sits under the 0.00126 this sample can resolve. On the CWL
-archive alone the same contrast was −0.00112 [−0.00220, −0.00010]. The posterior does not
-cost anything out of sample and may be worth a little, at a
-size this many maps would usually miss. Pick rates are a coin flip apart, 56.6% against
-56.6%. The case for the change rests on the specification and the intervals, and the
+posterior wins by −0.00087 of Brier [−0.00180, +0.00000] over 9,391 maps, an interval that
+now reaches zero at its upper end, on a gap that sits under the 0.00126 this sample can
+resolve. It read [−0.00180, −0.00010] over 9,257 maps before the recovered modes enlarged
+the population, and on the CWL archive alone the same contrast was −0.00112 [−0.00220,
+−0.00010]. Two of those three readings exclude zero and the current one does not, which is
+what a gap this far under the resolvable size looks like when the sample moves. The
+posterior does not cost anything out of sample and may be worth a little. Pick rates are a
+coin flip apart, 56.6% against 56.7%. The case for the change rests on the specification and the intervals, and the
 forecast says it costs nothing, which is what it had to say.
 
 (μ, τ²) are fitted by EM: closed form per step, monotone in the marginal likelihood,
@@ -1452,11 +1476,14 @@ Steps 2 to 4 above never change. What changed across versions is step 1's answer
 choice can be checked, not asserted.
 
 - **1.0.0**: kills, deaths, assists and one objective column per mode, all per ten
-  minutes. The box score, essentially.
+  minutes. The box score, essentially. The objective slot ends in the round score, which
+  is what a title carrying a scoreboard and nothing else has.
 - **2.0.0**: per-mode feature sets drawn from the metric layer, with per-mode
   denominators: Search & Destroy is measured per *round*, not per minute, because a
   round is what the mode actually spends. First bloods, first deaths, survival, time
-  per life, hill captures and flag carry time enter here.
+  per life, hill captures and flag carry time enter here. Where a mode's own columns are
+  absent the slot falls back rather than emptying: the round score for Hardpoint, the
+  bomb plant alone for Search & Destroy, assists for Control.
 - **2.1.0**: adds the kill-feed tier to the modes where a trade means something:
   untraded-death rate and trade kills in Hardpoint and Search & Destroy, plus deaths
   that surrendered a man advantage in Search & Destroy. **This is the published
@@ -1522,8 +1549,9 @@ is a real thing; at the resolution of one number per team per map, this column i
 better-resolved reading of the same gunfight. Counting it as "the rest" would have inflated
 the beyond-the-gunfight ratio with a column that is mostly kills. Non-traded-kill share does
 not have that problem: it is a share of a player's own kills, and correlates 0.13 to 0.39
-with the kills differential in Search & Destroy. It is the column that gives **2022-2025
-Control a beyond-the-gunfight ratio for the first time.**
+with the kills differential in Search & Destroy. It is the column that gave **2022-2025
+Control a beyond-the-gunfight ratio** before the published version had one; those seasons
+now carry assists and have a ratio without it.
 
 **2021 Control still has none, and that is a fact about the season, not a gap.**
 Non-traded kills and the Control round counts are declared and empty for Black Ops Cold War,
@@ -1752,17 +1780,17 @@ eight maps on each side, season *N* predicts season *N+1*. Two predictors (the c
 rating and the era-adjusted K/D z) against two targets, the same pair one season later.
 The 2×2 is deliberate: predicting next season's rating flatters the rating, predicting
 next season's K/D flatters K/D, so the off-diagonal is where the question actually lives.
-561 transitions across nine season boundaries, from 100 (IW → WWII) down to 41 (BOCW → VG),
+563 transitions across nine season boundaries, from 100 (IW → WWII) down to 41 (BOCW → VG),
 Pearson *r* with a 2,000-draw bootstrap over players.
 
 | Predictor (season *N*) | → next rating | → next K/D z |
 |---|---|---|
-| Composite rating | 0.47 [0.40, 0.53] | 0.34 [0.26, 0.41] |
-| Era-adjusted K/D z | 0.41 [0.34, 0.48] | **0.56** [0.50, 0.62] |
+| Composite rating | 0.49 [0.43, 0.55] | 0.34 [0.26, 0.41] |
+| Era-adjusted K/D z | 0.43 [0.36, 0.49] | **0.56** [0.50, 0.62] |
 
 The contrasts are paired: the same resampled players score both predictors, because
 comparing two intervals that happen to overlap answers nothing. Predicting next season's
-K/D, Δ*r* = −0.23 [−0.29, −0.16], which excludes zero: **K/D z predicts a player's future
+K/D, Δ*r* = −0.22 [−0.29, −0.15], which excludes zero: **K/D z predicts a player's future
 K/D better than the composite rating built on top of it, decisively.** That is the same
 verdict this test returned on the CWL archive and on every population since, in the same
 direction and at a similar size.
@@ -1770,8 +1798,8 @@ direction and at a similar size.
 The other column has moved, and the earlier version of this page overstated it. On 216
 CWL-era transitions the rating also lost at predicting *its own next value*, by Δ*r* =
 −0.08 with an interval spanning zero, and the summary here read "raw K/D z is the better
-predictor in both columns". On 561 transitions the sign reverses: Δ*r* = +0.06
-[−0.01, +0.13], still spanning zero. The correct statement is the one that was true of
+predictor in both columns". On 563 transitions the sign reverses: Δ*r* = +0.06
+[−0.00, +0.13], still spanning zero. The correct statement is the one that was true of
 both samples: the two predictors are indistinguishable at forecasting next season's
 rating. "Better in both columns" was reading a point estimate inside its own
 interval. Only the K/D column separates, and it separates in the direction that is bad
@@ -1781,10 +1809,11 @@ news for the rating.
 the run.** Until [the evaluation harness](#the-evaluation-harness-what-a-rating-has-to-beat-declared-in-advance)
 below was built, this section carried 541
 transitions and Δ*r* = −0.26 from a run that predates the identity merges, the plus-minus
-lineup rule and the fourth feature set. The pre-flight section further down this
-same page already quoted the current 561. Every verdict here survived the refresh; the
+lineup rule, the fourth feature set and the mode recovery that added the last two
+transitions. The pre-flight section further down this
+same page already quoted the current count. Every verdict here survived the refresh; the
 magnitudes did not, and the largest single move is the rating predicting its own next
-value, 0.32 to 0.47. The numbers on this page are now pinned in the harness and a run
+value, 0.32 to 0.49. The numbers on this page are now pinned in the harness and a run
 that disagrees with them fails the release gate.
 
 **Does a roster predict future map wins?** Walk-forward by event within each season: at
@@ -1792,29 +1821,29 @@ every event the whole rating pipeline is refit on maps from earlier events only,
 team's players are averaged into a roster strength for that map's mode, and the
 differential becomes a win probability through a logistic also fit on those earlier maps.
 Nothing from the event being scored enters. The population is the published one, floored
-at 2017 like every other figure in this section. 9,257 maps survive on which every
-predictor has an opinion; 1,548 are skipped for having no history and 956 for having no
+at 2017 like every other figure in this section. 9,391 maps survive on which every
+predictor has an opinion; 1,548 are skipped for having no history and 822 for having no
 identifiable roster.
 
 | Predictor | Brier | Log loss | Accuracy | vs. coin flip |
 |---|---|---|---|---|
-| **RAPM** | **0.24609** | 0.6946 | 59.0% [57.9, 59.9] | **−0.0039** [−0.0077, +0.0000] |
-| RAPM, rating-centered | 0.24675 | 0.6968 | **59.2%** [58.2, 60.2] | −0.0032 [−0.0071, +0.0008] |
-| Roster composite rating | 0.24780 | 0.6916 | 56.6% [55.5, 57.6] | −0.0022 [−0.0053, +0.0010] |
-| Same rating, z-and-shrink | 0.24875 | 0.6946 | 56.6% [55.6, 57.6] | −0.0013 [−0.0045, +0.0019] |
-| Glicko-2 team rating | 0.24999 | 0.7053 | 59.2% [58.2, 60.2] | −0.0000 [−0.0041, +0.0039] |
-| Roster K/D | 0.25156 | 0.7032 | 56.5% [55.5, 57.6] | +0.0016 [−0.0016, +0.0047] |
+| **RAPM** | **0.24636** | 0.6952 | 58.9% [57.9, 59.9] | **−0.0036** [−0.0073, +0.0001] |
+| RAPM, rating-centered | 0.24688 | 0.6971 | **59.2%** [58.2, 60.2] | −0.0031 [−0.0069, +0.0008] |
+| Roster composite rating | 0.24763 | 0.6913 | 56.6% [55.6, 57.6] | −0.0024 [−0.0054, +0.0007] |
+| Same rating, z-and-shrink | 0.24850 | 0.6941 | 56.7% [55.7, 57.7] | −0.0015 [−0.0046, +0.0016] |
+| Glicko-2 team rating | 0.25006 | 0.7055 | 59.2% [58.2, 60.1] | +0.0001 [−0.0038, +0.0041] |
+| Roster K/D | 0.25181 | 0.7038 | 56.5% [55.5, 57.5] | +0.0018 [−0.0014, +0.0050] |
 | Coin flip at 0.5 | 0.25000 | 0.6931 | — | — |
 
-**None of these separates from the coin flip. RAPM comes closest, at −0.0039 [−0.0077,
-+0.0000], and its interval reaches zero.** An earlier version of this page read RAPM's
+**None of these separates from the coin flip. RAPM comes closest, at −0.0036 [−0.0073,
++0.0001], and its interval reaches zero.** An earlier version of this page read RAPM's
 interval as excluding zero, on a fit drawn before the 2026-08-17 identity pass merged two
-player rows and two team rows; the maps are the same 9,257 and the reading moved from
-"resolves, barely" to "does not resolve". The composite rating's own gap is −0.0022
-[−0.0053, +0.0010] and spans zero, which is what the CWL archive said before it.
+player rows and two team rows; the reading moved from "resolves, barely" to "does not
+resolve" and has stayed there. The composite rating's own gap is −0.0024 [−0.0054,
++0.0007] and spans zero, which is what the CWL archive said before it.
 
 The qualifier is the same one as everywhere else here, and it now applies to every row.
-RAPM's −0.0039 sits under the 0.0053 that 9,257 maps can resolve, so the size of the effect
+RAPM's −0.0036 sits under the 0.0053 that 9,391 maps can resolve, so the size of the effect
 was already below what this test can see. "Roster strength forecasts map wins slightly
 better than a coin flip" is the direction every predictor points; this table does not
 establish it.
@@ -1890,7 +1919,7 @@ rating converted into map-win logits, at an exchange rate estimated on the train
 archive the blend was *worse* on Brier (0.24601 against 0.24467) and better on accuracy,
 and this page reported a mixed result and declined to adopt it. On an earlier cut of the
 full record it was better on both, and this page said so. On the current one it is mixed
-again: Brier 0.24675 against plain RAPM's 0.24609, accuracy 59.2% against 59.0%.
+again: Brier 0.24688 against plain RAPM's 0.24636, accuracy 59.2% against 58.9%.
 
 **A verdict that has moved three times on samples this close together is the finding.** The
 two arms are 0.0007 of Brier apart on predictors that correlate at 0.993, which is well
@@ -1934,12 +1963,13 @@ tried. The round-level model in Tier 1d works as a model of a round, but
 the player value derived from it, win probability added per kill, turns out to be kill
 rate in another unit, and the part that is not kill rate does not reproduce across a
 player's own games. Plus-minus does better: RAPM posts the best Brier in the table and a
-clearly above-chance pick rate without touching the box score, and its gap over the coin
-flip excludes zero, though it does not clear what 9,257 maps can resolve. Its coefficients
-remain entangled with lineups, if less so than before.
+clearly above-chance pick rate without touching the box score, but its gap over the coin
+flip no longer excludes zero — −0.0036 [−0.0073, +0.0001] — and it does not clear what
+9,391 maps can resolve either. Its coefficients remain entangled with lineups, if less so
+than before.
 
 Player-level information does appear to forecast map wins slightly better than the
-composite rating does, and RAPM against the rating directly is +0.0017 [−0.0015, +0.0049]:
+composite rating does, and RAPM against the rating directly is +0.0013 [−0.0021, +0.0046]:
 better on the point estimate, unresolved on the interval, as it was. Neither result
 promotes anything into the published rating.
 
@@ -2505,12 +2535,20 @@ agrees at 0.235. Then both are widened by the design effect the clustering costs
 
 **The next rating's floor is computed on the panel it will actually occupy, before it exists.**
 A rating built on the season plus-minus can only be scored where a season-resolution coefficient
-exists, which is the CDL era alone: **267 of the 561 transitions, over 90 of the 189 players.**
+exists, which is the CDL era alone: **268 of the 563 transitions, over 90 of the 190 players.**
 Fewer clusters is a higher floor, so the threshold that rating will be held to is not the 0.110
 above but **0.175**, an independent floor of 0.11 widened by a design effect of 1.59 measured on
 that narrower panel, well above the 1.225 the full panel costs. On it the composite loses by
 0.258 against a baseline *r* of 0.630, so the rating has to move **0.433** in correlation to
 clear a gate that says beat, not tie.
+
+The same computation on the current record returns 0.1688, on 268 transitions over the same 90
+players, and the rating would have to move 0.4034. That is reported beside the threshold and
+does not replace it: 0.175 was written before the model existed, and a threshold recomputed
+once the result is visible is not a threshold declared in advance. The panel has not changed
+shape; the plus-minus it reads has, twice — first when the 2013-2016 seasons entered the fit,
+and again when the recovered modes gave 2014 a rating and every pre-2017 season its Search and
+Destroy cohort. A larger archive is not a better result.
 That number is stored in a run that precedes any run carrying the model it judges, and the
 release gate checks that ordering, because a threshold written beside a result is not a
 threshold declared in advance.
@@ -2544,7 +2582,7 @@ target containing its own answer. The manifest names `filtered` as the only fami
 test may read, the harness routes its read through the estimator's own check instead of
 reimplementing it, and that check raises instead of warning. It is exercised on real
 coefficients every run instead of lying dormant: the filtered season plus-minus reaches *r* =
-0.197 against next season's K/D z over 267 season-resolution cells, against the baseline's 0.630.
+0.209 against next season's K/D z over 268 season-resolution cells, against the baseline's 0.629.
 
 **That figure was 0.291 over 553 cells until the resolution split was added.** A coefficient is stored against every season it covers, so an era-resolution
 row (the CWL years, which the identification pre-flight never allowed a season on) files one
@@ -2693,22 +2731,22 @@ SKILL is the box-score prior with the direct estimate as a correction, and it is
 way instead of being described as a balance of two comparable estimates.
 
 **The result, against a floor computed before the model existed.** The gate runs on the
-transitions carrying all four predictors: 218 over 75 players. That is fewer than the 267 the
+transitions carrying all four predictors: 219 over 75 players. That is fewer than the 268 the
 floor was computed for, and the difference is not a coverage failure. SKILL is predicted from
 the seasons before it, so the earliest CDL season has no rating and its 49 transitions cannot
-carry one. On its own panel the smallest resolvable gap is 0.1623.
+carry one. On its own panel the smallest resolvable gap is 0.16.
 
 | Predictor | Δ*r* vs K/D z | 95% interval | Detectable at | Beats the baseline? |
 |---|---|---|---|---|
-| SKILL | **−0.2183** | [−0.3269, −0.0838] | 0.1623 | no |
-| Composite | −0.2666 | [−0.4139, −0.1154] | 0.1623 | no |
-| `openskill` | −0.6711 | [−0.9200, −0.3721] | 0.2029 | no |
+| SKILL | **−0.2236** | [−0.3389, −0.0940] | 0.16 | no |
+| Composite | −0.2718 | [−0.4312, −0.1244] | 0.16 | no |
+| `openskill` | −0.6702 | [−0.9248, −0.3810] | 0.20 | no |
 
 **The architecture did not reverse the persistence failure.** SKILL predicts next season's
 era-adjusted K/D z materially *worse* than K/D z does, by a margin larger than this panel can
 mistake for noise, and K/D z is left standing as the recommended forecaster. The three-way
-comparison the earlier figures were computed on is retained unchanged beside it (561
-transitions over 189 players, composite at −0.2316), so nothing published before this phase was
+comparison the earlier figures were computed on is retained beside it (563
+transitions over 190 players, composite at −0.2188), so nothing published before this phase was
 restated by a fourth predictor narrowing the panel.
 
 **One secondary test, declared in the manifest before the model existed, says where the failure
@@ -3251,7 +3289,7 @@ The opponent-strength proxy needs its own honesty check. The project has no inde
 team rating, so a team's own season strength is approximated as the mean VALUE of its
 modal-team players. That proxy was checked against an outside signal before this
 shipped: season map win rate, taken from `games.winner_team_id`. It correlates with the
-proxy at Pearson r = 0.76 and Spearman r = 0.79 over 292 team-seasons with at least 10
+proxy at Pearson r = 0.76 and Spearman r = 0.80 over 327 team-seasons with at least 10
 maps, strong enough to trust as a real signal and not a coincidence of the join. Both
 numbers are computed on every run and stored in the artifact this page reads, so the check
 is repeated rather than remembered.

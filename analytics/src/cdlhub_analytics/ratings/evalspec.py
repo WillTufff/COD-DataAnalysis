@@ -274,18 +274,18 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # the second by `career_rank.roster_strength.proxy_check` — and pinned here
     # so a move has to be read and written down rather than published quietly.
     "retrodiction_cells_before": 5091,
-    "team_strength_proxy": {"n_team_seasons": 292, "pearson": 0.7608, "spearman": 0.793},
-    "persistence_pairs": 561,
-    "persistence_delta_r": -0.2316,
+    "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
+    "persistence_pairs": 563,
+    "persistence_delta_r": -0.2188,
     "delta_r_tol": 5e-4,
-    "forecast_maps": 9257,
+    "forecast_maps": 9391,
     "brier_tol": 5e-5,
     # The panel the next rating will be gated on, and the floor computed for it
     # before that rating exists. Pinned for the same reason as everything else
     # here: a figure on the page that nothing compares against is a figure that
     # drifts, and this one is a threshold.
     "skill_panel": {
-        "n": 267,
+        "n": 268,
         "clusters": 90,
         "mde80_clustered": 0.1749,
         "distance_to_clear": 0.433,
@@ -302,10 +302,14 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # better result, and the release has to show the distance rather than
     # quietly close it.
     "skill_panel_remeasured": {
-        "on": "2026-08-16",
-        "why": "the 2013-2016 load moved the plus-minus the panel reads; the panel is unchanged",
-        "mde80_clustered": 0.1665,
-        "distance_to_clear": 0.4246,
+        "on": "2026-08-18",
+        "why": (
+            "the recovered modes gave 2014 a rating and every pre-2017 season its"
+            " Search and Destroy cohort, so the panel gained one transition and the"
+            " plus-minus it reads moved again; the method is unchanged"
+        ),
+        "mde80_clustered": 0.1688,
+        "distance_to_clear": 0.4034,
     },
     # The plus-minus read forward, at the resolution the read is valid at, with
     # the pooled figure the page corrects and the era figure that inflated it.
@@ -314,7 +318,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # `Envy` into `Team Envy`, and the wiki load gained 157 event-roster rows, so
     # the lineups the plus-minus is fitted on moved. Every figure below that
     # reads the fit moved with them; nothing about the method changed.
-    "plusminus_forward": {"n": 267, "r": 0.2078, "pooled_r": 0.301, "era_r": 0.3755},
+    "plusminus_forward": {"n": 268, "r": 0.2087, "pooled_r": 0.301, "era_r": 0.3755},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -324,14 +328,14 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # this panel computes for itself, 0.1623, and the 0.1749 pinned above stays
     # what it always was — the number written before the model, against a panel
     # the model turned out not to fill.
-    "skill_result": {"n": 218, "clusters": 75, "delta_r": -0.2183, "mde80": 0.1623},
+    "skill_result": {"n": 219, "clusters": 75, "delta_r": -0.2236, "mde80": 0.16},
     "forecast_brier": {
-        "rapm": 0.24609,
-        "rapm_prior": 0.24675,
-        "rating": 0.2478,
-        "rating_zshrink": 0.24875,
-        "glicko": 0.24999,
-        "kd": 0.25156,
+        "rapm": 0.24636,
+        "rapm_prior": 0.24688,
+        "rating": 0.24763,
+        "rating_zshrink": 0.2485,
+        "glicko": 0.25006,
+        "kd": 0.25181,
     },
 }
 
