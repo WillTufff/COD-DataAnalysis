@@ -16,6 +16,7 @@ are non-zero — an absolute floor rather than a share, so genuinely rare events
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, cast
@@ -66,6 +67,26 @@ MODE_SND = "search-and-destroy"
 MODE_CONTROL = "control"
 MODE_CTF = "capture-the-flag"
 MODE_UPLINK = "uplink"
+MODE_DOMINATION = "domination"
+MODE_BLITZ = "blitz"
+MODE_OVERLOAD = "overload"
+
+# Every mode the archive holds maps for. A rating feature set is a dictionary
+# keyed by these, and a lookup that misses returns no features rather than an
+# error, so a mode absent from that dictionary is a mode nobody rates and
+# nothing says so. Ghosts Domination and Blitz sat unrated for four years and
+# Black Ops 7 Overload for a season, each a third of its year's maps. This
+# tuple is what `gates.mode_vocabulary_failures` checks the archive against.
+MODE_ORDER = (
+    MODE_HARDPOINT,
+    MODE_SND,
+    MODE_CONTROL,
+    MODE_CTF,
+    MODE_UPLINK,
+    MODE_DOMINATION,
+    MODE_BLITZ,
+    MODE_OVERLOAD,
+)
 
 # Typed columns on game_player_stats, read straight off the row. Keys shared
 # with NUMERIC_EXTRAS (snd_rounds, ctrl_captures) merge typed-first: the CWL
@@ -162,6 +183,7 @@ NUMERIC_EXTRAS: tuple[str, ...] = (
     "scorestreaks_used",
     "ekia",
     "player_score",
+    "blitz_caps",
     "ctrl_captures",
     "ctrl_firstbloods",
     "ctrl_firstdeaths",
@@ -294,6 +316,39 @@ def record_coverage(coverage: Coverage, title: str, key: str, value: float | Non
 
 def tracked(coverage: Coverage, title: str, key: str) -> bool:
     return coverage.get(title, {}).get(key, KeyCoverage()).tracked
+
+
+# The share of a slice's own rows that must report a column before anything may
+# rate on it. `tracked` above answers a different question — does this title
+# record this quantity at all — and answers it across every mode the title
+# played, which is the only grain the metric layer needs.
+#
+# A rating cohort is one (season x mode), and a column reported on a handful of
+# that cohort's rows fails it in a way the title-wide count cannot see. Missing
+# is not zero, but a rate sums numerator and denominator across a player's maps,
+# so an absent column enters the sum as a zero and the player's rate becomes a
+# function of how many of their maps happened to be reported. Black Ops 7
+# reports `captures` on 32 of 2,240 Overload rows and 24 of them are non-zero,
+# which clears the title-wide floor of 20 and means nothing.
+#
+# 0.25 is not a tuned number. Measured over every cohort in the archive, the
+# columns that are genuinely one mode's own sit at 0.497 and above, and the
+# partly-reported ones at 0.065 and below. The floor sits inside an empty band,
+# so moving it anywhere in that band changes nothing.
+MIN_PRESENT_SHARE = 0.25
+
+
+def present_share(rows: Sequence[MapRow], key: str) -> float:
+    """The share of these rows that report a real value for one column."""
+    if not rows:
+        return 0.0
+    if key == DURATION_KEY:
+        return sum(1 for r in rows if r.duration_s > 0) / len(rows)
+    return sum(1 for r in rows if key in r.values) / len(rows)
+
+
+def reported(rows: Sequence[MapRow], key: str) -> bool:
+    return present_share(rows, key) >= MIN_PRESENT_SHARE
 
 
 def titles_tracking(coverage: Coverage, keys: tuple[str, ...]) -> tuple[str, ...]:

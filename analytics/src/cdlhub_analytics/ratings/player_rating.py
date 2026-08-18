@@ -67,10 +67,12 @@ hand-maintained per-title matrix.
 
 Map time is the one denominator the archive does not carry everywhere: the CWL
 years record it and the CDL box scores do not. A rate denominated in time is
-therefore declared as a `Paced` pair and resolved per title — per 10 minutes
+therefore declared as a `Paced` chain and resolved per cohort — per 10 minutes
 where the clock exists, per map where it does not — so the CDL era keeps its
 Hardpoint and Control cohorts instead of losing them one zero denominator at a
-time.
+time. The same chain fills a slot whose numerator one source splits and another
+does not, which is what keeps Ghosts bomb plays and pre-2017 Hardpoint objective
+play in the fit.
 """
 
 from __future__ import annotations
@@ -89,15 +91,19 @@ from ..backtest import Prediction
 from ..era import MIN_MAPS
 from ..maprows import (
     DURATION_KEY,
+    MODE_BLITZ,
     MODE_CONTROL,
     MODE_CTF,
+    MODE_DOMINATION,
     MODE_HARDPOINT,
+    MODE_OVERLOAD,
     MODE_SND,
     MODE_UPLINK,
     Coverage,
     MapRow,
     load_map_rows,
     record_coverage,
+    reported,
     tracked,
 )
 from ..metrics import (
@@ -172,11 +178,30 @@ class Feature:
     def skill_eligible(self) -> bool:
         return self.eligibility in SKILL_ELIGIBLE
 
-    def available(self, coverage: Coverage, title: str) -> bool:
-        return all(tracked(coverage, title, src) for src in self.sources)
+    def available(self, coverage: Coverage, title: str, rows: Sequence[MapRow]) -> bool:
+        """Tracked by the title, and reported by this cohort's own rows.
 
-    def resolve(self, coverage: Coverage, title: str) -> Feature | None:
-        return self if self.available(coverage, title) else None
+        Two questions, and the second is not implied by the first. A title
+        records a quantity across every mode it played, so `tracked` can say
+        yes on the strength of rows this cohort does not contain — Ghosts
+        records first bloods on 158 rows out of 7,534, all of them in a handful
+        of Search and Destroy series, and the title-wide count reads that as a
+        column the mode has. `reported` asks the cohort instead.
+
+        A feed feature is exempt from the second question, and only from it.
+        The hazard `reported` exists to stop is an absent column summing into a
+        rate as a zero, and `Cohort.accepts` already stops that one at the row
+        rather than at the feature: a cohort using the feed reads reconciled
+        maps and no others. Asking presence of every row as well would drop the
+        family wherever reconciliation is partial, which is the coverage the
+        row rule is there to handle.
+        """
+        if self.needs_feed:
+            return all(tracked(coverage, title, src) for src in self.sources)
+        return all(tracked(coverage, title, src) and reported(rows, src) for src in self.sources)
+
+    def resolve(self, coverage: Coverage, title: str, rows: Sequence[MapRow]) -> Feature | None:
+        return self if self.available(coverage, title, rows) else None
 
 
 def skill_features(features: Sequence[Feature]) -> tuple[Feature, ...]:
@@ -192,33 +217,59 @@ def skill_features(features: Sequence[Feature]) -> tuple[Feature, ...]:
 
 @dataclass(frozen=True)
 class Paced:
-    """One quantity under two denominators, resolved per title.
+    """One slot in a feature set, as an ordered list of ways to fill it.
 
-    Map time is measured across the CWL archive and absent from the CDL box
-    scores, so a per-10-minute rate is unavailable for half of this archive
-    while a per-map one is available for all of it. Declaring both and resolving
-    per title keeps the richer denominator where it exists instead of dropping
-    to the poorer one everywhere — or, as this used to do, dropping the mode.
+    A version names a quantity it wants from a mode. Which columns are on hand
+    to express that quantity is a fact about the cohort, so the slot holds
+    candidates, richest first, and the first one the cohort supports wins. The
+    alternative is what this used to do: name a single form, and lose the whole
+    mode wherever that form is unavailable.
+
+    Both kinds of shortfall occur, and both are now the same mechanism.
+
+    *A denominator the archive does not carry everywhere.* Map time is measured
+    across the CWL years and absent from the CDL box scores. Round counts are
+    measured from Infinite Warfare onward and absent from every pre-2017 title,
+    whose wiki transcription reports a scoreboard and no round tally. Search and
+    Destroy was denominated per round and nothing else, so all four pre-2017
+    titles lost the mode outright — a third of that era's maps, on cohorts whose
+    kills, deaths and bomb plays were all present.
+
+    *A numerator one source splits and another does not.* Ghosts reports bomb
+    plants on 79% of its Search and Destroy rows and defuses on 6%, so a feature
+    reading plants + defuses drops, taking with it the only objective column
+    that cohort has. Plants alone is the same quantity, worse resolved. And two
+    pre-2017 titles record no hill clock at all, leaving the round score as the
+    only reading of Hardpoint objective play they carry.
 
     Safe because a cohort is one (season × mode) and therefore resolves to
-    exactly one of the two. Team differentials are standardized within a cohort
-    and player aggregates z-scored within the same one, so the seam between the
-    denominators never falls inside a standardization; the choice reaches the
-    fitted weights only through how map length covaries with the profile, which
-    is the honest difference between the eras rather than an artefact.
+    exactly one candidate. Team differentials are standardized within a cohort
+    and player aggregates z-scored within the same one, so the seam between two
+    forms never falls inside a standardization; the choice reaches the fitted
+    weights only through how the forms covary with the profile, which is the
+    honest difference between the eras rather than an artefact.
     """
 
-    timed: Feature
-    per_map: Feature
+    options: tuple[Feature, ...]
 
-    def resolve(self, coverage: Coverage, title: str) -> Feature | None:
-        for feature in (self.timed, self.per_map):
-            if feature.available(coverage, title):
+    @property
+    def preferred(self) -> Feature:
+        return self.options[0]
+
+    @property
+    def fallback(self) -> Feature:
+        """The last resort — the form that asks least of the source."""
+        return self.options[-1]
+
+    def resolve(self, coverage: Coverage, title: str, rows: Sequence[MapRow]) -> Feature | None:
+        for feature in self.options:
+            if feature.available(coverage, title, rows):
                 return feature
         return None
 
 
-# What a version's mode entry may hold: a feature, or a pair to choose between.
+# What a version's mode entry may hold: a feature, or an ordered list to choose
+# between.
 FeatureSpec = Feature | Paced
 
 
@@ -309,13 +360,80 @@ def _per_map_feature(
     )
 
 
+# The round score, as an objective column of last resort.
+#
+# Every pre-2017 title transcribes a scoreboard, and two of them record nothing
+# else about objective play: Black Ops 2 and Advanced Warfare carry no hill
+# clock, so their Hardpoint cohorts had the slaying pair and nothing more. The
+# score is a title's own weighting of objective work and kills, which makes it
+# a worse reading of the objective than a real column and a better one than
+# none.
+#
+# Measured before it was admitted, at team-differential resolution. Against
+# kills it runs 0.40 to 0.80 across the eleven pre-2017 cohorts, well under the
+# 0.82 to 0.94 that put damage in the slaying pair rather than beside it, and
+# against each mode's own objective column 0.09 to 0.54. So it is neither a
+# duplicate of the gunfight nor a substitute for a real objective count: it is a
+# third thing, and it is what those cohorts have.
+#
+# Value-only, and the reason is the eligibility rule rather than caution. Each
+# title scores by its own formula, and Blitz scores differently from Domination
+# inside one title, so the column does not mean the same thing twice and cannot
+# carry across a seam into a forecast.
+SCORE_PM = _per_map_feature(
+    "round_score", "Round score per map", "player_score", eligibility=ELIGIBLE_VALUE_ONLY
+)
+
+
 def _paced(
     key: str, timed: str, per_map: str, *sources: str, eligibility: str, slaying: bool = False
 ) -> Paced:
     """Per 10 minutes where the title records map time, per map where it does not."""
     return Paced(
-        timed=_time(key, timed, *sources, eligibility=eligibility, slaying=slaying),
-        per_map=_per_map_feature(key, per_map, *sources, eligibility=eligibility, slaying=slaying),
+        (
+            _time(key, timed, *sources, eligibility=eligibility, slaying=slaying),
+            _per_map_feature(key, per_map, *sources, eligibility=eligibility, slaying=slaying),
+        )
+    )
+
+
+def _then(*specs: Paced | Feature) -> Paced:
+    """One slot, filled by the first form the cohort supports, in this order."""
+    options: list[Feature] = []
+    for spec in specs:
+        options.extend(spec.options if isinstance(spec, Paced) else (spec,))
+    return Paced(tuple(options))
+
+
+def _rounded(
+    key: str,
+    label: str,
+    per_map_key: str,
+    per_map_label: str,
+    numerator: Callable[[MapRow], float],
+    *sources: str,
+    eligibility: str,
+    slaying: bool = False,
+) -> Paced:
+    """Per round where the title counts rounds, per map where it does not.
+
+    The per-round key is unchanged from when it was the only form, so a cohort
+    that has rounds fits and publishes exactly what it did before.
+    """
+    return Paced(
+        (
+            _per_round(key, label, numerator, *sources, eligibility=eligibility, slaying=slaying),
+            Feature(
+                key=per_map_key,
+                label=per_map_label,
+                numerator=numerator,
+                denominator=_per_map,
+                denom_kind="maps",
+                sources=sources,
+                eligibility=eligibility,
+                slaying=slaying,
+            ),
+        )
     )
 
 
@@ -368,10 +486,35 @@ _OBJ_V1 = {
         "uplink_points",
         eligibility=ELIGIBLE_VALUE_ONLY,
     ),
+    MODE_DOMINATION: _paced(
+        "obj",
+        "Flag captures per 10 min",
+        "Flag captures per map",
+        "captures",
+        eligibility=ELIGIBLE_VALUE_ONLY,
+    ),
+    MODE_BLITZ: _paced(
+        "obj",
+        "Blitz captures per 10 min",
+        "Blitz captures per map",
+        "blitz_caps",
+        eligibility=ELIGIBLE_VALUE_ONLY,
+    ),
 }
 
+# Overload is the one mode in the archive with no objective column of its own.
+# Black Ops 7 reports kills, deaths, assists and damage for it and nothing else,
+# so it is named here rather than in `_OBJ_V1` — a mode with no objective is
+# still a mode, and leaving it out of the vocabulary is how it went unrated for
+# a whole season.
+_NO_OBJECTIVE: tuple[str, ...] = (MODE_OVERLOAD,)
+
+# One objective slot per mode, and the round score is the last thing it tries.
+# It changes nothing for a cohort whose own objective column is there, and it is
+# the whole of what Black Ops 2 and Advanced Warfare Hardpoint have.
 FEATURES_V1: dict[str, tuple[FeatureSpec, ...]] = {
-    mode: (KILLS, DEATHS, ASSISTS, obj) for mode, obj in _OBJ_V1.items()
+    **{mode: (KILLS, DEATHS, ASSISTS, _then(obj, SCORE_PM)) for mode, obj in _OBJ_V1.items()},
+    **{mode: (KILLS, DEATHS, ASSISTS, SCORE_PM) for mode in _NO_OBJECTIVE},
 }
 
 # --- 2.0.0: per-mode intangibles, per-mode denominators ---
@@ -390,11 +533,17 @@ FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
     MODE_HARDPOINT: (
         KILLS,
         DEATHS,
-        _paced(
-            "hill_time",
-            "Hill time per 10 min",
-            "Hill seconds per map",
-            eligibility=ELIGIBLE_VALUE_ONLY,
+        # Occupancy is the mode's score, so this is the objective slot. Two
+        # pre-2017 titles record no hill clock on any row, and for those the
+        # round score is the only reading of objective play in the box score.
+        _then(
+            _paced(
+                "hill_time",
+                "Hill time per 10 min",
+                "Hill seconds per map",
+                eligibility=ELIGIBLE_VALUE_ONLY,
+            ),
+            SCORE_PM,
         ),
         _paced(
             "hill_captures",
@@ -405,50 +554,79 @@ FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
         TIME_PER_LIFE,
     ),
     MODE_SND: (
-        _per_round(
+        _rounded(
             "snd_kpr",
             "Kills per round",
+            "snd_kills_pm",
+            "Kills per map",
             _col("kills"),
             "kills",
             eligibility=ELIGIBLE_BOTH,
             slaying=True,
         ),
-        _per_round(
+        _rounded(
             "snd_dpr",
             "Deaths per round",
+            "snd_deaths_pm",
+            "Deaths per map",
             _col("deaths"),
             "deaths",
             eligibility=ELIGIBLE_BOTH,
             slaying=True,
         ),
-        _per_round(
+        _rounded(
             "snd_fb_rate",
             "First bloods per round",
+            "snd_fb_pm",
+            "First bloods per map",
             _col("first_bloods"),
             "first_bloods",
             eligibility=ELIGIBLE_BOTH,
         ),
-        _per_round(
+        _rounded(
             "snd_fd_rate",
             "First deaths per round",
+            "snd_fd_pm",
+            "First deaths per map",
             _col("snd_firstdeaths"),
             "snd_firstdeaths",
             eligibility=ELIGIBLE_BOTH,
         ),
-        _per_round(
+        _rounded(
             "snd_survival_rate",
             "Survivals per round",
+            "snd_survives_pm",
+            "Survivals per map",
             _col("snd_survives"),
             "snd_survives",
             eligibility=ELIGIBLE_CONDITIONAL,
         ),
-        _per_round(
-            "snd_bomb_pr",
-            "Plants + defuses per round",
-            _col("plants", "defuses"),
-            "plants",
-            "defuses",
-            eligibility=ELIGIBLE_VALUE_ONLY,
+        # Bomb plays, in whichever of the two forms the source splits them
+        # into. Ghosts reports plants on 79% of its rows and defuses on 6%, so
+        # the paired form drops and the plant on its own is what that cohort
+        # carries — the same quantity, worse resolved, and the only objective
+        # column in a 2,445-row cohort that would otherwise rate on the
+        # gunfight alone.
+        _then(
+            _rounded(
+                "snd_bomb_pr",
+                "Plants + defuses per round",
+                "snd_bomb_pm",
+                "Plants + defuses per map",
+                _col("plants", "defuses"),
+                "plants",
+                "defuses",
+                eligibility=ELIGIBLE_VALUE_ONLY,
+            ),
+            _rounded(
+                "snd_plants_pr",
+                "Plants per round",
+                "snd_plants_pm",
+                "Plants per map",
+                _col("plants"),
+                "plants",
+                eligibility=ELIGIBLE_VALUE_ONLY,
+            ),
         ),
     ),
     MODE_CONTROL: (
@@ -457,13 +635,25 @@ FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
         _per_map_feature(
             "ctrl_caps", "Captures per map", "ctrl_captures", eligibility=ELIGIBLE_VALUE_ONLY
         ),
-        _per_ctrl_round(
-            "ctrl_fb_net_pr",
-            "First-blood net per round",
-            _net("ctrl_firstbloods", "ctrl_firstdeaths"),
-            "ctrl_firstbloods",
-            "ctrl_firstdeaths",
-            eligibility=ELIGIBLE_BOTH,
+        # One reading of Control beyond the gunfight, and which one exists is a
+        # fact about the source. The CWL archive counts first bloods and first
+        # deaths on the round; the CDL box score counts neither, and neither the
+        # captures above nor any round tally, so 2022-2025 Control fitted on the
+        # slaying pair alone — fewer columns than 1.0.0 gave it, because the
+        # per-mode set that replaced the box-score set assumed the per-mode
+        # columns. Assists is what those cohorts carry instead. Black Ops Cold
+        # War carries none of the three, and 2021 stays on the pair: a fact
+        # about that season's box score rather than a slot left unfilled.
+        _then(
+            _per_ctrl_round(
+                "ctrl_fb_net_pr",
+                "First-blood net per round",
+                _net("ctrl_firstbloods", "ctrl_firstdeaths"),
+                "ctrl_firstbloods",
+                "ctrl_firstdeaths",
+                eligibility=ELIGIBLE_BOTH,
+            ),
+            ASSISTS,
         ),
     ),
     MODE_CTF: (
@@ -487,6 +677,28 @@ FEATURES_V2: dict[str, tuple[FeatureSpec, ...]] = {
         DEATHS,
         _per_map_feature("uplink_points", "Uplink points per map", eligibility=ELIGIBLE_VALUE_ONLY),
     ),
+    # The three modes below keep the 1.0.0 shape, assists included, and the
+    # reason is the archive rather than a preference. 2.0.0 spends its extra
+    # room on per-mode intangibles — hill captures, first-blood net, flag carry
+    # time — and no source records an intangible for any of these three. Ghosts
+    # reports a scoreboard, and Cito reports four columns for Overload. So the
+    # slaying pair plus one objective count is the whole of what exists, and
+    # assists is the one further column two of the three carry.
+    MODE_DOMINATION: (
+        KILLS,
+        DEATHS,
+        ASSISTS,
+        _per_map_feature(
+            "dom_caps", "Flag captures per map", "captures", eligibility=ELIGIBLE_VALUE_ONLY
+        ),
+    ),
+    MODE_BLITZ: (
+        KILLS,
+        DEATHS,
+        ASSISTS,
+        _per_map_feature("blitz_caps", "Blitz captures per map", eligibility=ELIGIBLE_VALUE_ONLY),
+    ),
+    MODE_OVERLOAD: (KILLS, DEATHS, ASSISTS),
 }
 
 # --- 2.1.0: the kill-feed tier, on the modes where a trade means something ---
@@ -605,9 +817,11 @@ DAMAGE = _paced(
     eligibility=ELIGIBLE_BOTH,
     slaying=True,
 )
-DAMAGE_PR = _per_round(
+DAMAGE_PR = _rounded(
     "snd_damage_pr",
     "Damage per round",
+    "snd_damage_pm",
+    "Damage per map",
     _col("damage"),
     "damage",
     eligibility=ELIGIBLE_BOTH,
@@ -705,6 +919,13 @@ FEATURES_V22: dict[str, tuple[FeatureSpec, ...]] = {
     ),
     MODE_CTF: (*FEATURES_V21[MODE_CTF], ACCURACY, HEADSHOT_RATE),
     MODE_UPLINK: (*FEATURES_V21[MODE_UPLINK], ACCURACY, HEADSHOT_RATE),
+    # Damage and the non-traded share are Cito columns, so they reach the three
+    # CDL-era cohorts here — 2020 Domination and 2026 Overload — and resolve
+    # away for Ghosts, which records neither. Overload needs them most: without
+    # this version it rates on the slaying pair and assists alone.
+    MODE_DOMINATION: (*FEATURES_V21[MODE_DOMINATION], DAMAGE, NON_TRADED_KILL_RATE),
+    MODE_BLITZ: (*FEATURES_V21[MODE_BLITZ], DAMAGE, NON_TRADED_KILL_RATE),
+    MODE_OVERLOAD: (*FEATURES_V21[MODE_OVERLOAD], DAMAGE, NON_TRADED_KILL_RATE),
 }
 
 VERSIONS: dict[str, dict[str, tuple[FeatureSpec, ...]]] = {
@@ -736,16 +957,18 @@ PUBLISHED_ESTIMATOR = "hierarchical"
 
 
 def resolve_features(
-    version: str, mode_slug: str, coverage: Coverage, title: str
+    version: str, mode_slug: str, coverage: Coverage, title: str, rows: Sequence[MapRow]
 ) -> tuple[Feature, ...]:
     """The feature set for one cohort: those whose every source column this
-    title actually tracks. Availability is measured, never declared.
+    title tracks and this cohort's own rows report. Availability is measured,
+    never declared.
 
-    A `Paced` entry contributes whichever of its two denominators the title
-    supports, so a title with no map time keeps the quantity rather than losing
-    the feature and, with enough of them, the cohort."""
+    A `Paced` entry contributes the first of its candidate forms the cohort
+    supports, so a title with no map time, one with no round count and one that
+    splits a numerator two ways each keep the quantity rather than losing the
+    feature and, with enough of them, the mode."""
     spec = VERSIONS[version].get(mode_slug, ())
-    resolved = (f.resolve(coverage, title) for f in spec)
+    resolved = (f.resolve(coverage, title, rows) for f in spec)
     return tuple(f for f in resolved if f is not None)
 
 
@@ -866,17 +1089,24 @@ def usable(row: MapRow) -> bool:
 def build_cohorts(
     rows: Sequence[MapRow], coverage: Coverage, version: str
 ) -> dict[tuple[int, int], Cohort]:
-    out: dict[tuple[int, int], Cohort] = {}
+    """One cohort per (season × mode), resolved against its own rows.
+
+    The grouping happens before resolution rather than after, because a feature
+    now asks two questions and the second one only the cohort can answer.
+    """
+    grouped: dict[tuple[int, int], list[MapRow]] = defaultdict(list)
     for row in rows:
-        key = (row.season_id, row.mode_id)
-        if key in out:
-            continue
+        grouped[(row.season_id, row.mode_id)].append(row)
+
+    out: dict[tuple[int, int], Cohort] = {}
+    for key, cohort_rows in grouped.items():
+        first = cohort_rows[0]
         out[key] = Cohort(
-            season_id=row.season_id,
-            mode_id=row.mode_id,
-            mode_slug=row.mode_slug,
-            title=row.title,
-            features=resolve_features(version, row.mode_slug, coverage, row.title),
+            season_id=first.season_id,
+            mode_id=first.mode_id,
+            mode_slug=first.mode_slug,
+            title=first.title,
+            features=resolve_features(version, first.mode_slug, coverage, first.title, cohort_rows),
         )
     return {k: c for k, c in out.items() if len(c.features) >= MIN_COHORT_FEATURES}
 

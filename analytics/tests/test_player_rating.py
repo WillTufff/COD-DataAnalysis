@@ -12,7 +12,12 @@ import pytest
 
 from cdlhub_analytics.maprows import (
     DURATION_KEY,
+    MODE_BLITZ,
+    MODE_CONTROL,
+    MODE_DOMINATION,
     MODE_HARDPOINT,
+    MODE_ORDER,
+    MODE_OVERLOAD,
     MODE_SND,
     Coverage,
     KeyCoverage,
@@ -25,6 +30,7 @@ from cdlhub_analytics.ratings.player_rating import (
     ELIGIBLE_BOTH,
     ELIGIBLE_CONDITIONAL,
     ELIGIBLE_VALUE_ONLY,
+    MIN_COHORT_FEATURES,
     MIN_TRAIN_GAMES,
     SHRINK_FALLBACK,
     VERSIONS,
@@ -76,6 +82,45 @@ def coverage_for(title: str, columns: tuple[str, ...], missing: tuple[str, ...] 
     return {title: {c: (UNTRACKED if c in missing else TRACKED) for c in columns}}
 
 
+def rows_reporting(
+    title: str,
+    mode_slug: str,
+    columns: tuple[str, ...],
+    missing: tuple[str, ...] = (),
+    part: tuple[str, ...] = (),
+) -> list[MapRow]:
+    """Twenty player-maps that report these columns, for feature resolution.
+
+    `missing` is a column the cohort never reports; `part` is one it reports on
+    a single row out of twenty, which is what a partly-populated column looks
+    like in the archive and what the presence floor exists to drop.
+    """
+    reported = tuple(c for c in columns if c not in missing)
+    out: list[MapRow] = []
+    for i in range(20):
+        values = {c: 1.0 for c in reported if c not in part or i == 0}
+        out.append(
+            MapRow(
+                player_id=i,
+                team_id=i % 2,
+                game_id=i,
+                series_id=i,
+                season_id=1,
+                mode_id=1,
+                mode_slug=mode_slug,
+                title=title,
+                event_id=1,
+                played_at=date(2020, 1, 1),
+                duration_s=600.0 if DURATION_KEY in reported and DURATION_KEY not in part else 0.0,
+                winner_team_id=0,
+                values=values,
+                team_kills=10.0,
+                team_hill_time=0.0,
+            )
+        )
+    return out
+
+
 def rated(row: SeasonRating) -> float:
     """The rating as a number. A row that withholds one fails the test that
     asked for it rather than being compared against None."""
@@ -84,8 +129,12 @@ def rated(row: SeasonRating) -> float:
 
 
 def declared(spec: FeatureSpec) -> tuple[Feature, ...]:
-    """Both arms of a Paced pair, or the single feature."""
-    return (spec.timed, spec.per_map) if isinstance(spec, Paced) else (spec,)
+    """Every candidate form of one slot, or the single feature.
+
+    All of them, not the two ends: a slot that falls back on its numerator as
+    well as its denominator has forms in the middle, and a rule asserted over
+    the ends only would stop reading them."""
+    return spec.options if isinstance(spec, Paced) else (spec,)
 
 
 def _zero(_row: MapRow) -> float:
@@ -369,12 +418,14 @@ def test_untracked_column_drops_only_its_own_feature() -> None:
         MODE_HARDPOINT,
         coverage_for("WWII", HP_COLUMNS, missing=("hill_captures",)),
         "WWII",
+        rows_reporting("WWII", MODE_HARDPOINT, HP_COLUMNS, missing=("hill_captures",)),
     )
     bo4 = resolve_features(
         "2.0.0",
         MODE_HARDPOINT,
         coverage_for("BO4", HP_COLUMNS, missing=("time_alive_s",)),
         "BO4",
+        rows_reporting("BO4", MODE_HARDPOINT, HP_COLUMNS, missing=("time_alive_s",)),
     )
     assert [f.key for f in wwii] == ["kills_p10", "deaths_p10", "hill_time_p10", "time_per_life_s"]
     assert [f.key for f in bo4] == [
@@ -389,12 +440,19 @@ def test_a_title_without_map_time_keeps_the_mode_per_map() -> None:
     """The CDL box scores carry no clock. Every per-10-minute rate resolves to
     its per-map twin instead of reporting itself available on the numerator and
     then emptying the cohort one zero denominator at a time."""
-    timed = resolve_features("2.0.0", MODE_HARDPOINT, coverage_for("MW19", HP_COLUMNS), "MW19")
+    timed = resolve_features(
+        "2.0.0",
+        MODE_HARDPOINT,
+        coverage_for("MW19", HP_COLUMNS),
+        "MW19",
+        rows_reporting("MW19", MODE_HARDPOINT, HP_COLUMNS),
+    )
     untimed = resolve_features(
         "2.0.0",
         MODE_HARDPOINT,
         coverage_for("MW19", HP_COLUMNS, missing=(DURATION_KEY,)),
         "MW19",
+        rows_reporting("MW19", MODE_HARDPOINT, HP_COLUMNS, missing=(DURATION_KEY,)),
     )
     assert [f.key for f in timed] == [
         "kills_p10",
@@ -420,15 +478,226 @@ def test_iw_snd_drops_the_first_death_family() -> None:
         MODE_SND,
         coverage_for("IW", SND_COLUMNS, missing=("snd_firstdeaths", "snd_survives")),
         "IW",
+        rows_reporting("IW", MODE_SND, SND_COLUMNS, missing=("snd_firstdeaths", "snd_survives")),
     )
     assert [f.key for f in iw] == ["snd_kpr", "snd_dpr", "snd_fb_rate", "snd_bomb_pr"]
+
+
+def test_a_title_without_rounds_keeps_search_and_destroy_per_map() -> None:
+    """No pre-2017 title counts rounds. Every per-round rate resolves to its
+    per-map twin, so the mode survives instead of losing all six features and
+    with them the cohort — which is how a third of that era went unrated."""
+    columns = tuple(c for c in SND_COLUMNS if c not in ("snd_firstdeaths", "snd_survives"))
+    rounded = resolve_features(
+        "2.0.0",
+        MODE_SND,
+        coverage_for("BO4", columns),
+        "BO4",
+        rows_reporting("BO4", MODE_SND, columns),
+    )
+    unrounded = resolve_features(
+        "2.0.0",
+        MODE_SND,
+        coverage_for("BO3", columns, missing=("snd_rounds",)),
+        "BO3",
+        rows_reporting("BO3", MODE_SND, columns, missing=("snd_rounds",)),
+    )
+    assert [f.key for f in rounded] == ["snd_kpr", "snd_dpr", "snd_fb_rate", "snd_bomb_pr"]
+    assert [f.key for f in unrounded] == [
+        "snd_kills_pm",
+        "snd_deaths_pm",
+        "snd_fb_pm",
+        "snd_bomb_pm",
+    ]
+    assert {f.denom_kind for f in unrounded} == {"maps"}
+
+
+def test_a_partly_reported_column_is_not_a_column() -> None:
+    """Ghosts records first bloods on one Search and Destroy row in fifteen. The
+    title-wide count reads a tracked column; the cohort's own rows do not. A
+    rate fitted on it would divide a player's few reported maps by all of them,
+    so the feature drops and the cohort keeps the columns it really has."""
+    columns = tuple(c for c in SND_COLUMNS if c not in ("snd_firstdeaths", "snd_survives"))
+    features = resolve_features(
+        "2.0.0",
+        MODE_SND,
+        coverage_for("GHO", columns, missing=("snd_rounds",)),
+        "GHO",
+        rows_reporting("GHO", MODE_SND, columns, missing=("snd_rounds",), part=("first_bloods",)),
+    )
+    assert [f.key for f in features] == ["snd_kills_pm", "snd_deaths_pm", "snd_bomb_pm"]
+
+
+def test_every_mode_the_archive_plays_has_a_feature_set() -> None:
+    """A feature set is a dictionary keyed by mode slug and a miss returns no
+    features, so a mode nobody named is a mode nobody rates and no error says
+    so. Domination, Blitz and Overload each went unrated that way."""
+    for version in ALL_VERSIONS:
+        assert set(VERSIONS[version]) == set(MODE_ORDER), version
+
+
+@pytest.mark.parametrize(
+    ("mode", "columns", "expected"),
+    [
+        (
+            MODE_DOMINATION,
+            ("kills", "deaths", "captures"),
+            ["kills_pm", "deaths_pm", "dom_caps_pm"],
+        ),
+        (MODE_BLITZ, ("kills", "deaths", "blitz_caps"), ["kills_pm", "deaths_pm", "blitz_caps_pm"]),
+        (MODE_OVERLOAD, ("kills", "deaths", "assists"), ["kills_pm", "deaths_pm", "assists_pm"]),
+    ],
+)
+def test_the_three_recovered_modes_rate_on_what_they_carry(
+    mode: str, columns: tuple[str, ...], expected: list[str]
+) -> None:
+    """Each clears MIN_COHORT_FEATURES on real columns, with no clock and no
+    rounds. Overload has no objective column in any source, so it rates on the
+    slaying pair and assists."""
+    features = resolve_features(
+        "2.0.0", mode, coverage_for("GHO", columns), "GHO", rows_reporting("GHO", mode, columns)
+    )
+    assert [f.key for f in features] == expected
+    assert len(features) >= MIN_COHORT_FEATURES
+
+
+def test_a_slot_resolves_to_the_first_form_the_cohort_supports() -> None:
+    """The order in the chain is the preference, and only the cohort decides
+    where it stops. Anything else is a per-title matrix maintained by hand."""
+    columns = ("kills", "deaths", "hill_time", DURATION_KEY)
+    timed = resolve_features(
+        "1.0.0",
+        MODE_HARDPOINT,
+        coverage_for("WWII", columns),
+        "WWII",
+        rows_reporting("WWII", MODE_HARDPOINT, columns),
+    )
+    untimed = resolve_features(
+        "1.0.0",
+        MODE_HARDPOINT,
+        coverage_for("MW19", columns, missing=(DURATION_KEY,)),
+        "MW19",
+        rows_reporting("MW19", MODE_HARDPOINT, columns, missing=(DURATION_KEY,)),
+    )
+    assert [f.key for f in timed][-1] == "obj_p10"
+    assert [f.key for f in untimed][-1] == "obj_pm"
+
+
+def test_a_hardpoint_with_no_hill_clock_rates_on_the_round_score() -> None:
+    """Black Ops 2 and Advanced Warfare record no hill time on any row, so the
+    objective slot resolves past both of its hill forms to the scoreboard. The
+    cohort rated on the gunfight alone until the score was claimed."""
+    columns = ("kills", "deaths", "hill_time", "player_score", DURATION_KEY)
+    features = resolve_features(
+        "2.0.0",
+        MODE_HARDPOINT,
+        coverage_for("BO2", columns, missing=("hill_time", DURATION_KEY)),
+        "BO2",
+        rows_reporting("BO2", MODE_HARDPOINT, columns, missing=("hill_time", DURATION_KEY)),
+    )
+    assert [f.key for f in features] == ["kills_pm", "deaths_pm", "round_score_pm"]
+
+
+def test_a_source_that_records_plants_and_not_defuses_keeps_the_plant() -> None:
+    """The paired form needs both columns and Ghosts reports one of them. Plants
+    alone is the same quantity worse resolved, and it is the difference between
+    an objective axis and none for that cohort."""
+    columns = ("kills", "deaths", "plants", "defuses")
+    both = resolve_features(
+        "2.0.0",
+        MODE_SND,
+        coverage_for("BO2", columns),
+        "BO2",
+        rows_reporting("BO2", MODE_SND, columns),
+    )
+    plants_only = resolve_features(
+        "2.0.0",
+        MODE_SND,
+        coverage_for("GHO", columns),
+        "GHO",
+        rows_reporting("GHO", MODE_SND, columns, part=("defuses",)),
+    )
+    assert [f.key for f in both] == ["snd_kills_pm", "snd_deaths_pm", "snd_bomb_pm"]
+    assert [f.key for f in plants_only] == ["snd_kills_pm", "snd_deaths_pm", "snd_plants_pm"]
+
+
+def test_control_reads_first_bloods_where_they_exist_and_assists_where_they_do_not() -> None:
+    """The CWL archive counts first bloods on the Control round and the CDL box
+    score counts none of the mode's own columns, so the per-mode set that
+    replaced the box-score set left 2022-2025 on the slaying pair — fewer
+    columns than 1.0.0 had given them."""
+    cwl_columns = (
+        "kills",
+        "deaths",
+        "ctrl_captures",
+        "ctrl_firstbloods",
+        "ctrl_firstdeaths",
+        "ctrl_rounds",
+        "assists",
+        DURATION_KEY,
+    )
+    cdl_columns = ("kills", "deaths", "assists")
+    cwl = resolve_features(
+        "2.0.0",
+        MODE_CONTROL,
+        coverage_for("BO4", cwl_columns),
+        "BO4",
+        rows_reporting("BO4", MODE_CONTROL, cwl_columns),
+    )
+    cdl = resolve_features(
+        "2.0.0",
+        MODE_CONTROL,
+        coverage_for("MWII", cdl_columns),
+        "MWII",
+        rows_reporting("MWII", MODE_CONTROL, cdl_columns),
+    )
+    assert [f.key for f in cwl] == [
+        "kills_p10",
+        "deaths_p10",
+        "ctrl_caps_pm",
+        "ctrl_fb_net_pr",
+    ]
+    assert [f.key for f in cdl] == ["kills_pm", "deaths_pm", "assists_pm"]
+
+
+def test_a_season_carrying_none_of_the_forms_keeps_the_pair() -> None:
+    """Black Ops Cold War records no assists, no Control round counts and no
+    first bloods. Two features is what that box score supports, and the rule
+    reports it rather than inventing a third."""
+    columns = ("kills", "deaths", "assists")
+    features = resolve_features(
+        "2.0.0",
+        MODE_CONTROL,
+        coverage_for("BOCW", columns, missing=("assists",)),
+        "BOCW",
+        rows_reporting("BOCW", MODE_CONTROL, columns),
+    )
+    assert [f.key for f in features] == ["kills_pm", "deaths_pm"]
+
+
+def test_a_slot_fills_once_however_many_forms_it_declares() -> None:
+    """A chain is one feature in the fit, not a family. Two forms of the same
+    quantity in one cohort would double-count it."""
+    columns = ("kills", "deaths", "plants", "defuses", "player_score", "hill_time", DURATION_KEY)
+    for mode in (MODE_HARDPOINT, MODE_SND):
+        features = resolve_features(
+            "2.0.0",
+            mode,
+            coverage_for("BO2", columns),
+            "BO2",
+            rows_reporting("BO2", mode, columns),
+        )
+        assert len({f.key for f in features}) == len(features)
+        assert len([f for f in features if f.key.startswith(("snd_bomb", "snd_plants"))]) <= 1
+        assert len([f for f in features if f.key in ("hill_time_pm", "round_score_pm")]) <= 1
 
 
 def test_feed_features_need_a_feed() -> None:
     """A title with no kill feed publishes none of the trade features, and 2.1.0
     degrades to exactly the 2.0.0 set rather than emitting zeros."""
-    without = resolve_features("2.1.0", MODE_SND, coverage_for("BO4", SND_COLUMNS), "BO4")
-    plain = resolve_features("2.0.0", MODE_SND, coverage_for("BO4", SND_COLUMNS), "BO4")
+    snd_rows = rows_reporting("BO4", MODE_SND, SND_COLUMNS)
+    without = resolve_features("2.1.0", MODE_SND, coverage_for("BO4", SND_COLUMNS), "BO4", snd_rows)
+    plain = resolve_features("2.0.0", MODE_SND, coverage_for("BO4", SND_COLUMNS), "BO4", snd_rows)
     assert [f.key for f in without] == [f.key for f in plain]
     assert not any(f.needs_feed for f in without)
 
