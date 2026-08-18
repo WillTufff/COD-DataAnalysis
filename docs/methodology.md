@@ -1591,8 +1591,8 @@ the same nine maps also leave the four-way version comparison, which is why the 
 versions' comparison numbers move very slightly while their ratings do not move at all.
 
 **2.2.0 also loses the map backtest, and that comes first, not last.** Over the
-9,193 maps all four versions predict, Brier goes 1.0.0 0.05572, 2.0.0 0.04741, 2.1.0 0.04720,
-**2.2.0 0.04828**, a small regression, losing in 19 of 25 cohorts. Two things about that,
+13,876 maps all four versions predict, Brier goes 1.0.0 0.06354, 2.0.0 0.05710, 2.1.0 0.05696,
+**2.2.0 0.05769**, a small regression, losing in 19 of 41 cohorts. Two things about that,
 and neither is "the columns are worthless".
 
 The first is that this is the test the page above spends several paragraphs explaining should
@@ -2518,27 +2518,29 @@ computes is labelled secondary in the stored payload and published without signi
 
 | Predictor, season *N* | *r* with next K/D z | Δ*r* vs. K/D z | Detectable at |
 |---|---|---|---|
-| Era-adjusted K/D z (baseline) | 0.564 [0.475, 0.637] | — | — |
-| Composite rating | 0.335 [0.222, 0.435] | **−0.229** [−0.308, −0.155] | 0.110 |
-| `openskill` player rating | 0.040 [−0.060, 0.139] | **−0.524** [−0.634, −0.408] | 0.135 |
+| Era-adjusted K/D z (baseline) | 0.559 [0.470, 0.634] | — | — |
+| Composite rating | 0.340 [0.217, 0.443] | **−0.219** [−0.305, −0.145] | 0.113 |
+| `openskill` player rating | 0.098 [−0.001, 0.203] | **−0.461** [−0.576, −0.333] | 0.139 |
 
 Both gaps exclude zero and both exceed what this record can detect, in the losing direction.
-561 transitions over 189 players, and none of them dropped for want of a predictor.
+563 transitions over 190 players, and none of them dropped for want of a predictor. This is
+the three-way panel, which the harness keeps computing after a fourth predictor narrowed the
+shared one, so neither set of figures restates the other.
 
 **The threshold is computed, not chosen.** A gate declared below the smallest effect the record
 can resolve can be failed by a model that works, so each predictor gets its own floor from the
 [pre-flight's](#can-the-plus-minus-have-a-time-axis) closed form at the measured sample size,
 the measured baseline correlation and that predictor's measured agreement with the baseline:
-0.09 for the composite, which agrees with K/D z at 0.572, and 0.11 for `openskill`, which
-agrees at 0.235. Then both are widened by the design effect the clustering costs, measured at
-**1.225**, measured, not assumed.
+0.09 for the composite, which agrees with K/D z at 0.563, and 0.11 for `openskill`, which
+agrees at 0.246. Then both are widened by the design effect the clustering costs, measured at
+**1.259**, measured, not assumed.
 
 **The next rating's floor is computed on the panel it will actually occupy, before it exists.**
 A rating built on the season plus-minus can only be scored where a season-resolution coefficient
 exists, which is the CDL era alone: **268 of the 563 transitions, over 90 of the 190 players.**
 Fewer clusters is a higher floor, so the threshold that rating will be held to is not the 0.110
 above but **0.175**, an independent floor of 0.11 widened by a design effect of 1.59 measured on
-that narrower panel, well above the 1.225 the full panel costs. On it the composite loses by
+that narrower panel, well above the 1.259 the full panel costs. On it the composite loses by
 0.258 against a baseline *r* of 0.630, so the rating has to move **0.433** in correlation to
 clear a gate that says beat, not tie.
 
@@ -2559,7 +2561,7 @@ keyed by a map or a series resamples whole series. A persistence observation is 
 either: it is a player-season transition assembled from tens of series, and no series contains
 a whole one. The smallest cluster that does is the player, which is what the primary test draws
 on. It is strictly coarser than the per-observation draw the published test uses. The
-1.225 design effect above is exactly the price of the coarser draw, measured by running both
+1.259 design effect above is exactly the price of the coarser draw, measured by running both
 and dividing.
 
 **A rating that never sees the box score is the adversary.** `openskill` (Weng-Lin /
