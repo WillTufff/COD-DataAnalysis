@@ -14,6 +14,9 @@ const MODE_SLUG: Record<string, string> = {
   Control: "control",
   "Capture the Flag": "capture-the-flag",
   Uplink: "uplink",
+  Domination: "domination",
+  Blitz: "blitz",
+  Overload: "overload",
 };
 
 /** Where a finding's evidence actually lives. Metric-backed kinds deep-link

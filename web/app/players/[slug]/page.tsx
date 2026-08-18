@@ -156,6 +156,8 @@ const METRIC_PRIORITY = [
   "ctrl_caps_pm",
   "ctrl_fb_net_pr",
   "ctrl_opening_duel_win",
+  "dom_caps_pm",
+  "blitz_caps_pm",
   "damage_p10",
   "blitz_index_p10",
   "clean_kill_rate",
@@ -578,6 +580,12 @@ const MODE_SIGNATURE: Record<string, string[]> = {
   control: ["ctrl_caps_pm", "ctrl_fb_net_pr", "ctrl_opening_duel_win"],
   "capture-the-flag": ["ctf_caps_pm", "ctf_returns_pm", "ctf_carry_efficiency"],
   uplink: ["uplink_points_pm", "uplink_dunk_rate"],
+  domination: ["dom_caps_pm"],
+  blitz: ["blitz_caps_pm"],
+  // Overload has no entry because no source records a column that is Overload's
+  // own: Black Ops 7 reports kills, deaths, assists and damage for it and
+  // nothing else. Its block leads with the shared slaying line, which is what
+  // the mode actually carries.
 };
 
 type StyleView = {

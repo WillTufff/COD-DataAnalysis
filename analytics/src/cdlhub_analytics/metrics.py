@@ -29,8 +29,10 @@ from .maprows import (
     DURATION_KEY,
     KILL_DIST,
     MIN_NONZERO_ROWS,
+    MODE_BLITZ,
     MODE_CONTROL,
     MODE_CTF,
+    MODE_DOMINATION,
     MODE_HARDPOINT,
     MODE_SND,
     MODE_UPLINK,
@@ -1909,6 +1911,41 @@ _UNTIMED: tuple[Metric, ...] = (
     ),
 )
 
+# The two pre-2017 objective modes. Both columns were loaded and coverage-
+# measured from the first wiki import and named by nothing, so Ghosts published
+# a scoreboard with the objective missing from it — the mode's whole point,
+# absent from every card and every report on a 4,000-map season.
+_GHOSTS: tuple[Metric, ...] = (
+    Metric(
+        key="dom_caps_pm",
+        label="Flag captures per map",
+        category="domination",
+        tier="gold",
+        unit="per map",
+        higher_is_better=True,
+        formula="sum(captures) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("captures",),
+        modes=(MODE_DOMINATION,),
+        compute=_pm("captures"),
+    ),
+    Metric(
+        key="blitz_caps_pm",
+        label="Blitz captures per map",
+        category="blitz",
+        tier="gold",
+        unit="per map",
+        higher_is_better=True,
+        formula="sum(blitz_caps) / maps",
+        denom_kind="maps",
+        min_denom=float(MIN_MAPS),
+        sources=("blitz_caps",),
+        modes=(MODE_BLITZ,),
+        compute=_pm("blitz_caps"),
+    ),
+)
+
 CATALOG: tuple[Metric, ...] = (
     *_SLAYING,
     *_UNTIMED,
@@ -1919,6 +1956,7 @@ CATALOG: tuple[Metric, ...] = (
     *_CTF,
     *_UPLINK,
     *_CONTROL,
+    *_GHOSTS,
     *_SCORESTREAKS,
     *_TRADES,
     *_CLUTCH,
