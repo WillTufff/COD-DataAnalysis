@@ -15,6 +15,7 @@ import psycopg
 import pytest
 
 from cdlhub_analytics import gates
+from cdlhub_analytics.era import MIN_MAPS
 from cdlhub_analytics.errorcontrol import Q_THRESHOLD
 from cdlhub_analytics.gates import (
     PUBLISHED_BASES,
@@ -26,6 +27,8 @@ from cdlhub_analytics.gates import (
     error_control_failures,
     evaluation_failures,
     mode_naming_failures,
+    mode_vocabulary_failures,
+    rated_cohort_failures,
     role_failures,
     rotation_failures,
     season_rapm_failures,
@@ -188,6 +191,54 @@ def test_a_named_mode_nobody_played_is_not_a_failure() -> None:
     """`game_modes` carries modes no archived season used. A name with no rows
     is spare capacity, not a gap."""
     assert mode_naming_failures([], {"hardpoint", "blitz"}) == []
+
+
+# ------------------------------------------------------------ mode vocabulary
+
+
+def test_every_played_mode_rated_passes() -> None:
+    played = [("hardpoint", 6087), ("domination", 590), ("overload", 282)]
+    assert mode_vocabulary_failures(played, {"hardpoint", "domination", "overload"}) == []
+
+
+def test_a_played_mode_with_no_feature_set_fails_with_its_map_count() -> None:
+    """The shape of the defect: three modes were absent from the feature-set
+    dictionary, the lookup returned an empty tuple, and the cohort died before
+    anything was measured. Two of the three are a third of their year's maps and
+    the year published a rating anyway, over the modes that were named."""
+    failed = mode_vocabulary_failures([("overload", 282)], {"hardpoint"})
+    assert len(failed) == 1
+    assert "overload" in failed[0] and "282" in failed[0]
+
+
+def test_a_rated_mode_the_archive_never_played_is_not_a_failure() -> None:
+    """A feature set ahead of the data is a plan. A mode ahead of the feature
+    sets is a hole."""
+    assert mode_vocabulary_failures([], {"hardpoint", "blitz"}) == []
+
+
+# -------------------------------------------------------------- rated cohorts
+
+
+def test_a_cohort_for_every_season_and_mode_played_passes() -> None:
+    played = [(2014, "domination", 406), (2014, "search-and-destroy", 320)]
+    rated = {(2014, "domination"), (2014, "search-and-destroy")}
+    assert rated_cohort_failures(played, rated) == []
+
+
+def test_a_season_and_mode_with_maps_and_no_cohort_fails() -> None:
+    """2014 published no rating at all and 2013, 2015 and 2016 published one
+    with Search and Destroy missing. Both read as a season the model had
+    covered, because the label said all modes either way."""
+    failed = rated_cohort_failures([(2014, "search-and-destroy", 320)], set())
+    assert len(failed) == 1
+    assert "2014" in failed[0] and "search-and-destroy" in failed[0] and "320" in failed[0]
+
+
+def test_too_few_maps_to_fit_is_not_a_lost_cohort() -> None:
+    """Below the qualification floor there is no cohort to lose. Failing there
+    would push the next reader to fit a season on a handful of maps."""
+    assert rated_cohort_failures([(2013, "blitz", MIN_MAPS - 1)], set()) == []
 
 
 # -------------------------------------------------------- the season plus-minus

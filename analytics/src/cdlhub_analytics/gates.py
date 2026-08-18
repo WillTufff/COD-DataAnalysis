@@ -36,6 +36,7 @@ from . import aging, career, errorcontrol, metrics, role, seriesdyn, style, vali
 from .career_rank import engine as career_rank
 from .career_rank import evalpop as career_evalpop
 from .db import connect
+from .era import MIN_MAPS
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
 from .metricdiff.run import POPULATION_ARTIFACT, REPORT_ARTIFACT
 from .ratings import evalspec, maplevel, player_rating, prior, statespace
@@ -85,10 +86,17 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
         ("volume", "kills"),
         ("survival", "deaths"),
     ),
+    # Re-read on 2026-08-18, after 2014 entered the basis for the first time.
+    # `build_basis` keeps only rows with a rating, and 2014 had none until the
+    # Search and Destroy, Domination and Blitz cohorts were recovered, so a
+    # whole season joined the population this is fitted on. The two named axes
+    # held. Axis 3's marker moved from kills to deaths on a real margin
+    # (+0.464 against -0.410) and axis 4 held. Both are unnamed, so nothing
+    # published is renamed.
     "extended 2013-2016": (
         ("volume", "kills"),
         ("survival", "deaths"),
-        ("axis 3", "kills"),
+        ("axis 3", "deaths"),
         ("axis 4", "deaths"),
     ),
     "core CWL": (
@@ -116,10 +124,15 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
         ("volume", "kills"),
         ("survival", "deaths"),
     ),
+    # Axis 3 re-pinned 2026-08-18 from plus_minus to kd, and the two are a tie
+    # rather than a move: kd loads +0.337666 and plus-minus +0.337585, a gap of
+    # 0.00008. Per-map plus-minus and K/D are the same quantity differenced two
+    # ways, so which of them the marker rule picks is decided in the fifth
+    # decimal and will keep changing. The axis itself did not move.
     "extended CDL": (
         ("volume", "kills"),
         ("survival", "deaths"),
-        ("axis 3", "plus_minus"),
+        ("axis 3", "kd"),
         ("axis 4", "damage"),
         ("axis 5", "damage"),
     ),
@@ -852,6 +865,84 @@ def mode_naming_failures(scored: list[tuple[str, int]], named: set[str]) -> list
     ]
 
 
+def mode_vocabulary_failures(played: list[tuple[str, int]], rated: set[str]) -> list[str]:
+    """A feature set is a dictionary keyed by mode slug, and a lookup that misses
+    returns an empty tuple, so a mode nobody named is a mode nobody rates and
+    nothing reports it. Ghosts Domination and Blitz sat unrated for four years
+    and Black Ops 7 Overload for a season, each of them a third of its year's
+    maps, under an all-modes label. This is the `TITLE_ORDER` treatment for
+    modes: what the archive plays is the vocabulary, and the code follows it."""
+    return [
+        f"{slug}: {maps:,} maps and no feature set in player_rating.VERSIONS"
+        for slug, maps in played
+        if slug not in rated
+    ]
+
+
+def rated_cohort_failures(
+    played: list[tuple[int, str, int]], cohorts: set[tuple[int, str]]
+) -> list[str]:
+    """A (season x mode) with box scores and no cohort publishes nothing, and the
+    all-modes rating above it is a blend over whatever did fit. 2014 had no
+    rating at all, and 2013, 2015 and 2016 published one with Search and Destroy
+    missing from it - a third of those years' maps - because a denominator was
+    declared and never available.
+
+    The floor is `era.MIN_MAPS`, the count a player needs to be qualified: below
+    it there is no cohort to fit rather than a cohort that was lost."""
+    return [
+        f"{year} {slug}: {maps:,} decided maps and no rating cohort"
+        for year, slug, maps in sorted(played)
+        if (year, slug) not in cohorts and maps >= MIN_MAPS
+    ]
+
+
+def played_modes(conn: psycopg.Connection[Any]) -> tuple[list[tuple[str, int]], set[str]]:
+    """Modes the archive holds box scores for, and the modes a version rates.
+
+    A mode counts as rated only where every feature-set version names it. The
+    versions are fitted together and compared against each other, so one of them
+    rating fewer modes than the rest is the same defect one step further in."""
+    rows = conn.execute(
+        "SELECT gm.slug, count(DISTINCT g.id) FROM game_player_stats gps"
+        " JOIN games g ON g.id = gps.game_id"
+        " JOIN game_modes gm ON gm.id = g.mode_id"
+        " GROUP BY gm.slug"
+    ).fetchall()
+    if not rows:
+        raise CannotRun("no box scores in this database")
+    rated = set.intersection(*(set(spec) for spec in player_rating.VERSIONS.values()))
+    return [(str(r[0]), int(r[1])) for r in rows], rated
+
+
+def played_cohorts(conn: psycopg.Connection[Any]) -> list[tuple[int, str, int]]:
+    """Every (season x mode) the archive holds decided box-score maps for."""
+    rows = conn.execute(
+        "SELECT s.year, gm.slug, count(DISTINCT g.id) FROM game_player_stats gps"
+        " JOIN games g ON g.id = gps.game_id"
+        " JOIN game_modes gm ON gm.id = g.mode_id"
+        " JOIN series se ON se.id = g.series_id"
+        " JOIN events e ON e.id = se.event_id"
+        " JOIN seasons s ON s.id = e.season_id"
+        " WHERE g.winner_team_id IS NOT NULL"
+        " GROUP BY s.year, gm.slug"
+    ).fetchall()
+    if not rows:
+        raise CannotRun("no box scores in this database")
+    return [(int(r[0]), str(r[1]), int(r[2])) for r in rows]
+
+
+def rated_cohorts(posterior: dict[str, Any], slug_of: dict[str, str]) -> set[tuple[int, str]]:
+    """The (year, slug) pairs the published fit produced a cohort for. The
+    posterior names a mode by its display name, so the mode table translates."""
+    return {(int(c["year"]), slug_of[str(c["mode"])]) for c in posterior["cohorts"]}
+
+
+def mode_slugs_by_name(conn: psycopg.Connection[Any]) -> dict[str, str]:
+    rows = conn.execute("SELECT name, slug FROM game_modes WHERE name IS NOT NULL").fetchall()
+    return {str(r[0]): str(r[1]) for r in rows}
+
+
 def scored_modes(conn: psycopg.Connection[Any]) -> tuple[list[tuple[str, int]], set[str]]:
     """Modes carrying rows in the newest metric layer run, and the named set."""
     run_id = latest_run_id(conn, metrics.MODEL)
@@ -934,8 +1025,16 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             ),
         ),
         ("cohort", cohort_failures(rating_artifact(conn, "rating_posterior"))),
+        (
+            "rated cohorts",
+            rated_cohort_failures(
+                played_cohorts(conn),
+                rated_cohorts(rating_artifact(conn, "rating_posterior"), mode_slugs_by_name(conn)),
+            ),
+        ),
         ("basis", basis_failures(artifact(conn, STYLE_MODEL, "player_style"))),
         ("mode naming", mode_naming_failures(*scored_modes(conn))),
+        ("mode vocabulary", mode_vocabulary_failures(*played_modes(conn))),
         (
             "season plus-minus",
             season_rapm_failures(
