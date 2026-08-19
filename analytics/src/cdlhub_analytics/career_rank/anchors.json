@@ -1,0 +1,54 @@
+{
+  "_comment": "Published all-time rankings, transcribed as ordered lists. This file is evidence, not a target: nothing here is fitted against, and no formula weight may be chosen to move a player named in it. 'all_time' lists set the tiers; a 'current_form' list ranks the players active when it was written, so it can admit an active player to tier C and can never place one in tier A or B.",
+  "pulled": "2026-08-18",
+  "lists": [
+    {
+      "id": "codwiki-2018",
+      "publisher": "Call of Duty Esports Wiki",
+      "title": "Top 10 BEST Players of All Time",
+      "url": "https://cod-esports.fandom.com/wiki/Article:Top_10_Players_of_All_Time",
+      "date": "2018-06",
+      "kind": "all_time",
+      "licence": "CC BY-SA 3.0",
+      "order": ["Crimsix", "Scump", "Karma", "JKap", "Aches", "Clayster", "FormaL", "TeePee", "SlasheR", "John"]
+    },
+    {
+      "id": "esportstalk-2021",
+      "publisher": "EsportsTalk",
+      "title": "Top 10 Best Call of Duty Players of All Time",
+      "url": "https://www.esportstalk.com/blog/top-10-best-call-of-duty-players-of-all-time/",
+      "date": "2021-10-16",
+      "kind": "all_time",
+      "order": ["Karma", "Crimsix", "Clayster", "Scump", "JKap", "Simp", "SlasheR", "Aches", "Apathy", "Attach"]
+    },
+    {
+      "id": "dexerto-2022",
+      "publisher": "Dexerto",
+      "title": "Top 10 best Call of Duty players of all time",
+      "url": "https://www.dexerto.com/call-of-duty/top-10-best-call-of-duty-players-of-all-time-1900543/",
+      "date": "2022-08-12",
+      "kind": "all_time",
+      "order": ["Crimsix", "Scump", "Clayster", "Karma", "Simp", "FormaL", "Arcitys", "aBeZy", "Aches", "SlasheR"]
+    },
+    {
+      "id": "jaxon-2026",
+      "publisher": "Jaxon / esportsbetting.com",
+      "title": "Best Call of Duty players of all time",
+      "url": "https://esportsbetting.com/best-call-of-duty-players/",
+      "date": "2026",
+      "kind": "all_time",
+      "note": "published 2025-01-06, updated 2026; five players are ranked",
+      "order": ["Crimsix", "Scump", "Karma", "Clayster", "FormaL"]
+    },
+    {
+      "id": "1v9-2025",
+      "publisher": "1v9",
+      "title": "10 Best Call of Duty Players Of All Time",
+      "url": "https://1v9.gg/blog/call-of-duty-cod-best-players-of-all-time",
+      "date": "2025-05-26",
+      "kind": "current_form",
+      "note": "titled all-time and ranks only players active in 2025, so it is read as a list of the active tier",
+      "order": ["aBeZy", "HyDra", "Cellium", "Scrap", "Simp", "Shotzzy", "Dashy", "Pred", "Drazah", "Priestahh"]
+    }
+  ]
+}
