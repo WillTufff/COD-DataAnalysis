@@ -2,11 +2,12 @@
 
 Two rows in `players` are a candidate when their handles collapse to the same
 key once case and punctuation are removed, when they are one edit apart and
-share a team, or when they carry the same real name and birthdate. That third
-rule is the only one that catches a rename to an unrelated gamertag, which no
-amount of string distance will find. The evidence is what decides it: two
-handles that appear in the same game are two people, and two that never overlap
-and hand a team over between them are one.
+share a team, when they carry the same real name and birthdate, or when the
+wiki lists one handle as a former gamertag of the other. The last two rules are
+what catch a rename to an unrelated gamertag, which no amount of string
+distance will find, and a former gamertag decides the pair on its own. For the
+rest, the evidence decides: two handles that appear in the same game are two
+people, and two that never overlap and hand a team over between them are one.
 
 Decisions are written to the pipeline's `aliases.json` and nowhere else. Rows
 written straight into Postgres do not survive the next import; an alias entry
@@ -18,14 +19,17 @@ from __future__ import annotations
 import json
 import unicodedata
 from datetime import date
+from pathlib import Path
 from typing import Any, cast
 
-from . import ALIASES_PATH, Conn, rows_as_dicts
+from . import ALIASES_PATH, SNAPSHOTS_DIR, Conn, rows_as_dicts
 
 # Below this, one edit is most of the handle and the pair means nothing.
 MIN_FUZZY_LENGTH = 4
 # Teams shown per player: enough to see whose history is whose.
 TOP_TEAMS = 6
+# The wiki snapshot that names a page's former gamertags.
+LPDB_PLAYERS_PATH = SNAPSHOTS_DIR / "lpdb" / "players.json"
 
 KEPT_SEPARATE_COMMENT = (
     "'identity_kept_separate' lists handle pairs confirmed to be two different "
@@ -116,6 +120,33 @@ def load_aliases() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def alternate_id_pairs(path: Path = LPDB_PLAYERS_PATH) -> set[tuple[str, str]]:
+    """Handle pairs the wiki itself calls one person, normalized and sorted.
+
+    A page carries the gamertags its player used before the one it is titled
+    with. That is a statement about the person, not about the spelling, so it
+    settles a rename that neither string distance nor a birthdate can reach.
+    """
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(loaded, list):
+        return set()
+    pairs: set[tuple[str, str]] = set()
+    for row in loaded:
+        if not isinstance(row, dict):
+            continue
+        current = normalize(str(row.get("id") or row.get("pagename") or ""))
+        if not current:
+            continue
+        for former in str(row.get("alternateid") or "").split(","):
+            key = normalize(former)
+            if key and key != current:
+                pairs.add(_pair_key(key, current))
+    return pairs
 
 
 def _bio_key(player: dict[str, Any]) -> tuple[str, date] | None:
@@ -240,12 +271,22 @@ def _side(
 def _suggestion(evidence: dict[str, Any]) -> str:
     """What the evidence says, for the owner to accept or overrule.
 
-    Sharing a map is two people; so is holding two rosters at once. A team both
-    handles played for but never played a map on together is one person under
-    two spellings, which is the whole shape this queue is looking for. A shared
-    real name and birthdate says the same thing without the handles agreeing at
-    all, so it decides a pair the string rules would never have offered.
+    A former gamertag on the wiki page is the wiki saying the two handles are
+    one person, so it decides the pair before anything else is read. Two stints
+    at once do not overrule it: an archive stint spans its whole event, and a
+    player lent to another roster for one week reads as a conflict. A map the
+    two handles played together does hold it back for the owner, because that
+    would mean one of the sources is wrong about who played.
+
+    Otherwise: sharing a map is two people, and so is holding two rosters at
+    once. A team both handles played for but never played a map on together is
+    one person under two spellings, which is the whole shape this queue is
+    looking for. A shared real name and birthdate says the same thing without
+    the handles agreeing at all, so it decides a pair the string rules would
+    never have offered.
     """
+    if evidence["kind"] == "alternate_id":
+        return "review" if evidence["games_together"] > 0 else "merge"
     if evidence["games_together"] > 0:
         return "keep_separate"
     if evidence["stint_conflicts"]:
@@ -273,7 +314,7 @@ def candidates(conn: Conn) -> list[dict[str, Any]]:
     for row in rows_as_dicts(conn.execute(_STINTS_SQL)):
         stints.setdefault(int(row["player_id"]), []).append(row)
 
-    pairs = _pair_up(players, resolved, separated)
+    pairs = _pair_up(players, resolved, separated, alternate_id_pairs())
     if not pairs:
         return []
 
@@ -326,14 +367,16 @@ def _pair_up(
     players: list[dict[str, Any]],
     resolved: set[str],
     separated: set[tuple[str, str]],
+    alternates: set[tuple[str, str]] | None = None,
 ) -> list[tuple[int, int, str]]:
-    """Candidate pairs: same normalized handle, one edit apart, or one person's bio."""
+    """Candidate pairs: a former gamertag, one biography, a spelling, or one edit."""
     keys = {int(p["player_id"]): normalize(str(p["handle"])) for p in players}
     handles = {int(p["player_id"]): str(p["handle"]) for p in players}
     bios = {int(p["player_id"]): _bio_key(p) for p in players}
     # A row with no maps carries no box-score evidence, so a pair built on its
     # spelling alone can never be settled. Its biography still can settle one.
     played = {int(p["player_id"]) for p in players if int(p["maps"] or 0) > 0}
+    former = alternates or set()
     ids = sorted(keys, key=lambda i: handles[i])
 
     pairs: list[tuple[int, int, str]] = []
@@ -345,6 +388,9 @@ def _pair_up(
             if _pair_key(left, right) in separated:
                 continue
             a, b = keys[left_id], keys[right_id]
+            if a and b and _pair_key(a, b) in former:
+                pairs.append((left_id, right_id, "alternate_id"))
+                continue
             bio = bios[left_id]
             if bio is not None and bio == bios[right_id]:
                 pairs.append((left_id, right_id, "bio"))

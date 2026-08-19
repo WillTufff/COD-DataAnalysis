@@ -809,6 +809,70 @@ def test_a_shared_team_never_played_together_reads_as_one_person() -> None:
     assert ops_identity._suggestion(evidence(shared_teams=["OpTic"])) == "merge"
 
 
+def test_a_former_gamertag_decides_the_pair_and_a_shared_map_holds_it_back() -> None:
+    """The wiki naming both handles as one person outranks a stint conflict.
+
+    A player lent to another roster for a week holds two archive stints at
+    once, which is why the conflict cannot overrule the wiki. A map the two
+    handles played together is a different matter: one of the sources is then
+    wrong about who played, and that is the owner's to read.
+    """
+    conflict = {"left": {"team": "Complexity"}, "right": {"team": "Splyce"}}
+    assert ops_identity._suggestion(evidence(kind="alternate_id")) == "merge"
+    assert (
+        ops_identity._suggestion(evidence(kind="alternate_id", stint_conflicts=[conflict]))
+        == "merge"
+    )
+    assert ops_identity._suggestion(evidence(kind="alternate_id", games_together=2)) == "review"
+
+
+def test_former_gamertags_are_read_from_the_wiki_snapshot(tmp_path: Path) -> None:
+    path = tmp_path / "players.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"id": "FeLo", "alternateid": "FeLonY"},
+                {"pagename": "Burns", "id": "", "alternateid": "Burnsoff"},
+                {"id": "Multi", "alternateid": "One, Two"},
+                {"id": "Same", "alternateid": "same"},
+                {"id": "Alone", "alternateid": ""},
+                "not a row",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert ops_identity.alternate_id_pairs(path) == {
+        ("felo", "felony"),
+        ("burns", "burnsoff"),
+        ("multi", "one"),
+        ("multi", "two"),
+    }
+    assert ops_identity.alternate_id_pairs(tmp_path / "absent.json") == set()
+
+
+def test_a_former_gamertag_pairs_two_rows_however_they_are_spelled(aliases: Path) -> None:
+    players = [
+        {"player_id": 1, "handle": "FeLo", "maps": 49, "real_name": None, "birthdate": None},
+        {"player_id": 2, "handle": "Felony", "maps": 1000, "real_name": None, "birthdate": None},
+        {"player_id": 3, "handle": "Burns", "maps": 72, "real_name": None, "birthdate": None},
+        {"player_id": 4, "handle": "Burnsoff", "maps": 0, "real_name": None, "birthdate": None},
+    ]
+
+    pairs = ops_identity._pair_up(
+        players,
+        resolved=set(),
+        separated=set(),
+        alternates={("felo", "felony"), ("burns", "burnsoff")},
+    )
+
+    # The second pair also proves the rule reaches a row with no maps of its own.
+    assert {(left, right, kind) for left, right, kind in pairs} == {
+        (1, 2, "alternate_id"),
+        (3, 4, "alternate_id"),
+    }
+
+
 def test_a_spelling_pair_is_a_merge_and_anything_else_is_a_review() -> None:
     assert ops_identity._suggestion(evidence(kind="spelling")) == "merge"
     assert ops_identity._suggestion(evidence()) == "review"
