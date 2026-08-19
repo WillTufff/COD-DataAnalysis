@@ -140,6 +140,18 @@ JOBS: list[dict[str, Any]] = [
         "est_seconds": 20,
     },
     {
+        "id": "face_validity",
+        "label": "Face-validity tests (all-time board)",
+        "cwd": "analytics",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_analytics.career_rank.facevalidity"],
+        "stages": [],
+        # Five queries and a rank correlation over the published board. It reads
+        # the frozen anchor set and writes nothing.
+        "destructive": False,
+        "events": False,
+        "est_seconds": 5,
+    },
+    {
         "id": "metric_diff",
         "label": "Metric diff (snapshot and compare)",
         "cwd": "analytics",

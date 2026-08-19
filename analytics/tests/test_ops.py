@@ -882,10 +882,10 @@ def test_a_refused_decision_exits_without_printing_a_payload(
 
 def test_a_resolved_handle_is_no_longer_offered_as_a_candidate(aliases: Path) -> None:
     players = [
-        {"player_id": 1, "handle": "Scump"},
-        {"player_id": 2, "handle": "Scumps"},
-        {"player_id": 3, "handle": "Formal"},
-        {"player_id": 4, "handle": "FormaL"},
+        {"player_id": 1, "handle": "Scump", "maps": 900},
+        {"player_id": 2, "handle": "Scumps", "maps": 12},
+        {"player_id": 3, "handle": "Formal", "maps": 40},
+        {"player_id": 4, "handle": "FormaL", "maps": 800},
     ]
 
     pairs = ops_identity._pair_up(players, resolved=set(), separated=set())
@@ -895,6 +895,34 @@ def test_a_resolved_handle_is_no_longer_offered_as_a_candidate(aliases: Path) ->
     }
 
     assert ops_identity._pair_up(players, {"Scumps"}, {("FormaL", "Formal")}) == []
+
+
+def test_one_person_is_paired_by_biography_however_the_handles_read(
+    aliases: Path,
+) -> None:
+    """A rename to an unrelated gamertag is invisible to every string rule.
+
+    The same real name and birthdate is the only evidence that finds it, and it
+    has to reach a row with no maps at all, because a biography row is exactly
+    where the other half of a split career hides.
+    """
+    born = date(2002, 7, 1)
+    players = [
+        {"player_id": 1, "handle": "Replays", "maps": 839, "real_name": "A B", "birthdate": born},
+        {"player_id": 2, "handle": "Crowder", "maps": 34, "real_name": "a  b", "birthdate": born},
+        {"player_id": 3, "handle": "Someone", "maps": 0, "real_name": "C D", "birthdate": born},
+        {"player_id": 4, "handle": "Somewhere", "maps": 12, "real_name": "C D", "birthdate": born},
+        {"player_id": 5, "handle": "Namefree", "maps": 7, "real_name": None, "birthdate": born},
+        {"player_id": 6, "handle": "Namefre", "maps": 0, "real_name": None, "birthdate": born},
+    ]
+
+    pairs = ops_identity._pair_up(players, resolved=set(), separated=set())
+
+    assert (2, 1, "bio") in pairs
+    assert (3, 4, "bio") in pairs
+    # A shared birthdate with no name is not a person, and a one-edit pair with
+    # no maps on one side has nothing to settle it either way.
+    assert not [pair for pair in pairs if 5 in pair[:2] or 6 in pair[:2]]
 
 
 def test_identity_report_lists_the_queue_and_what_is_already_resolved(

@@ -1,10 +1,12 @@
 """Player handles that may be one person, with the evidence either way.
 
 Two rows in `players` are a candidate when their handles collapse to the same
-key once case and punctuation are removed, or when they are one edit apart and
-share a team. The evidence is what decides it: two handles that appear in the
-same game are two people, and two that never overlap and hand a team over
-between them are one.
+key once case and punctuation are removed, when they are one edit apart and
+share a team, or when they carry the same real name and birthdate. That third
+rule is the only one that catches a rename to an unrelated gamertag, which no
+amount of string distance will find. The evidence is what decides it: two
+handles that appear in the same game are two people, and two that never overlap
+and hand a team over between them are one.
 
 Decisions are written to the pipeline's `aliases.json` and nowhere else. Rows
 written straight into Postgres do not survive the next import; an alias entry
@@ -32,18 +34,20 @@ KEPT_SEPARATE_COMMENT = (
 )
 
 _PLAYERS_SQL = """
-SELECT p.id                                   AS player_id,
+SELECT p.id                                       AS player_id,
        p.handle,
-       count(*)                               AS maps,
-       count(DISTINCT g.series_id)            AS series,
-       min(s.played_at)::date                 AS first_date,
-       max(s.played_at)::date                 AS last_date,
-       array_agg(DISTINCT s.data_source)      AS sources
+       p.real_name,
+       p.birthdate,
+       count(gps.player_id)                       AS maps,
+       count(DISTINCT g.series_id)                AS series,
+       min(s.played_at)::date                     AS first_date,
+       max(s.played_at)::date                     AS last_date,
+       array_remove(array_agg(DISTINCT s.data_source), NULL) AS sources
 FROM players p
-JOIN game_player_stats gps ON gps.player_id = p.id
-JOIN games g               ON g.id = gps.game_id
-JOIN series s              ON s.id = g.series_id
-GROUP BY p.id, p.handle
+LEFT JOIN game_player_stats gps ON gps.player_id = p.id
+LEFT JOIN games g               ON g.id = gps.game_id
+LEFT JOIN series s              ON s.id = g.series_id
+GROUP BY p.id, p.handle, p.real_name, p.birthdate
 ORDER BY p.handle
 """
 
@@ -112,6 +116,18 @@ def load_aliases() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _bio_key(player: dict[str, Any]) -> tuple[str, date] | None:
+    """The person a row claims to be, or None when it does not claim one.
+
+    Both halves are required. A shared name alone is two people often enough to
+    be worthless, and a shared birthdate alone is worth even less.
+    """
+    name, born = player.get("real_name"), player.get("birthdate")
+    if not isinstance(name, str) or not name.strip() or not isinstance(born, date):
+        return None
+    return (" ".join(name.split()).casefold(), born)
 
 
 def _kept_separate(aliases: dict[str, Any]) -> set[tuple[str, str]]:
@@ -226,7 +242,9 @@ def _suggestion(evidence: dict[str, Any]) -> str:
 
     Sharing a map is two people; so is holding two rosters at once. A team both
     handles played for but never played a map on together is one person under
-    two spellings, which is the whole shape this queue is looking for.
+    two spellings, which is the whole shape this queue is looking for. A shared
+    real name and birthdate says the same thing without the handles agreeing at
+    all, so it decides a pair the string rules would never have offered.
     """
     if evidence["games_together"] > 0:
         return "keep_separate"
@@ -234,7 +252,7 @@ def _suggestion(evidence: dict[str, Any]) -> str:
         return "keep_separate"
     if evidence["shared_teams"]:
         return "merge"
-    if evidence["kind"] == "spelling":
+    if evidence["kind"] in {"spelling", "bio"}:
         return "merge"
     return "review"
 
@@ -309,9 +327,13 @@ def _pair_up(
     resolved: set[str],
     separated: set[tuple[str, str]],
 ) -> list[tuple[int, int, str]]:
-    """Candidate pairs: same normalized handle, then one edit apart."""
+    """Candidate pairs: same normalized handle, one edit apart, or one person's bio."""
     keys = {int(p["player_id"]): normalize(str(p["handle"])) for p in players}
     handles = {int(p["player_id"]): str(p["handle"]) for p in players}
+    bios = {int(p["player_id"]): _bio_key(p) for p in players}
+    # A row with no maps carries no box-score evidence, so a pair built on its
+    # spelling alone can never be settled. Its biography still can settle one.
+    played = {int(p["player_id"]) for p in players if int(p["maps"] or 0) > 0}
     ids = sorted(keys, key=lambda i: handles[i])
 
     pairs: list[tuple[int, int, str]] = []
@@ -323,7 +345,13 @@ def _pair_up(
             if _pair_key(left, right) in separated:
                 continue
             a, b = keys[left_id], keys[right_id]
+            bio = bios[left_id]
+            if bio is not None and bio == bios[right_id]:
+                pairs.append((left_id, right_id, "bio"))
+                continue
             if not a or not b:
+                continue
+            if left_id not in played or right_id not in played:
                 continue
             if a == b:
                 pairs.append((left_id, right_id, "spelling"))
@@ -347,6 +375,8 @@ def _write(aliases: dict[str, Any]) -> None:
 
 def merge(source: str, canonical: str) -> dict[str, Any]:
     """Map one spelling onto another in `players`."""
+    if not source.strip() or not canonical.strip():
+        raise DecisionError("a merge needs two handles")
     if source == canonical:
         raise DecisionError("a handle cannot be merged into itself")
     aliases = load_aliases()

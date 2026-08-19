@@ -14,7 +14,17 @@
     "Gunshiii": "Gunsiii",
     "Setzy": "Setzyy",
     "TDylan": "Dylan",
-    "Alex": "Alexx"
+    "Alex": "Alexx",
+    "Scrappy": "Scrap",
+    "Ulisses": "Uli",
+    "Mock": "Cells",
+    "Cheen": "Chino",
+    "Fear": "Fire",
+    "Gunsii": "Gunsiii",
+    "Waartex": "Wartex",
+    "Brawks": "BroKeN",
+    "Naux": "Hollow",
+    "Replays": "Crowder"
   },
   "_comment_scoped": "'players_by_source' is a per-archive spelling map, applied only to the archive it is listed under. A handle that means one person in one source and another person elsewhere cannot be merged globally: 'Zerg' is Deleo Devitt in the CWL archive and is a different handle in the wiki record.",
   "players_by_source": {

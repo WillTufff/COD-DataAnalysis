@@ -1780,13 +1780,13 @@ eight maps on each side, season *N* predicts season *N+1*. Two predictors (the c
 rating and the era-adjusted K/D z) against two targets, the same pair one season later.
 The 2×2 is deliberate: predicting next season's rating flatters the rating, predicting
 next season's K/D flatters K/D, so the off-diagonal is where the question actually lives.
-563 transitions across nine season boundaries, from 100 (IW → WWII) down to 41 (BOCW → VG),
+565 transitions across nine season boundaries, from 100 (IW → WWII) down to 41 (BOCW → VG),
 Pearson *r* with a 2,000-draw bootstrap over players.
 
 | Predictor (season *N*) | → next rating | → next K/D z |
 |---|---|---|
-| Composite rating | 0.49 [0.43, 0.55] | 0.34 [0.26, 0.41] |
-| Era-adjusted K/D z | 0.43 [0.36, 0.49] | **0.56** [0.50, 0.62] |
+| Composite rating | 0.49 [0.42, 0.55] | 0.34 [0.26, 0.41] |
+| Era-adjusted K/D z | 0.43 [0.36, 0.49] | **0.55** [0.49, 0.62] |
 
 The contrasts are paired: the same resampled players score both predictors, because
 comparing two intervals that happen to overlap answers nothing. Predicting next season's
@@ -1798,7 +1798,7 @@ direction and at a similar size.
 The other column has moved, and the earlier version of this page overstated it. On 216
 CWL-era transitions the rating also lost at predicting *its own next value*, by Δ*r* =
 −0.08 with an interval spanning zero, and the summary here read "raw K/D z is the better
-predictor in both columns". On 563 transitions the sign reverses: Δ*r* = +0.06
+predictor in both columns". On 565 transitions the sign reverses: Δ*r* = +0.06
 [−0.00, +0.13], still spanning zero. The correct statement is the one that was true of
 both samples: the two predictors are indistinguishable at forecasting next season's
 rating. "Better in both columns" was reading a point estimate inside its own
@@ -2523,7 +2523,7 @@ computes is labelled secondary in the stored payload and published without signi
 | `openskill` player rating | 0.098 [−0.001, 0.203] | **−0.461** [−0.576, −0.333] | 0.139 |
 
 Both gaps exclude zero and both exceed what this record can detect, in the losing direction.
-563 transitions over 190 players, and none of them dropped for want of a predictor. This is
+565 transitions over 190 players, and none of them dropped for want of a predictor. This is
 the three-way panel, which the harness keeps computing after a fourth predictor narrowed the
 shared one, so neither set of figures restates the other.
 
@@ -2531,26 +2531,27 @@ shared one, so neither set of figures restates the other.
 can resolve can be failed by a model that works, so each predictor gets its own floor from the
 [pre-flight's](#can-the-plus-minus-have-a-time-axis) closed form at the measured sample size,
 the measured baseline correlation and that predictor's measured agreement with the baseline:
-0.09 for the composite, which agrees with K/D z at 0.563, and 0.11 for `openskill`, which
-agrees at 0.246. Then both are widened by the design effect the clustering costs, measured at
-**1.259**, measured, not assumed.
+0.09 for the composite, which agrees with K/D z at 0.564, and 0.11 for `openskill`, which
+agrees at 0.240. Then both are widened by the design effect the clustering costs, measured at
+**1.317**, measured, not assumed.
 
 **The next rating's floor is computed on the panel it will actually occupy, before it exists.**
 A rating built on the season plus-minus can only be scored where a season-resolution coefficient
-exists, which is the CDL era alone: **268 of the 563 transitions, over 90 of the 190 players.**
+exists, which is the CDL era alone: **268 of the 565 transitions, over 90 of the 190 players.**
 Fewer clusters is a higher floor, so the threshold that rating will be held to is not the 0.110
 above but **0.175**, an independent floor of 0.11 widened by a design effect of 1.59 measured on
-that narrower panel, well above the 1.259 the full panel costs. On it the composite loses by
+that narrower panel, well above the 1.317 the full panel costs. On it the composite loses by
 0.258 against a baseline *r* of 0.630, so the rating has to move **0.433** in correlation to
 clear a gate that says beat, not tie.
 
-The same computation on the current record returns 0.1688, on 268 transitions over the same 90
-players, and the rating would have to move 0.4034. That is reported beside the threshold and
+The same computation on the current record returns 0.1748, on 268 transitions over the same 90
+players, and the rating would have to move 0.4094. That is reported beside the threshold and
 does not replace it: 0.175 was written before the model existed, and a threshold recomputed
 once the result is visible is not a threshold declared in advance. The panel has not changed
-shape; the plus-minus it reads has, twice — first when the 2013-2016 seasons entered the fit,
-and again when the recovered modes gave 2014 a rating and every pre-2017 season its Search and
-Destroy cohort. A larger archive is not a better result.
+shape; the plus-minus it reads has, three times — first when the 2013-2016 seasons entered the
+fit, again when the recovered modes gave 2014 a rating and every pre-2017 season its Search and
+Destroy cohort, and again when ten identity merges put split careers back together and changed
+the lineups the fit is built on. A larger archive is not a better result.
 That number is stored in a run that precedes any run carrying the model it judges, and the
 release gate checks that ordering, because a threshold written beside a result is not a
 threshold declared in advance.
@@ -2561,7 +2562,7 @@ keyed by a map or a series resamples whole series. A persistence observation is 
 either: it is a player-season transition assembled from tens of series, and no series contains
 a whole one. The smallest cluster that does is the player, which is what the primary test draws
 on. It is strictly coarser than the per-observation draw the published test uses. The
-1.259 design effect above is exactly the price of the coarser draw, measured by running both
+1.317 design effect above is exactly the price of the coarser draw, measured by running both
 and dividing.
 
 **A rating that never sees the box score is the adversary.** `openskill` (Weng-Lin /
@@ -2736,19 +2737,19 @@ way instead of being described as a balance of two comparable estimates.
 transitions carrying all four predictors: 219 over 75 players. That is fewer than the 268 the
 floor was computed for, and the difference is not a coverage failure. SKILL is predicted from
 the seasons before it, so the earliest CDL season has no rating and its 49 transitions cannot
-carry one. On its own panel the smallest resolvable gap is 0.16.
+carry one. On its own panel the smallest resolvable gap is 0.17.
 
 | Predictor | Δ*r* vs K/D z | 95% interval | Detectable at | Beats the baseline? |
 |---|---|---|---|---|
-| SKILL | **−0.2236** | [−0.3389, −0.0940] | 0.16 | no |
+| SKILL | **−0.2428** | [−0.3645, −0.1042] | 0.17 | no |
 | Composite | −0.2718 | [−0.4312, −0.1244] | 0.16 | no |
-| `openskill` | −0.6702 | [−0.9248, −0.3810] | 0.20 | no |
+| `openskill` | −0.6959 | [−0.9867, −0.3783] | 0.20 | no |
 
 **The architecture did not reverse the persistence failure.** SKILL predicts next season's
 era-adjusted K/D z materially *worse* than K/D z does, by a margin larger than this panel can
 mistake for noise, and K/D z is left standing as the recommended forecaster. The three-way
-comparison the earlier figures were computed on is retained beside it (563
-transitions over 190 players, composite at −0.2188), so nothing published before this phase was
+comparison the earlier figures were computed on is retained beside it (565
+transitions over 190 players, composite at −0.2189), so nothing published before this phase was
 restated by a fourth predictor narrowing the panel.
 
 **One secondary test, declared in the manifest before the model existed, says where the failure
@@ -2833,7 +2834,7 @@ rookie cohort: Gwinn 2nd of 11, RenKoR 3rd of 12, Nium 3rd of 21, and Pred 10th 
 much the remaining seasons reorder. The weakest of six holdouts reorders the later cells at
 Spearman 0.997, against a floor of 0.8 set in advance. Removing a season also cannot touch
 any cell before it, because the one-sided family solves through each cell and no further, and
-the check confirms that on all 5,091 earlier cells rather than assuming it. Read this as a
+the check confirms that on all 5,079 earlier cells rather than assuming it. Read this as a
 weak test passed: one season is 7 to 9% of the admitted maps, and a fit that survives losing
 it has not been asked a hard question.
 

@@ -717,6 +717,43 @@ def reproduction(
             }
         )
 
+    # The three-way panel and the adversary's row beside it. Both were printed
+    # for phases with a live artifact behind them and no comparison, which is
+    # how they went stale unnoticed while every pinned figure failed loudly.
+    three_way = (gate or {}).get("retained_three_way", {})
+    retained = printed["retained_three_way"]
+    for what, got, want in (
+        ("three-way panel transitions", three_way.get("n"), retained["n"]),
+        (
+            "three-way panel players",
+            three_way.get("clusters"),
+            retained["clusters"],
+        ),
+        (
+            "three-way composite persistence gap",
+            three_way.get("gaps", {}).get("composite", {}).get("delta_r"),
+            retained["composite_delta_r"],
+        ),
+        (
+            "three-way design effect",
+            three_way.get("power", {}).get("design_effect"),
+            retained["design_effect"],
+        ),
+        (
+            "openskill gate persistence gap",
+            (gate or {}).get("gaps", {}).get("openskill", {}).get("delta_r"),
+            retained["openskill_gate_delta_r"],
+        ),
+    ):
+        page.append(
+            {
+                "what": what,
+                "run": got,
+                "page": want,
+                "matches": bool(got is not None and abs(float(got) - float(want)) <= 5e-4),
+            }
+        )
+
     return {
         "what": (
             "an independent recomputation of the published persistence test, and the "

@@ -273,9 +273,12 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # Both are now computed every run — the first by `validation.retrodiction`,
     # the second by `career_rank.roster_strength.proxy_check` — and pinned here
     # so a move has to be read and written down rather than published quietly.
-    "retrodiction_cells_before": 5091,
+    # Re-pinned 2026-08-18 with the rest of this block: the identity merges
+    # joined split careers, so the player-seasons the one-sided property is
+    # checked on are fewer and each covers more of a career.
+    "retrodiction_cells_before": 5079,
     "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
-    "persistence_pairs": 563,
+    "persistence_pairs": 565,
     "persistence_delta_r": -0.2188,
     "delta_r_tol": 5e-4,
     "forecast_maps": 9391,
@@ -304,21 +307,21 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     "skill_panel_remeasured": {
         "on": "2026-08-18",
         "why": (
-            "the recovered modes gave 2014 a rating and every pre-2017 season its"
-            " Search and Destroy cohort, so the panel gained one transition and the"
-            " plus-minus it reads moved again; the method is unchanged"
+            "ten identity merges put split careers back together — the largest moved"
+            " 839 maps onto one player — so the lineups the plus-minus is fitted on"
+            " changed and the panel it reads moved with them; the method is unchanged"
         ),
-        "mde80_clustered": 0.1688,
-        "distance_to_clear": 0.4034,
+        "mde80_clustered": 0.1748,
+        "distance_to_clear": 0.4094,
     },
     # The plus-minus read forward, at the resolution the read is valid at, with
     # the pooled figure the page corrects and the era figure that inflated it.
     #
-    # Re-pinned 2026-08-17. The identity pass merged `Zerg` into `Deleo` and
-    # `Envy` into `Team Envy`, and the wiki load gained 157 event-roster rows, so
-    # the lineups the plus-minus is fitted on moved. Every figure below that
-    # reads the fit moved with them; nothing about the method changed.
-    "plusminus_forward": {"n": 268, "r": 0.2087, "pooled_r": 0.301, "era_r": 0.3755},
+    # Re-pinned 2026-08-18. Ten identity merges joined careers that the archive
+    # held under two gamertags, the largest moving 839 maps, so the lineups the
+    # plus-minus is fitted on moved again. Every figure below that reads the fit
+    # moved with them; nothing about the method changed.
+    "plusminus_forward": {"n": 268, "r": 0.2029, "pooled_r": 0.2977, "era_r": 0.3714},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -328,7 +331,22 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # this panel computes for itself, 0.1623, and the 0.1749 pinned above stays
     # what it always was — the number written before the model, against a panel
     # the model turned out not to fill.
-    "skill_result": {"n": 219, "clusters": 75, "delta_r": -0.2236, "mde80": 0.16},
+    # Re-pinned 2026-08-18 with `plusminus_forward`, for the same merges. The
+    # panel is the same 219 transitions over the same 75 players; what moved is
+    # the plus-minus underneath it, and the gap widened rather than closed.
+    "skill_result": {"n": 219, "clusters": 75, "delta_r": -0.2428, "mde80": 0.1733},
+    # The three-way panel the page quotes beside the four-way gate, and the
+    # adversary's row in the gate table. Pinned 2026-08-18: each had a live
+    # artifact and no comparison, so each drifted for several phases before a
+    # reader caught it. A number on the page is a checked claim or it is a
+    # transcription that will go stale.
+    "retained_three_way": {
+        "n": 565,
+        "clusters": 190,
+        "composite_delta_r": -0.2189,
+        "design_effect": 1.317,
+        "openskill_gate_delta_r": -0.6959,
+    },
     "forecast_brier": {
         "rapm": 0.24636,
         "rapm_prior": 0.24688,
