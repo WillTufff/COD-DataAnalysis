@@ -587,6 +587,7 @@ def reproduction(
     power: dict[str, Any],
     plusminus: dict[str, Any],
     gate: dict[str, Any] | None = None,
+    prior_target: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The gate: recover what is already published, or score nothing new."""
     recomputed = _published_persistence(panel)
@@ -744,6 +745,25 @@ def reproduction(
             (gate or {}).get("gaps", {}).get("openskill", {}).get("delta_r"),
             retained["openskill_gate_delta_r"],
         ),
+    ):
+        page.append(
+            {
+                "what": what,
+                "run": got,
+                "page": want,
+                "matches": bool(got is not None and abs(float(got) - float(want)) <= 5e-4),
+            }
+        )
+
+    # The secondary test the page quotes beside the gate. Same reason again: a
+    # live artifact, a printed number and nothing between them.
+    target = printed["prior_target"]
+    predictors = (prior_target or {}).get("predictors", {})
+    for what, got, want in (
+        ("prior-target panel transitions", (prior_target or {}).get("n"), target["n"]),
+        ("prior-target r, SKILL", predictors.get("skill"), target["skill"]),
+        ("prior-target r, composite", predictors.get("composite"), target["composite"]),
+        ("prior-target r, K/D z", predictors.get("kd_z"), target["kd_z"]),
     ):
         page.append(
             {
@@ -1208,7 +1228,13 @@ def artifacts(
             ),
         },
         "evaluation_reproduction": reproduction(
-            ordered, stored_persistence, stored_forecast, power, plusminus, gate
+            ordered,
+            stored_persistence,
+            stored_forecast,
+            power,
+            plusminus,
+            gate,
+            secondaries["prior_target_persistence"],
         ),
         "evaluation_primary": gate,
         "skill_power": power,

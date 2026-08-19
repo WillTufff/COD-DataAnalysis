@@ -268,17 +268,24 @@ REPRODUCE = (
 # into its first 2017 prediction. The SKILL floor is the one figure here that is
 # a threshold rather than a description, so it is not re-pinned; see
 # `skill_panel_remeasured`.
+#
+# Re-read again on 2026-08-19, after two identity merges the owner settled:
+# Burnsoff into Burns and Felony into FeLo, the second moving 887 maps and 9,378
+# kill events onto one player. Every panel here gained exactly one transition,
+# because a career the archive held as two rows is now one and its season
+# boundary is a transition the panel can read. What those panels read moved too.
 PUBLISHED_FIGURES: dict[str, Any] = {
     # Two figures the page stated that no artifact carried, added 2026-08-17.
     # Both are now computed every run — the first by `validation.retrodiction`,
     # the second by `career_rank.roster_strength.proxy_check` — and pinned here
     # so a move has to be read and written down rather than published quietly.
-    # Re-pinned 2026-08-18 with the rest of this block: the identity merges
-    # joined split careers, so the player-seasons the one-sided property is
-    # checked on are fewer and each covers more of a career.
-    "retrodiction_cells_before": 5079,
+    # Re-pinned 2026-08-19 with the rest of this block, for the reason it was
+    # re-pinned on 2026-08-18: an identity merge joins split careers, so the
+    # player-seasons the one-sided property is checked on are fewer and each
+    # covers more of a career. Two merges took 5,079 cells to 5,061.
+    "retrodiction_cells_before": 5061,
     "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
-    "persistence_pairs": 565,
+    "persistence_pairs": 566,
     "persistence_delta_r": -0.2188,
     "delta_r_tol": 5e-4,
     "forecast_maps": 9391,
@@ -288,7 +295,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # here: a figure on the page that nothing compares against is a figure that
     # drifts, and this one is a threshold.
     "skill_panel": {
-        "n": 268,
+        "n": 269,
         "clusters": 90,
         "mde80_clustered": 0.1749,
         "distance_to_clear": 0.433,
@@ -298,30 +305,32 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     #
     # A threshold recomputed once the result is visible is not a threshold
     # declared in advance, so 0.1749 stays the number the gate tests against.
-    # The panel it was computed on has not changed size — the same 267
-    # transitions over the same 90 players — but the plus-minus those
-    # transitions read has, because the fit now covers 2013-2016 as well and
-    # chooses its penalties over all of it. That is a larger archive, not a
-    # better result, and the release has to show the distance rather than
-    # quietly close it.
+    # The panel it was computed on has grown by the one transition the merges
+    # created, and the plus-minus those transitions read has moved, because the
+    # fit covers 2013-2016 as well and chooses its penalties over all of it.
+    # That is a larger archive, not a better result, and the release has to show
+    # the distance rather than quietly close it.
     "skill_panel_remeasured": {
-        "on": "2026-08-18",
+        "on": "2026-08-19",
         "why": (
-            "ten identity merges put split careers back together — the largest moved"
-            " 839 maps onto one player — so the lineups the plus-minus is fitted on"
-            " changed and the panel it reads moved with them; the method is unchanged"
+            "two more identity merges, Burnsoff into Burns and Felony into FeLo, the"
+            " second moving 887 maps onto one player, so the lineups the plus-minus is"
+            " fitted on changed again and the panel it reads moved with them; the"
+            " method is unchanged"
         ),
-        "mde80_clustered": 0.1748,
-        "distance_to_clear": 0.4094,
+        "mde80_clustered": 0.1734,
+        "distance_to_clear": 0.4076,
     },
     # The plus-minus read forward, at the resolution the read is valid at, with
     # the pooled figure the page corrects and the era figure that inflated it.
     #
-    # Re-pinned 2026-08-18. Ten identity merges joined careers that the archive
-    # held under two gamertags, the largest moving 839 maps, so the lineups the
+    # Re-pinned 2026-08-19. Two more identity merges joined careers the archive
+    # held under two gamertags, the larger moving 887 maps, so the lineups the
     # plus-minus is fitted on moved again. Every figure below that reads the fit
-    # moved with them; nothing about the method changed.
-    "plusminus_forward": {"n": 268, "r": 0.2029, "pooled_r": 0.2977, "era_r": 0.3714},
+    # moved with them; nothing about the method changed. The season-resolution
+    # correlation fell from 0.2029 to 0.1956, so the merges made the read harder
+    # rather than easier.
+    "plusminus_forward": {"n": 269, "r": 0.1956, "pooled_r": 0.2953, "era_r": 0.3714},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -331,22 +340,33 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # this panel computes for itself, 0.1623, and the 0.1749 pinned above stays
     # what it always was — the number written before the model, against a panel
     # the model turned out not to fill.
-    # Re-pinned 2026-08-18 with `plusminus_forward`, for the same merges. The
-    # panel is the same 219 transitions over the same 75 players; what moved is
-    # the plus-minus underneath it, and the gap widened rather than closed.
-    "skill_result": {"n": 219, "clusters": 75, "delta_r": -0.2428, "mde80": 0.1733},
+    # Re-pinned 2026-08-19 with `plusminus_forward`, for the same merges. The
+    # panel gained one transition, to 220 over the same 75 players; what else
+    # moved is the plus-minus underneath it. The gap narrowed from -0.2428 to
+    # -0.2401 and the floor fell from 0.1733 to 0.1625, which leaves SKILL
+    # losing by more than the floor either way.
+    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2401, "mde80": 0.1625},
     # The three-way panel the page quotes beside the four-way gate, and the
     # adversary's row in the gate table. Pinned 2026-08-18: each had a live
     # artifact and no comparison, so each drifted for several phases before a
     # reader caught it. A number on the page is a checked claim or it is a
-    # transcription that will go stale.
+    # transcription that will go stale. Re-pinned 2026-08-19 with the rest of
+    # the block: one more transition, and the design effect and the adversary's
+    # row moved with the fit underneath them.
     "retained_three_way": {
-        "n": 565,
+        "n": 566,
         "clusters": 190,
         "composite_delta_r": -0.2189,
-        "design_effect": 1.317,
-        "openskill_gate_delta_r": -0.6959,
+        "design_effect": 1.312,
+        "openskill_gate_delta_r": -0.6937,
     },
+    # The one secondary test the page quotes, scored against the quantity the
+    # rating was fitted for rather than against the baseline's own ground.
+    # Pinned 2026-08-19 for the reason the three-way panel was pinned the day
+    # before: it had a live artifact and nothing comparing it, and the page had
+    # drifted to 215 transitions and r = 0.4232 while the run returned 216 and
+    # 0.4002.
+    "prior_target": {"n": 216, "skill": 0.4002, "composite": 0.2906, "kd_z": 0.2565},
     "forecast_brier": {
         "rapm": 0.24636,
         "rapm_prior": 0.24688,
