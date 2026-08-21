@@ -32,6 +32,10 @@
   "players_by_source": {
     "cwl_archive": {
       "Zerg": "Deleo"
+    },
+    "lpdb": {
+      "LlamGod": "LlamaGod",
+      "Landxnn": "Landxn"
     }
   },
   "teams": {
@@ -555,7 +559,7 @@
     "Call_of_Duty_League/Season_7/Stage_4/Major": "CDL Major 4",
     "Call_of_Duty_League/Season_7/Stage_3/Minor": "CDL Minor 1",
     "Call_of_Duty_League/Season_7/Stage_4/Minor": "CDL Minor 2",
-    "Call_of_Duty_League/Season_7/Playoffs": null,
+    "Call_of_Duty_League/Season_7/Playoffs": "CDL Championship",
     "Call_of_Duty_World_League/2017/Championship/Last_Chance/Asia-Pacific": null,
     "Call_of_Duty_World_League/2017/Championship/Last_Chance/Europe": null,
     "Call_of_Duty_World_League/2017/Championship/Last_Chance/North_America": null,
@@ -563,8 +567,8 @@
     "Call_of_Duty_World_League/2017/Pro_League/Relegation/Qualifier/Asia-Pacific": null,
     "Call_of_Duty_World_League/2017/Pro_League/Relegation/Qualifier/EU": null,
     "Call_of_Duty_World_League/2017/Pro_League/Relegation/Qualifier/NA": null,
-    "Call_of_Duty_World_League/2017/Pro_League/Stage_1": null,
-    "Call_of_Duty_World_League/2017/Pro_League/Stage_2": null,
+    "Call_of_Duty_World_League/2017/Pro_League/Stage_1": "CWL 2017 Global Pro League Stage 1",
+    "Call_of_Duty_World_League/2017/Pro_League/Stage_2": "CWL 2017 Global Pro League Stage 2",
     "Call_of_Duty_World_League/2018/Championship/Last_Chance_Qualifier": null,
     "Call_of_Duty_World_League/2018/Dallas": "CWL Dallas 2017",
     "Call_of_Duty_World_League/2018/New_Orleans": "CWL New Orleans 2018",
@@ -575,7 +579,11 @@
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/Asia_Pacific": null,
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/Europe": null,
     "Call_of_Duty_World_League/2018/Pro_League/Relegation/North_America": null,
-    "Call_of_Duty_World_League/2019/Pro_League/Play-In": null
+    "Call_of_Duty_World_League/2019/Pro_League/Play-In": null,
+    "Call_of_Duty_World_League/2017/Las_Vegas": "CWL/2017 Season/Las Vegas Open",
+    "Call_of_Duty_League/Season_7/Monster_Launch_Invitational": "CDL Launch Invitational",
+    "Call_of_Duty_World_League/2019/Amateur_Finals": null,
+    "Call_of_Duty_World_League/2019/National_Cup": null
   },
   "_comment_identity": "'identity_kept_separate' lists handle pairs confirmed to be two different people. Nothing reads it at load time; it stops a pair being offered again as a merge candidate.",
   "identity_kept_separate": [

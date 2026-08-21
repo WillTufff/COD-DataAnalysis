@@ -81,14 +81,24 @@ MATCH_QUERY = (
 
 PREMIER = "([[publishertier::true]] OR [[liquipediatier::1]])"
 
+# The placement scope carries two widenings past the premier line, and each
+# costs no extra request: both are one more disjunct on a condition the pull
+# already sends once per game code.
+#
 # Awards are scoped by the award, not by the tier of the event that gave it.
 # Measured: 158 individual-award rows exist across the ten game codes and only
 # 108 are premier, so the premier scope alone drops `Best Hardpoint Player`,
 # `Best Control Player` and `Best SnD Player` entirely — the mode-conditional
 # referents a role model would be scored against, six rows, all of them below
-# the tier line. Widening costs no extra requests: it is one more disjunct on a
-# condition the pull already sends once per game code.
-AWARDS = "([[mode::award_individual]] OR " + PREMIER + ")"
+# the tier line.
+#
+# Tier 2 joins the scope for the same reason the tournament pull widened. The
+# nine CWL open events are tier 2, so under the premier scope their only
+# placement rows were the award ones: CWL Dallas 2018 had a winner in the box
+# scores and no finishing order anywhere in the database, and no ring could be
+# attributed for it. The loader still attaches rows to local events alone, so
+# a wider snapshot adds finishes to events that exist and creates none.
+PLACEMENTS = "([[mode::award_individual]] OR " + PREMIER + " OR [[liquipediatier::2]])"
 
 # The tournament table is pulled at every tier. It only ever enriches an event
 # that already exists locally — it creates none — so a wider snapshot can add a
@@ -137,7 +147,7 @@ PULLS: dict[str, tuple[Path, Callable[[LpdbClient], list[dict[str, Any]]]]] = {
     "placements": (
         PLACEMENTS_PATH,
         lambda c: _per_game(
-            c, "placement", "", PLACEMENT_QUERY, "date ASC, objectname ASC", scope=AWARDS
+            c, "placement", "", PLACEMENT_QUERY, "date ASC, objectname ASC", scope=PLACEMENTS
         ),
     ),
     "teams": (TEAMS_PATH, lambda c: _whole(c, "team", TEAM_QUERY, "pagename ASC")),

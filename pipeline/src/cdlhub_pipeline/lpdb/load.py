@@ -137,6 +137,40 @@ def move_season(d: date) -> int:
 SKIP_PREFIXES = ("Call_of_Duty_Challengers/", "Call_of_Duty_King/", "Esports_World_Cup/")
 
 
+# Pages that carry placements, model an event this project is in scope for, and
+# have no local counterpart because no box-score source ever covered them.
+# `events` is otherwise built by the sources that hold matches, so a tournament
+# nobody recorded a map for is invisible - which in 2017 meant the whole Global
+# Pro League and three of the four opens, while every 2018 and 2019 open is
+# present. The list is written out rather than derived: a rule over tier and
+# publisher tier also admits Challengers finals, regular-season standings pages
+# and third-party invitationals, none of which the rest of the model carries.
+# Names come from the /tournament row, so nothing here invents one.
+# The value overrides the name: `None` takes the /tournament row's own name,
+# which is what keeps this from inventing one. The CDL playoffs are the single
+# exception, because six earlier seasons of it are called `CDL Championship`
+# locally and the Cito loader finds an event by that name.
+CATALOG_BACKFILL: dict[str, str | None] = {
+    "Call_of_Duty_World_League/2017/Pro_League/Stage_1": None,
+    "Call_of_Duty_World_League/2017/Pro_League/Stage_2": None,
+    "Call_of_Duty_World_League/2017/Atlanta": None,
+    "Call_of_Duty_World_League/2017/Dallas": None,
+    "Call_of_Duty_World_League/2017/Anaheim": None,
+    "Call_of_Duty_World_League/2017/Birmingham": None,
+    "Call_of_Duty_World_League/2017/London": None,
+    "Call_of_Duty_World_League/2017/Paris": None,
+    "Call_of_Duty_World_League/2017/Sheffield": None,
+    "Call_of_Duty_World_League/2017/Sydney": None,
+    "Call_of_Duty_World_League/2017/Sydney/2": None,
+    "Call_of_Duty_World_League/2019/Las_Vegas/Open": None,
+    "Call_of_Duty_League/Season_7/Playoffs": "CDL Championship",
+}
+
+# `opponentplayers` keys: p1..pN name the finishing roster, p1dn..pNdn its
+# display spellings.
+_SLOT_KEY = re.compile(r"p\d+$")
+
+
 # The award string carries the season in some years and not others -- 2022 says
 # `CDL First All-Star Team`, 2023 says `CDL 2023 Team of The Year`, and the two
 # name the same selection. Matching on the part that does not move is what folds
@@ -226,6 +260,11 @@ class LpdbLoader:
             "awards_unresolved": [],
             "awards_unmapped": [],
             "awards_without_season": [],
+            "catalog_events_created": [],
+            "catalog_backfill_unavailable": [],
+            "roster_unresolved": [],
+            "roster_ambiguous_handles": [],
+            "roster_slots_held_elsewhere": [],
         }
         self._seasons: dict[int, int] = {
             cast(int, year): cast(int, sid)
@@ -259,6 +298,24 @@ class LpdbLoader:
             self._players[cast(str, alias).lower()] = cast(int, pid)
         for pid, handle in self.conn.execute("SELECT id, handle FROM players").fetchall():
             self._players[cast(str, handle).lower()] = cast(int, pid)
+        # Liquipedia separates two people by letter case alone, so a lowercased
+        # index can hand one person another's identity. Roster slots resolve
+        # through `player_slot`, which refuses these rather than picking one.
+        claims: dict[str, set[int]] = defaultdict(set)
+        for pid, spelling in self.conn.execute(
+            "SELECT player_id, alias FROM player_aliases UNION ALL SELECT id, handle FROM players"
+        ).fetchall():
+            claims[cast(str, spelling).lower()].add(cast(int, pid))
+        self._ambiguous_handles = {name for name, ids in claims.items() if len(ids) > 1}
+        # A roster slot names a Liquipedia page, and a page belongs to one
+        # person. It survives a rename the handle index cannot: `Scrappy` is
+        # the page of the player this database calls `Scrap`.
+        self._player_pages: dict[str, int] = {
+            cast(str, page).lower(): cast(int, pid)
+            for pid, page in self.conn.execute(
+                "SELECT id, liquipedia_page FROM players WHERE liquipedia_page IS NOT NULL"
+            ).fetchall()
+        }
 
     def canonical_team(self, lpdb_name: str, season: int) -> str:
         """Resolve an LPDB opponent name to the brand it wore that season."""
@@ -314,8 +371,70 @@ class LpdbLoader:
             if e_start <= end and e_end >= lo
         ]
 
+    def create_catalog_events(self, rows: list[dict[str, Any]]) -> None:
+        """Create the events `CATALOG_BACKFILL` names, from their /tournament row.
+
+        Runs before the placement load, and adds to the loader's own event
+        index, so the placements find the event in the same pass. An event that
+        already exists under its page or its name is left alone, which makes a
+        rerun a no-op.
+        """
+        by_page = {row["pagename"]: row for row in rows}
+        for pagename, override in CATALOG_BACKFILL.items():
+            row = by_page.get(pagename)
+            if row is None:
+                self.report["catalog_backfill_unavailable"].append(
+                    {"pagename": pagename, "reason": "no tournament row"}
+                )
+                continue
+            season = GAME_SEASONS[row["game"]]
+            season_id = self._seasons.get(season)
+            name = override or str(row.get("name") or "").strip()
+            start, end = _parse_date(row.get("startdate")), _parse_date(row.get("enddate"))
+            if season_id is None or not name or start is None or end is None:
+                self.report["catalog_backfill_unavailable"].append(
+                    {"pagename": pagename, "reason": "incomplete tournament row"}
+                )
+                continue
+            held = self.conn.execute(
+                "SELECT id FROM events WHERE liquipedia_page = %s", (pagename,)
+            ).fetchone()
+            if held is not None or (season, name) in self._events:
+                continue
+            created = self.conn.execute(
+                "INSERT INTO events (season_id, name, start_date, end_date, liquipedia_page) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (season_id, name, start, end, pagename),
+            ).fetchone()
+            assert created is not None
+            event_id = cast(int, created[0])
+            self._events[(season, name)] = event_id
+            self._season_events[season].append((name, start, end, event_id))
+            self.report["catalog_events_created"].append(
+                {"pagename": pagename, "name": name, "season": season, "event_id": event_id}
+            )
+            self.counts["catalog_events_created"] += 1
+
+    def player_slot(self, slot: str) -> int | None:
+        """A roster slot's player, or None. Never creates a player row.
+
+        The page is asked first, because it identifies a person where a handle
+        identifies only a spelling. The handle index answers for the players
+        whose bio never attached, and the alias map for the spellings only this
+        source uses.
+        """
+        page = self._player_pages.get(slot.lower())
+        if page is not None:
+            return page
+        key = self.aliases.player(slot, SOURCE).lower()
+        if key in self._ambiguous_handles:
+            self.report["roster_ambiguous_handles"].append(slot)
+            return None
+        return self._players.get(key)
+
     def load_placements(self, rows: list[dict[str, Any]]) -> None:
         self.conn.execute("DELETE FROM event_placements WHERE data_source = %s", (SOURCE,))
+        self.conn.execute("DELETE FROM event_rosters WHERE data_source = %s", (SOURCE,))
 
         by_page: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -398,13 +517,14 @@ class LpdbLoader:
             """
             INSERT INTO event_placements
               (event_id, team_id, placement_min, placement_max, prize,
-               individual_prize, data_source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+               individual_prize, lpdb_weight, data_source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (event_id, team_id) DO UPDATE SET
               placement_min = EXCLUDED.placement_min,
               placement_max = EXCLUDED.placement_max,
               prize = EXCLUDED.prize,
               individual_prize = EXCLUDED.individual_prize,
+              lpdb_weight = EXCLUDED.lpdb_weight,
               data_source = EXCLUDED.data_source
             """,
             (
@@ -414,10 +534,48 @@ class LpdbLoader:
                 placement[1],
                 row.get("prizemoney") or None,
                 row.get("individualprizemoney") or None,
+                row.get("weight") or None,
                 SOURCE,
             ),
         )
         self.counts["event_placements"] += 1
+        self._load_roster(event_id, team_id, row)
+
+    def _load_roster(self, event_id: int, team_id: int, row: dict[str, Any]) -> None:
+        """The finishing roster behind one placement, as `opponentplayers` gives it.
+
+        A handle with no player row is reported and skipped. Creating one here
+        would mint a player out of a name on a bracket, and the resume work
+        needs the opposite: a slot nobody can answer for has to stay visible.
+        """
+        for key, value in sorted((row.get("opponentplayers") or {}).items()):
+            if not _SLOT_KEY.fullmatch(key):
+                continue
+            handle = str(value or "").strip()
+            if not handle:
+                continue
+            self.counts["roster_slots"] += 1
+            player_id = self.player_slot(handle)
+            if player_id is None:
+                self.report["roster_unresolved"].append(
+                    {
+                        "pagename": row["pagename"],
+                        "team": row.get("opponentname"),
+                        "handle": handle,
+                    }
+                )
+                continue
+            written = self.conn.execute(
+                "INSERT INTO event_rosters (event_id, team_id, player_id, data_source) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING player_id",
+                (event_id, team_id, player_id, SOURCE),
+            ).fetchone()
+            if written is None:
+                self.report["roster_slots_held_elsewhere"].append(
+                    {"event_id": event_id, "handle": handle}
+                )
+                continue
+            self.counts["event_rosters"] += 1
 
     def load_awards(self, rows: list[dict[str, Any]]) -> None:
         """Individual awards, keyed on the season the game code implies.
@@ -895,6 +1053,8 @@ def load(conn: psycopg.Connection[tuple[object, ...]]) -> tuple[dict[str, int], 
     aliases = Aliases.load()
     loader = LpdbLoader(conn, aliases)
     placements = json.loads(PLACEMENTS_PATH.read_text())
+    if TOURNAMENTS_PATH.exists():
+        loader.create_catalog_events(json.loads(TOURNAMENTS_PATH.read_text()))
     loader.load_placements(placements)
     loader.load_awards(placements)
     loader.load_teams(json.loads(TEAMS_PATH.read_text()))

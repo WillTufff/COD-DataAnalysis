@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from cdlhub_analytics.career_rank import anchors
+from cdlhub_analytics.maprows import PUBLISHED_FROM_YEAR
 
 
 class FakeConn:
@@ -20,20 +21,26 @@ class FakeConn:
     def __init__(
         self,
         players: list[tuple[int, str]],
-        rings: list[tuple[Any, ...]] | None = None,
+        resume: list[tuple[Any, ...]] | None = None,
         roster_years: tuple[int, int] | None = None,
         last_season: int = 2026,
+        coverage: list[tuple[Any, ...]] | None = None,
     ) -> None:
         self.players = players
-        self.rings = rings or []
+        # (player_id, chips, rings, events, first_year, last_year)
+        self.resume = resume or []
         self.roster_years = roster_years
         self.last_season = last_season
+        # one row per year: (year, wins, attributable, unattributable event names)
+        self.coverage = coverage if coverage is not None else _covered(last_season)
         self._result: list[tuple[Any, ...]] = []
         self._one: tuple[Any, ...] | None = None
 
     def execute(self, sql: str, _params: Any = None) -> FakeConn:
-        if "FROM event_rosters" in sql and "placement_min" in sql:
-            self._result, self._one = self.rings, None
+        if "WITH wins AS" in sql:
+            self._result, self._one = self.coverage, None
+        elif "FROM event_rosters" in sql and "placement_min" in sql:
+            self._result, self._one = self.resume, None
         elif "min(s.year)" in sql or "max(s.year)" in sql:
             self._result, self._one = [], self.roster_years
         elif "max(year) FROM seasons" in sql:
@@ -47,6 +54,11 @@ class FakeConn:
 
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._one
+
+
+def _covered(last_season: int) -> list[tuple[Any, ...]]:
+    """Every published year carrying one title that a roster answers for."""
+    return [(year, 1, 1, None) for year in range(PUBLISHED_FROM_YEAR, last_season + 1)]
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +146,7 @@ def test_digest_ignores_resume_but_not_membership(monkeypatch: pytest.MonkeyPatc
     """
     _lists(monkeypatch, [{"id": "a", "kind": "all_time", "order": ["One"]}])
     bare = FakeConn([(1, "One")])
-    with_rings = FakeConn([(1, "One")], rings=[(1, 3, 9, 2015, 2016)])
+    with_rings = FakeConn([(1, "One")], resume=[(1, 3, 1, 9, 2015, 2016)])
     assert anchors.digest(anchors.build(bare)["players"]) == anchors.digest(  # type: ignore[arg-type]
         anchors.build(with_rings)["players"]  # type: ignore[arg-type]
     )
@@ -146,12 +158,39 @@ def test_digest_ignores_resume_but_not_membership(monkeypatch: pytest.MonkeyPatc
     )
 
 
-def test_rings_are_incomplete_until_rosters_reach_the_last_season() -> None:
-    """A win count is only a career total once the rosters cover the board."""
-    partial = FakeConn([(1, "One")], roster_years=(2013, 2017), last_season=2026)
-    assert anchors.rings_are_complete(partial) is False  # type: ignore[arg-type]
-    full = FakeConn([(1, "One")], roster_years=(2013, 2026), last_season=2026)
-    assert anchors.rings_are_complete(full) is True  # type: ignore[arg-type]
+def test_chips_are_incomplete_while_one_year_cannot_attribute_one() -> None:
+    """A win count is a career total only when every published year is covered.
+
+    The year that fails is named, because the reason a zero is unsafe is a
+    particular year's missing rosters and not the record as a whole.
+    """
+    short = FakeConn(
+        [(1, "One")],
+        coverage=[
+            (year, 2, 1 if year == 2017 else 2, ["CWL Atlanta Open 2017"]) for year in (2017, 2018)
+        ],
+        last_season=2018,
+    )
+    assert anchors.chips_are_complete(short) is False  # type: ignore[arg-type]
+    assert anchors.chip_coverage(short)["years_short"] == [2017]  # type: ignore[arg-type]
+
+    covered = FakeConn([(1, "One")], last_season=2026)
+    assert anchors.chips_are_complete(covered) is True  # type: ignore[arg-type]
+
+
+def test_a_published_year_with_no_chip_at_all_is_incomplete() -> None:
+    """The hole a coverage count cannot see is a year whose events never loaded.
+
+    Reading the highest roster year called that complete, which is how a 2017
+    with one event of thirteen passed while 2026 was being loaded.
+    """
+    missing = FakeConn(
+        [(1, "One")],
+        coverage=[(2018, 1, 1, None)],
+        last_season=2018,
+    )
+    assert anchors.chip_coverage(missing)["years_without_a_chip"] == [2017]  # type: ignore[arg-type]
+    assert anchors.chips_are_complete(missing) is False  # type: ignore[arg-type]
 
 
 def test_load_reresolves_after_a_merge(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -330,6 +330,63 @@ ORDER BY {dims}
 """
 
 
+# A page Liquipedia publishes a team finish on, at a tier this project models,
+# that no local event answers to. It is the one hole a roster-coverage check
+# cannot see: coverage measures the events that exist, so a title whose event
+# was never created reads as a year with nothing missing. Soft rather than
+# hard, because the wiki gains pages between ingests and a new one is news,
+# not a defect.
+# The circuit this project models. A tier-2 page outside it is a third-party
+# invitational, a regional league or a creator event, and its absence from
+# `events` is the scope working rather than a hole.
+CATALOG_PREFIXES = ("Call_of_Duty_World_League/", "Call_of_Duty_League/")
+CATALOG_TIERS = {"1", "2"}
+CATALOG_TIER_TYPES = {"Qualifier", "Showmatch"}
+CATALOG_NAME_EXCLUSIONS = ("Regular_Season", "All-Star", "Relegation", "Play-In")
+
+
+def catalog_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any]:
+    """LPDB pages with a team finish that model no local event, by season."""
+    from .identity import Aliases
+    from .lpdb.load import SKIP_PREFIXES
+    from .lpdb.pull import GAME_SEASONS, PLACEMENTS_PATH
+
+    if not PLACEMENTS_PATH.exists():
+        return {"checked": False, "pages": []}
+    aliases = Aliases.load()
+    held = {
+        cast(str, page)
+        for (page,) in conn.execute(
+            "SELECT liquipedia_page FROM events WHERE liquipedia_page IS NOT NULL"
+        ).fetchall()
+    }
+    pages: dict[str, dict[str, Any]] = {}
+    for row in json.loads(PLACEMENTS_PATH.read_text()):
+        page = str(row["pagename"])
+        if page in held or page in pages or page.startswith(SKIP_PREFIXES):
+            continue
+        if not page.startswith(CATALOG_PREFIXES):
+            continue
+        if str(row.get("opponenttype") or "team") != "team":
+            continue
+        if aliases.lpdb_events.get(page, "") is None:
+            continue
+        if str(row.get("liquipediatier") or "") not in CATALOG_TIERS:
+            continue
+        if str(row.get("liquipediatiertype") or "") in CATALOG_TIER_TYPES:
+            continue
+        if any(part in page for part in CATALOG_NAME_EXCLUSIONS):
+            continue
+        pages[page] = {
+            "pagename": page,
+            "tournament": row.get("tournament"),
+            "season": GAME_SEASONS[row["game"]],
+            "tier": row.get("liquipediatier"),
+        }
+    ordered = sorted(pages.values(), key=lambda page: (page["season"], page["pagename"]))
+    return {"checked": True, "pages": ordered}
+
+
 def venue_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any]:
     """Every event's venue flag, with the evidence class behind it.
 
@@ -572,6 +629,18 @@ def run(dsn: str, reports: Path = REPORTS_DIR) -> int:
         )
         for row in by_season:
             print("  " + json.dumps(row, default=str))
+
+        print("== title catalog ==")
+        catalog = catalog_payload(conn)
+        result["title_catalog"] = catalog
+        if not catalog["checked"]:
+            print("  no placement snapshot; skipped")
+        elif not catalog["pages"]:
+            print("  every in-scope page has a local event")
+        else:
+            print(f"  {len(catalog['pages'])} in-scope page(s) with no local event")
+            for row in catalog["pages"]:
+                print(f"    {row['season']}  tier {row['tier']}  {row['pagename']}")
 
         print("== venue derivation ==")
         result["venue"] = venue_payload(conn)

@@ -143,28 +143,33 @@ def absent_legend(board: Board, anchor_set: dict[str, Any]) -> Result:
 
 
 def unearned_top_ten(conn: Conn, board: Board, anchor_set: dict[str, Any]) -> Result:
-    """A top-ten career with no championship, no top-tier award and no mention.
+    """A top-ten career with no chip, no top-tier award and no published mention.
 
-    Blocked while the championship record is partial: a player whose rosters
-    were never loaded would read as having won nothing, and the test would
-    convict the archive rather than the formula.
+    A chip and not a ring, because rings are one event a year and a top-ten
+    career without one is an argument rather than a defect.
+
+    Blocked while the title record is partial: a player whose rosters were
+    never loaded would read as having won nothing, and the test would convict
+    the archive rather than the formula.
     """
-    if not anchors.rings_are_complete(conn):
-        window = conn.execute(
-            "SELECT max(s.year) FROM event_rosters r"
-            " JOIN events e ON e.id = r.event_id JOIN seasons s ON s.id = e.season_id"
-        ).fetchone()
-        covered_to = window[0] if window else None
+    coverage = anchors.chip_coverage(conn)
+    if not coverage["complete"]:
+        short = coverage["years_short"] + coverage["years_without_a_chip"]
         return Result(
             "unearned_top_ten",
             INCONCLUSIVE,
-            "championships are only attributable through "
-            f"{covered_to}, so a zero here is missing data and not a fact",
-            {"rings_covered_to": covered_to},
+            f"{len(short)} published year(s) cannot attribute every chip "
+            f"({', '.join(str(year) for year in sorted(short))}), so a zero "
+            "here is missing data and not a fact",
+            {
+                "years_short": coverage["years_short"],
+                "years_without_a_chip": coverage["years_without_a_chip"],
+                "years": coverage["years"],
+            },
         )
 
     named = {str(p["handle"]).casefold() for p in anchor_set["players"]}
-    wins = {pid: facts["event_wins"] for pid, facts in _resume_by_id(conn, board).items()}
+    chips = {pid: facts["chips"] for pid, facts in _resume_by_id(conn, board).items()}
     top_awards: dict[int, int] = {
         cast(int, row[0]): cast(int, row[1])
         for row in conn.execute(_TOP_AWARDS_SQL, (sorted(TOP_TIER),)).fetchall()
@@ -173,14 +178,14 @@ def unearned_top_ten(conn: Conn, board: Board, anchor_set: dict[str, Any]) -> Re
     unearned = [
         {"handle": row["handle"], "rank": rank}
         for rank, row in enumerate(board.top(TOP_TEN), start=1)
-        if wins.get(row["player_id"], 0) == 0
+        if chips.get(row["player_id"], 0) == 0
         and int(top_awards.get(row["player_id"], 0)) == 0
         and str(row["handle"]).casefold() not in named
     ]
     return Result(
         "unearned_top_ten",
         FAIL if unearned else PASS,
-        f"{len(unearned)} of the top {TOP_TEN} have no ring, no top-tier award "
+        f"{len(unearned)} of the top {TOP_TEN} have no chip, no top-tier award "
         "and no published mention",
         {"unearned": unearned},
     )

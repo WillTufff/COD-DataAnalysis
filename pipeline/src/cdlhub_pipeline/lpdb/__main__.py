@@ -48,6 +48,14 @@ def run_load(dsn: str) -> None:
         f"bios: {len(report['bios_updated'])} "
         f"({len(report['players_without_bio'])} players without bio)"
     )
+    print(
+        f"catalog events created: {len(report['catalog_events_created'])} "
+        f"({len(report['catalog_backfill_unavailable'])} backfill pages unavailable); "
+        f"roster slots: {counts.get('roster_slots', 0)} "
+        f"({counts.get('event_rosters', 0)} written, "
+        f"{len(report['roster_unresolved'])} unresolved, "
+        f"{len(report['roster_slots_held_elsewhere'])} already held by another source)"
+    )
     fix = report.get("series_fix")
     if fix:
         print(

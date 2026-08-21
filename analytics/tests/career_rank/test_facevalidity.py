@@ -80,7 +80,16 @@ def test_unearned_top_ten_is_inconclusive_while_rings_are_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A zero from an unloaded roster is missing data, never an acquittal."""
-    monkeypatch.setattr(anchors, "rings_are_complete", lambda _conn: False)
+    monkeypatch.setattr(
+        anchors,
+        "chip_coverage",
+        lambda _conn: {
+            "complete": False,
+            "years_short": [2017],
+            "years_without_a_chip": [],
+            "years": [{"year": 2017, "wins": 13, "attributable": 11}],
+        },
+    )
     conn = FakeConn({}, one=(2016,))
     result = facevalidity.unearned_top_ten(
         conn,  # type: ignore[arg-type]
@@ -89,18 +98,28 @@ def test_unearned_top_ten_is_inconclusive_while_rings_are_partial(
     )
     assert result.verdict == facevalidity.INCONCLUSIVE
     assert result.verdict != facevalidity.PASS
-    assert result.detail["rings_covered_to"] == 2016
+    assert result.detail["years_short"] == [2017]
+    assert "2017" in result.summary
 
 
 def test_unearned_top_ten_clears_a_player_with_a_ring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One championship is enough; the test polices résumés, not taste."""
-    monkeypatch.setattr(anchors, "rings_are_complete", lambda _conn: True)
+    monkeypatch.setattr(
+        anchors,
+        "chip_coverage",
+        lambda _conn: {
+            "complete": True,
+            "years_short": [],
+            "years_without_a_chip": [],
+            "years": [],
+        },
+    )
     monkeypatch.setattr(
         anchors,
         "resume",
-        lambda _conn, ids: {pid: {"event_wins": 1 if pid == 1 else 0} for pid in ids},
+        lambda _conn, ids: {pid: {"chips": 1 if pid == 1 else 0} for pid in ids},
     )
     conn = FakeConn({"player_awards": []}, one=None)
     result = facevalidity.unearned_top_ten(

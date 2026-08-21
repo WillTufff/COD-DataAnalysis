@@ -34,6 +34,8 @@ import psycopg
 
 from .. import artifacts
 from ..maprows import PUBLISHED_FROM_YEAR
+from .titles import CHAMPIONSHIP_EVENT, RING_RULE, TITLE_EVENT
+from .titles import RULE as TITLE_RULE
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
@@ -60,16 +62,25 @@ RULE = (
 
 _HANDLE_SQL = "SELECT id, handle FROM players"
 
-# Championships are only countable where a placement can be attributed to the
-# players who earned it, which needs an event roster. `event_rosters` holds the
-# 2013-2016 archive and nothing after it, so this number is a floor for anyone
-# who played in the league era and is complete for anyone who did not.
-_RINGS_SQL = """
+# Chips and rings, counted apart. A chip is any title win, a ring is a world
+# championship, and `titles.py` holds both rules.
+#
+# A win is `1` and not `1-4`: the 2020 Launch Weekend published a pooled
+# finish, and reading its lower bound alone handed three teams the same title.
+#
+# Either is only countable where a placement can be attributed to the players
+# who earned it, which needs an event roster. Every other first place — a
+# qualifier, a relegation bracket, a regular-season table — stays out of both
+# numbers while the events it belongs to stay in `events`.
+_RESUME_SQL = f"""
 SELECT r.player_id,
-       count(*) FILTER (WHERE ep.placement_min = 1) AS wins,
-       count(*)                                     AS events,
-       min(s.year)                                  AS first_year,
-       max(s.year)                                  AS last_year
+       count(*) FILTER (WHERE ep.placement_min = 1 AND ep.placement_max = 1
+                        AND {TITLE_EVENT})                              AS chips,
+       count(*) FILTER (WHERE ep.placement_min = 1 AND ep.placement_max = 1
+                        AND {TITLE_EVENT} AND {CHAMPIONSHIP_EVENT})     AS rings,
+       count(*)                                                        AS events,
+       min(s.year)                                                     AS first_year,
+       max(s.year)                                                     AS last_year
 FROM event_rosters r
 JOIN event_placements ep ON ep.event_id = r.event_id AND ep.team_id = r.team_id
 JOIN events e            ON e.id = r.event_id
@@ -82,6 +93,31 @@ SELECT min(s.year) AS first_year, max(s.year) AS last_year
 FROM event_rosters r
 JOIN events e  ON e.id = r.event_id
 JOIN seasons s ON s.id = e.season_id
+"""
+
+# Per published year: the chips that exist, and the ones a roster can answer
+# for. A year is covered when the two agree.
+_CHIP_COVERAGE_SQL = f"""
+WITH wins AS (
+    SELECT s.year,
+           e.name,
+           EXISTS (
+               SELECT 1 FROM event_rosters r
+               WHERE r.event_id = ep.event_id AND r.team_id = ep.team_id
+           ) AS attributable
+    FROM event_placements ep
+    JOIN events e  ON e.id = ep.event_id
+    JOIN seasons s ON s.id = e.season_id
+    WHERE ep.placement_min = 1 AND ep.placement_max = 1 AND {TITLE_EVENT}
+)
+SELECT year,
+       count(*)                                      AS chips,
+       count(*) FILTER (WHERE attributable)          AS attributable,
+       array_agg(DISTINCT name) FILTER (WHERE NOT attributable) AS unattributable_events
+FROM wins
+WHERE year >= %s
+GROUP BY year
+ORDER BY year
 """
 
 
@@ -146,21 +182,22 @@ def resolve(conn: Conn, handles: list[str]) -> tuple[dict[str, int], list[str]]:
 
 
 def resume(conn: Conn, player_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """Countable championships per player, with the years they can be counted over."""
+    """Chips and rings per player, with the years they can be counted over."""
     window = conn.execute(_ROSTER_YEARS_SQL).fetchone()
     covered_from, covered_to = window or (None, None)
     rows = {
         cast(int, row[0]): {
-            "event_wins": cast(int, row[1]),
-            "events_rostered": cast(int, row[2]),
-            "first_year": cast(int, row[3]),
-            "last_year": cast(int, row[4]),
+            "chips": cast(int, row[1]),
+            "rings": cast(int, row[2]),
+            "events_rostered": cast(int, row[3]),
+            "first_year": cast(int, row[4]),
+            "last_year": cast(int, row[5]),
         }
-        for row in conn.execute(_RINGS_SQL).fetchall()
+        for row in conn.execute(_RESUME_SQL).fetchall()
     }
     return {
         pid: {
-            **rows.get(pid, {"event_wins": 0, "events_rostered": 0}),
+            **rows.get(pid, {"chips": 0, "rings": 0, "events_rostered": 0}),
             "wins_covered_from": covered_from,
             "wins_covered_to": covered_to,
         }
@@ -168,16 +205,46 @@ def resume(conn: Conn, player_ids: list[int]) -> dict[int, dict[str, Any]]:
     }
 
 
-def rings_are_complete(conn: Conn) -> bool:
-    """True when a win count may be read as a career total.
+def chip_coverage(conn: Conn) -> dict[str, Any]:
+    """Per published year: chips, and the ones a roster can answer for.
 
-    `event_rosters` has to reach the last published season before a zero means
-    a player won nothing rather than that nobody recorded who was on the team.
+    The question a win count has to survive is not how far the rosters reach
+    but whether any year is short. Reading the highest year alone said the
+    record was complete as soon as one 2026 roster loaded, however little of
+    2017 was there — the failure the inconclusive verdict exists to prevent.
     """
-    window = conn.execute(_ROSTER_YEARS_SQL).fetchone()
-    if not window or window[1] is None:
-        return False
-    return int(cast(int, window[1])) >= _last_published_year(conn)
+    years: list[dict[str, Any]] = [
+        {
+            "year": int(cast(int, row[0])),
+            "chips": int(cast(int, row[1])),
+            "attributable": int(cast(int, row[2])),
+            "unattributable_events": sorted(cast(list[str], row[3] or [])),
+        }
+        for row in conn.execute(_CHIP_COVERAGE_SQL, (PUBLISHED_FROM_YEAR,)).fetchall()
+    ]
+    short = [year for year in years if int(year["attributable"]) < int(year["chips"])]
+    seen = {int(year["year"]) for year in years}
+    published = range(PUBLISHED_FROM_YEAR, _last_published_year(conn) + 1)
+    absent = [year for year in published if year not in seen]
+    return {
+        "title_rule": TITLE_RULE,
+        "ring_rule": RING_RULE,
+        "from_year": PUBLISHED_FROM_YEAR,
+        "years": years,
+        "years_short": [year["year"] for year in short],
+        "years_without_a_chip": absent,
+        "complete": not short and not absent,
+    }
+
+
+def chips_are_complete(conn: Conn) -> bool:
+    """True when a chip count may be read as a career total.
+
+    Every published year has to carry its titles, and every title has to reach
+    a roster, before a zero means a player won nothing rather than that nobody
+    recorded who was on the team.
+    """
+    return bool(chip_coverage(conn)["complete"])
 
 
 def _last_published_year(conn: Conn) -> int:
@@ -219,7 +286,8 @@ def build(conn: Conn) -> dict[str, Any]:
         ],
         "players": players,
         "unresolved": missing,
-        "rings_complete": rings_are_complete(conn),
+        "chips_complete": chips_are_complete(conn),
+        "chip_coverage": chip_coverage(conn),
         "tier_counts": _tier_counts(players),
     }
 
