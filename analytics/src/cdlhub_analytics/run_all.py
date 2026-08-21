@@ -1335,7 +1335,8 @@ def main(argv: list[str] | None = None) -> int:
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO player_season_rank (run_id, player_id, season_id, score, "
-                    "sd, net_of_teammates, opponent_strength) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    "sd, net_of_teammates, opponent_strength, resume, resume_credit) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1345,6 +1346,8 @@ def main(argv: list[str] | None = None) -> int:
                             row.season_sd.get(season_id),
                             row.net_of_teammates.get(season_id),
                             row.opponent_strength.get(season_id),
+                            row.resume.get(season_id),
+                            row.resume_credit.get(season_id),
                         )
                         for row in cr_rows
                         for season_id, score in row.seasons.items()
@@ -1353,7 +1356,8 @@ def main(argv: list[str] | None = None) -> int:
                 cur.executemany(
                     "INSERT INTO player_career_rank (run_id, player_id, qualified, n_seasons, "
                     "total, total_sd, peak, peak_season_id, best_three, "
-                    "best_three_start_season_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "best_three_start_season_id, chips, rings, rings_covered_from) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1366,6 +1370,9 @@ def main(argv: list[str] | None = None) -> int:
                             row.career.peak_season_id,
                             row.career.best_three,
                             row.career.best_three_start_season_id,
+                            row.chips,
+                            row.rings,
+                            cr_payload["resume"]["rings_covered_from"],
                         )
                         for row in cr_rows
                     ],
@@ -1373,6 +1380,11 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"career_rank run {cr_run}: {cr_payload['n_players_scored']} players scored, "
             f"{cr_payload['career']['n_qualified']} qualified"
+        )
+        cr_resume = cr_payload["resume"]
+        print(
+            f"  resume on {cr_resume['n_player_seasons']} player-seasons, "
+            f"chips and rings complete from {cr_resume['rings_covered_from']}"
         )
 
         # The same seasons on an age axis, and the selection problem that makes

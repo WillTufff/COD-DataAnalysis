@@ -14,7 +14,7 @@ import psycopg
 from .. import style, writeback
 from ..maprows import PUBLISHED_FROM_YEAR
 from ..ratings.preflight import load_seasons
-from . import awards, blend, breadth, evalpop, roster_strength
+from . import anchors, awards, blend, breadth, evalpop, resume, roster_strength
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
@@ -43,6 +43,7 @@ def params() -> dict[str, Any]:
         "award_top_tier_points": awards.TOP_TIER_POINTS,
         "award_second_tier_points": awards.SECOND_TIER_POINTS,
         "award_rookie_points": awards.ROOKIE_POINTS,
+        **resume.params(),
     }
 
 
@@ -54,6 +55,10 @@ class PlayerRow:
     season_sd: dict[int, float]  # season_id -> breadth.SeasonBreadth.sd
     net_of_teammates: dict[int, float]
     opponent_strength: dict[int, float]
+    resume: dict[int, float]  # season_id -> finish credit, share of the year
+    resume_credit: dict[int, float]  # the same, before the per-year division
+    chips: int  # title wins over the whole career, not only published seasons
+    rings: int
 
 
 def build(
@@ -101,6 +106,17 @@ def build(
             opp_row.mean_opponent_value
         )
 
+    # Finish credit is built over the whole archive and then attached to the
+    # seasons this run publishes: the credit a 2015 win earned is a fact about
+    # 2015, and withholding the season score does not change it.
+    resume_by_player: dict[int, dict[int, float]] = {}
+    resume_credit_by_player: dict[int, dict[int, float]] = {}
+    for entry in resume.build(conn):
+        resume_by_player.setdefault(entry.player_id, {})[entry.season_id] = entry.resume
+        resume_credit_by_player.setdefault(entry.player_id, {})[entry.season_id] = entry.credit
+    rings_covered_from = resume.coverage_from(conn)
+    career_titles = anchors.resume(conn, [row.player_id for row in career_rows])
+
     seasons_by_player: dict[int, dict[int, float]] = {}
     for (player_id, season_id), score in season_score_by_key.items():
         seasons_by_player.setdefault(player_id, {})[season_id] = score
@@ -118,6 +134,20 @@ def build(
                 season_sd=season_sd_by_player.get(career_row.player_id, {}),
                 net_of_teammates=net_by_player.get(career_row.player_id, {}),
                 opponent_strength=opp_by_player.get(career_row.player_id, {}),
+                resume={
+                    season_id: value
+                    for season_id, value in resume_by_player.get(career_row.player_id, {}).items()
+                    if season_id in seasons_by_player.get(career_row.player_id, {})
+                },
+                resume_credit={
+                    season_id: value
+                    for season_id, value in resume_credit_by_player.get(
+                        career_row.player_id, {}
+                    ).items()
+                    if season_id in seasons_by_player.get(career_row.player_id, {})
+                },
+                chips=int(career_titles.get(career_row.player_id, {}).get("chips", 0)),
+                rings=int(career_titles.get(career_row.player_id, {}).get("rings", 0)),
             )
         )
 
@@ -135,6 +165,13 @@ def build(
             "would be standardized inside is not yet comparable to a league one"
         ),
         "basket_size": len(basket),
+        # The finish component. It does not enter `career` — the fixed-weight
+        # blend is R7 — so this is the whole of what the run says about it.
+        "resume": {
+            **resume.params(),
+            "rings_covered_from": rings_covered_from,
+            "n_player_seasons": sum(len(row.resume) for row in out),
+        },
         "career": blend.artifact([r.career for r in out]),
         # Every scored player, not just the top ten: the metric-diff harness
         # keys a list by `player_id` (see `LIST_KEYS` in
@@ -153,6 +190,9 @@ def build(
                 "best_three": None
                 if row.career.best_three is None
                 else round(row.career.best_three, 2),
+                "chips": row.chips,
+                "rings": row.rings,
+                "resume_total": round(sum(row.resume.values()), 4),
             }
             for row in out
         ],
