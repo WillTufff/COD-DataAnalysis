@@ -3575,11 +3575,28 @@ export type CareerRankArtifact = {
   n_players_scored: number;
   basket_size: number;
   restricted: boolean;
+  publish_from_year: number;
+  shrinkage: {
+    k: number;
+    rule: string;
+    refit: { k: number; n: number; fitted: number };
+  };
+  era_season_scores: {
+    era: string;
+    seasons: number;
+    median_metrics: number;
+    median_maps: number;
+    sd_before: number;
+    sd_after: number;
+  }[];
   career: {
     min_seasons_floor: number;
+    season_component_weights: Record<string, number>;
     n_players: number;
     n_qualified: number;
     n_below_floor: number;
+    n_partial_coverage: number;
+    seasons_uncovered: number;
     top_ten_by_total: { player_id: number; total: number; total_sd: number | null }[];
   };
 };
@@ -3594,6 +3611,11 @@ export type CareerRankLeaderboardRow = {
   playerId: number;
   handle: string;
   nSeasons: number;
+  /** Seasons the board could score. Below nSeasons when the box-score archive
+   *  does not reach every season the career has. */
+  seasonsCovered: number;
+  /** Earliest year a box score reaches this player, null when none does. */
+  coverageFromYear: number | null;
   total: number;
   totalSd: number | null;
   peak: number;
@@ -3607,7 +3629,8 @@ export async function getCareerRankLeaderboard(
   limit: number,
 ): Promise<CareerRankLeaderboardRow[]> {
   const rows = await db.execute(sql`
-    SELECT c.player_id, p.handle, c.n_seasons, c.total, c.total_sd, c.peak,
+    SELECT c.player_id, p.handle, c.n_seasons, c.seasons_covered,
+           c.coverage_from_year, c.total, c.total_sd, c.peak,
            ps.year AS peak_year, c.best_three, bs.year AS best_three_year
     FROM player_career_rank c
     JOIN players p ON p.id = c.player_id
@@ -3622,6 +3645,8 @@ export async function getCareerRankLeaderboard(
       player_id: number;
       handle: string;
       n_seasons: number;
+      seasons_covered: number | null;
+      coverage_from_year: number | null;
       total: number;
       total_sd: number | null;
       peak: number;
@@ -3633,6 +3658,10 @@ export async function getCareerRankLeaderboard(
     playerId: r.player_id,
     handle: r.handle,
     nSeasons: Number(r.n_seasons),
+    seasonsCovered:
+      r.seasons_covered === null ? Number(r.n_seasons) : Number(r.seasons_covered),
+    coverageFromYear:
+      r.coverage_from_year === null ? null : Number(r.coverage_from_year),
     total: Number(r.total),
     totalSd: r.total_sd === null ? null : Number(r.total_sd),
     peak: Number(r.peak),
@@ -3646,6 +3675,8 @@ export async function getCareerRankLeaderboard(
 export type PlayerCareerRankSummary = {
   qualified: boolean;
   nSeasons: number;
+  seasonsCovered: number;
+  coverageFromYear: number | null;
   total: number;
   totalSd: number | null;
   peak: number;
@@ -3658,8 +3689,11 @@ export type PlayerCareerRankSeason = {
   seasonId: number;
   year: number;
   league: string;
-  score: number;
+  /** Null when the season carries no box score. Not a zero: the season was
+   *  not measured, and the row says which components it did carry. */
+  score: number | null;
   sd: number | null;
+  componentsPresent: string[];
   netOfTeammates: number | null;
   opponentStrength: number | null;
 };
@@ -3673,7 +3707,8 @@ export async function getPlayerCareerRank(
 }> {
   const [summaryRows, seasonRows] = await Promise.all([
     db.execute(sql`
-      SELECT c.qualified, c.n_seasons, c.total, c.total_sd, c.peak,
+      SELECT c.qualified, c.n_seasons, c.seasons_covered, c.coverage_from_year,
+             c.total, c.total_sd, c.peak,
              ps.year AS peak_year, c.best_three, bs.year AS best_three_year
       FROM player_career_rank c
       LEFT JOIN seasons ps ON ps.id = c.peak_season_id
@@ -3682,6 +3717,7 @@ export async function getPlayerCareerRank(
     `),
     db.execute(sql`
       SELECT r.season_id, s.year, s.league, r.score, r.sd,
+             coalesce(r.components_present, '{}') AS components_present,
              r.net_of_teammates, r.opponent_strength
       FROM player_season_rank r
       JOIN seasons s ON s.id = r.season_id
@@ -3693,6 +3729,8 @@ export async function getPlayerCareerRank(
     summaryRows as unknown as {
       qualified: boolean;
       n_seasons: number;
+      seasons_covered: number | null;
+      coverage_from_year: number | null;
       total: number;
       total_sd: number | null;
       peak: number;
@@ -3706,6 +3744,12 @@ export async function getPlayerCareerRank(
       ? {
           qualified: s.qualified,
           nSeasons: Number(s.n_seasons),
+          seasonsCovered:
+            s.seasons_covered === null
+              ? Number(s.n_seasons)
+              : Number(s.seasons_covered),
+          coverageFromYear:
+            s.coverage_from_year === null ? null : Number(s.coverage_from_year),
           total: Number(s.total),
           totalSd: s.total_sd === null ? null : Number(s.total_sd),
           peak: Number(s.peak),
@@ -3720,8 +3764,9 @@ export async function getPlayerCareerRank(
         season_id: number;
         year: number;
         league: string;
-        score: number;
+        score: number | null;
         sd: number | null;
+        components_present: string[] | null;
         net_of_teammates: number | null;
         opponent_strength: number | null;
       }[]
@@ -3729,8 +3774,9 @@ export async function getPlayerCareerRank(
       seasonId: r.season_id,
       year: Number(r.year),
       league: r.league,
-      score: Number(r.score),
+      score: r.score === null ? null : Number(r.score),
       sd: r.sd === null ? null : Number(r.sd),
+      componentsPresent: r.components_present ?? [],
       netOfTeammates:
         r.net_of_teammates === null ? null : Number(r.net_of_teammates),
       opponentStrength:
@@ -3741,9 +3787,8 @@ export async function getPlayerCareerRank(
 
 /** The seasons the career-rank engine published a score for.
  *
- *  A season it scored and then withheld is not in here, which is the point: the
- *  page has to be able to name the seasons that carry no score without knowing
- *  the year the engine withholds from. */
+ *  A season that scored nothing is not in here, so the page can name the
+ *  seasons that carry no score without knowing the engine's own rules. */
 export async function getCareerRankSeasons(runId: number): Promise<number[]> {
   const rows = await db.execute(sql`
     SELECT DISTINCT s.year

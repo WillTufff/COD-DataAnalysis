@@ -1300,11 +1300,10 @@ function CareerRankSection({
   const gap = uncoveredYears(playerYears, coveredYears);
   const gapReason = (
     <>
-      A season score ranks one season against every other, so it needs a field
-      the seasons share. The comparable-cohort rule that would put an
-      open-bracket field on the same scale as a franchised one is not built, so
-      those seasons are scored and withheld rather than published on a scale of
-      their own.
+      A season needs at least two surviving gold-tier stats before it scores at
+      all, the same floor that decides whether a metric card renders above. A
+      season with fewer maps than the archive can qualify, or with too thin a
+      set of columns, carries no score. The maps are still on this page.
     </>
   );
   if (summary === null || seasons.length === 0) {
@@ -1350,10 +1349,20 @@ function CareerRankSection({
             </span>
           )}
           <span className="ml-2 text-xs text-ink-muted">
-            over {summary.nSeasons} season{summary.nSeasons === 1 ? "" : "s"}
+            over {summary.seasonsCovered} season
+            {summary.seasonsCovered === 1 ? "" : "s"}
             {!summary.qualified && " · below the ranking floor"}
           </span>
         </p>
+        {summary.seasonsCovered < summary.nSeasons && (
+          <p className="mt-1 text-xs text-ink-muted">
+            {summary.nSeasons - summary.seasonsCovered} further season
+            {summary.nSeasons - summary.seasonsCovered === 1 ? "" : "s"} carry a
+            finish and no box score, and score nothing here.
+            {summary.coverageFromYear !== null &&
+              ` Box scores reach this career from ${summary.coverageFromYear}.`}
+          </p>
+        )}
         <p className="mt-1 text-xs text-ink-muted">
           Peak {summary.peak.toFixed(1)}
           {summary.peakSeasonYear !== null && ` (${summary.peakSeasonYear})`}
@@ -1382,12 +1391,20 @@ function CareerRankSection({
                   {s.year} {s.league}
                 </td>
                 <td className="py-1 pr-4">
-                  {s.score.toFixed(1)}
-                  {s.sd !== null && (
-                    <span className="text-ink-muted">
-                      {" ± "}
-                      {s.sd.toFixed(1)}
+                  {s.score === null ? (
+                    <span className="text-ink-muted" title="no box score">
+                      not measured
                     </span>
+                  ) : (
+                    <>
+                      {s.score.toFixed(1)}
+                      {s.sd !== null && (
+                        <span className="text-ink-muted">
+                          {" ± "}
+                          {s.sd.toFixed(1)}
+                        </span>
+                      )}
+                    </>
                   )}
                 </td>
                 <td className="py-1 pr-4">

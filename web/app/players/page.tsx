@@ -500,11 +500,14 @@ export default async function PlayersPage({
             career of at least three qualified seasons.
           </p>
           <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-            This board covers 2017 onward. The 2013&ndash;2016 seasons are in
-            the archive and on player pages, and their season scores are
-            withheld until the field they would be measured against is made
-            comparable to a league one, so a career that started before 2017 is
-            scored on its 2017-onward seasons only. See{" "}
+            This board covers 2013 onward. A season is scored against the
+            players who played it, then pulled toward that season&rsquo;s
+            average by how many maps it is, so a 40-map season cannot post a
+            number a 124-map season could not. The early seasons carry a
+            narrower set of stats, which is the record and not the player.
+            Scored counts the seasons the box-score archive reaches; where a
+            career has more, the column says so, and the seasons it does not
+            reach score nothing rather than zero. See{" "}
             <Link className="underline hover:text-ink-secondary" href="/methodology">
               methodology
             </Link>
@@ -516,7 +519,7 @@ export default async function PlayersPage({
                 <tr className="border-b border-hairline text-xs text-ink-muted">
                   <th className="py-2 pr-3 font-normal">#</th>
                   <th className="py-2 pr-4 font-normal">Player</th>
-                  <th className="py-2 pr-4 text-right font-normal">Seasons</th>
+                  <th className="py-2 pr-4 text-right font-normal">Scored</th>
                   <th className="py-2 pr-4 text-right font-normal">
                     Total ± sd
                   </th>
@@ -539,7 +542,18 @@ export default async function PlayersPage({
                       </Link>
                     </td>
                     <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
-                      {r.nSeasons}
+                      {r.seasonsCovered}
+                      {r.seasonsCovered < r.nSeasons && (
+                        <span
+                          className="text-ink-muted"
+                          title={`${r.nSeasons - r.seasonsCovered} further season${
+                            r.nSeasons - r.seasonsCovered === 1 ? "" : "s"
+                          } carry a finish and no box score`}
+                        >
+                          {" of "}
+                          {r.nSeasons}
+                        </span>
+                      )}
                     </td>
                     <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
                       {r.total.toFixed(1)}

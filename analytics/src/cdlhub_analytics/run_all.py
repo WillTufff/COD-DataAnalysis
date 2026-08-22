@@ -1333,31 +1333,38 @@ def main(argv: list[str] | None = None) -> int:
         cr_rows, cr_payload, cr_run = career_rank.write(conn)
         if cr_rows:
             with conn.cursor() as cur:
+                # Keyed on `components`, not on `seasons`: a season with a
+                # finish and no qualifying breadth row has no score and is
+                # still a season, and writing only the scored ones is how its
+                # finish credit used to disappear.
                 cur.executemany(
                     "INSERT INTO player_season_rank (run_id, player_id, season_id, score, "
-                    "sd, net_of_teammates, opponent_strength, resume, resume_credit) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "sd, net_of_teammates, opponent_strength, resume, resume_credit, "
+                    "components_present) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
                             row.player_id,
                             season_id,
-                            score,
+                            row.seasons.get(season_id),
                             row.season_sd.get(season_id),
                             row.net_of_teammates.get(season_id),
                             row.opponent_strength.get(season_id),
                             row.resume.get(season_id),
                             row.resume_credit.get(season_id),
+                            list(present),
                         )
                         for row in cr_rows
-                        for season_id, score in row.seasons.items()
+                        for season_id, present in row.components.items()
                     ],
                 )
                 cur.executemany(
                     "INSERT INTO player_career_rank (run_id, player_id, qualified, n_seasons, "
                     "total, total_sd, peak, peak_season_id, best_three, "
-                    "best_three_start_season_id, chips, rings, rings_covered_from) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "best_three_start_season_id, chips, rings, rings_covered_from, "
+                    "seasons_covered, coverage_from_year, components_present) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1373,6 +1380,9 @@ def main(argv: list[str] | None = None) -> int:
                             row.chips,
                             row.rings,
                             cr_payload["resume"]["rings_covered_from"],
+                            row.career.seasons_covered,
+                            row.career.coverage_from_year,
+                            list(row.career.components_present),
                         )
                         for row in cr_rows
                     ],
