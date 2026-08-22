@@ -3618,6 +3618,9 @@ export type CareerRankLeaderboardRow = {
   coverageFromYear: number | null;
   total: number;
   totalSd: number | null;
+  /** total over the seasons that carry a score. Published beside the sum so
+   *  the attendance inside a total is visible; nothing ranks on it. */
+  meanSeason: number | null;
   peak: number;
   peakSeasonYear: number | null;
   bestThree: number | null;
@@ -3630,7 +3633,7 @@ export async function getCareerRankLeaderboard(
 ): Promise<CareerRankLeaderboardRow[]> {
   const rows = await db.execute(sql`
     SELECT c.player_id, p.handle, c.n_seasons, c.seasons_covered,
-           c.coverage_from_year, c.total, c.total_sd, c.peak,
+           c.coverage_from_year, c.total, c.total_sd, c.mean_season, c.peak,
            ps.year AS peak_year, c.best_three, bs.year AS best_three_year
     FROM player_career_rank c
     JOIN players p ON p.id = c.player_id
@@ -3649,6 +3652,7 @@ export async function getCareerRankLeaderboard(
       coverage_from_year: number | null;
       total: number;
       total_sd: number | null;
+      mean_season: number | null;
       peak: number;
       peak_year: number | null;
       best_three: number | null;
@@ -3664,6 +3668,7 @@ export async function getCareerRankLeaderboard(
       r.coverage_from_year === null ? null : Number(r.coverage_from_year),
     total: Number(r.total),
     totalSd: r.total_sd === null ? null : Number(r.total_sd),
+    meanSeason: r.mean_season === null ? null : Number(r.mean_season),
     peak: Number(r.peak),
     peakSeasonYear: r.peak_year === null ? null : Number(r.peak_year),
     bestThree: r.best_three === null ? null : Number(r.best_three),
@@ -3679,6 +3684,7 @@ export type PlayerCareerRankSummary = {
   coverageFromYear: number | null;
   total: number;
   totalSd: number | null;
+  meanSeason: number | null;
   peak: number;
   peakSeasonYear: number | null;
   bestThree: number | null;
@@ -3708,7 +3714,7 @@ export async function getPlayerCareerRank(
   const [summaryRows, seasonRows] = await Promise.all([
     db.execute(sql`
       SELECT c.qualified, c.n_seasons, c.seasons_covered, c.coverage_from_year,
-             c.total, c.total_sd, c.peak,
+             c.total, c.total_sd, c.mean_season, c.peak,
              ps.year AS peak_year, c.best_three, bs.year AS best_three_year
       FROM player_career_rank c
       LEFT JOIN seasons ps ON ps.id = c.peak_season_id
@@ -3733,6 +3739,7 @@ export async function getPlayerCareerRank(
       coverage_from_year: number | null;
       total: number;
       total_sd: number | null;
+      mean_season: number | null;
       peak: number;
       peak_year: number | null;
       best_three: number | null;
@@ -3752,6 +3759,7 @@ export async function getPlayerCareerRank(
             s.coverage_from_year === null ? null : Number(s.coverage_from_year),
           total: Number(s.total),
           totalSd: s.total_sd === null ? null : Number(s.total_sd),
+          meanSeason: s.mean_season === null ? null : Number(s.mean_season),
           peak: Number(s.peak),
           peakSeasonYear: s.peak_year === null ? null : Number(s.peak_year),
           bestThree: s.best_three === null ? null : Number(s.best_three),

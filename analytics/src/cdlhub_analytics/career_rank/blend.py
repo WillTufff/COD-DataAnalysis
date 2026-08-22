@@ -82,6 +82,10 @@ class CareerRank:
     qualified: bool  # clears the MIN_SEASONS floor
     total: float
     total_sd: float | None
+    # `total` over the seasons that carry a score. Published beside the sum so
+    # a reader can see how much of a total is rate and how much is length;
+    # nothing ranks on it.
+    mean_season: float
     peak: float
     peak_season_id: int
     best_three: float | None
@@ -146,6 +150,7 @@ def build(scores: list[SeasonScore], seasons: dict[int, Season]) -> list[CareerR
                 qualified=len(scorable) >= MIN_SEASONS,
                 total=total,
                 total_sd=total_sd,
+                mean_season=total / len(scorable),
                 peak=peak_score,
                 peak_season_id=peak_entry.season_id,
                 best_three=None if run is None else run[0],
@@ -177,6 +182,10 @@ def artifact(rows: list[CareerRank], n_unrankable: int = 0) -> dict[str, Any]:
                 "total_sd": None if r.total_sd is None else round(r.total_sd, 2),
             }
             for r in sorted(qualified, key=lambda r: (-r.total, r.player_id))[:10]
+        ],
+        "top_ten_by_mean_season": [
+            {"player_id": r.player_id, "mean_season": round(r.mean_season, 2)}
+            for r in sorted(qualified, key=lambda r: (-r.mean_season, r.player_id))[:10]
         ],
         "top_ten_by_peak": [
             {"player_id": r.player_id, "peak": round(r.peak, 2)}

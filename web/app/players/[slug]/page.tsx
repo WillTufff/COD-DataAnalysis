@@ -1364,6 +1364,12 @@ function CareerRankSection({
           </p>
         )}
         <p className="mt-1 text-xs text-ink-muted">
+          {summary.meanSeason !== null && (
+            <>
+              {summary.meanSeason.toFixed(1)}
+              {" per scored season · "}
+            </>
+          )}
           Peak {summary.peak.toFixed(1)}
           {summary.peakSeasonYear !== null && ` (${summary.peakSeasonYear})`}
           {summary.bestThree !== null && (

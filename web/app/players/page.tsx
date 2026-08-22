@@ -507,7 +507,10 @@ export default async function PlayersPage({
             narrower set of stats, which is the record and not the player.
             Scored counts the seasons the box-score archive reaches; where a
             career has more, the column says so, and the seasons it does not
-            reach score nothing rather than zero. See{" "}
+            reach score nothing rather than zero. Per season is the total over
+            those scored seasons: the board ranks on the total, so a long career
+            outranks a shorter better one, and this column is what that costs.
+            See{" "}
             <Link className="underline hover:text-ink-secondary" href="/methodology">
               methodology
             </Link>
@@ -523,6 +526,7 @@ export default async function PlayersPage({
                   <th className="py-2 pr-4 text-right font-normal">
                     Total ± sd
                   </th>
+                  <th className="py-2 pr-4 text-right font-normal">Per season</th>
                   <th className="py-2 pr-4 font-normal">Peak</th>
                   <th className="py-2 font-normal">Best three</th>
                 </tr>
@@ -560,6 +564,12 @@ export default async function PlayersPage({
                       {r.totalSd !== null && (
                         <span className="text-ink-muted"> ±{r.totalSd.toFixed(1)}</span>
                       )}
+                    </td>
+                    <td
+                      className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary"
+                      title="The total divided by the seasons that carry a score. The board ranks on the total, so a long career outranks a shorter better one; this column is how much of that total is rate."
+                    >
+                      {r.meanSeason === null ? "—" : r.meanSeason.toFixed(1)}
                     </td>
                     <td className="py-1.5 pr-4 text-ink-secondary">
                       {r.peak.toFixed(1)}
