@@ -205,6 +205,34 @@ def resume(conn: Conn, player_ids: list[int]) -> dict[int, dict[str, Any]]:
     }
 
 
+# The size of the title set itself, apart from who won what. A chip count is
+# only as good as the set it counts over, and that set is decided by one
+# predicate: an unknown tier once defaulted to the top one and read six
+# 2014-2016 tournaments as titles on the strength of a missing field. These
+# three totals are what a later run is held against.
+_TITLE_SET_SQL = f"""
+WITH t AS (
+    SELECT e.id, e.name FROM events e WHERE {TITLE_EVENT}
+)
+SELECT (SELECT count(*) FROM t),
+       (SELECT count(*) FROM t
+          JOIN event_placements ep ON ep.event_id = t.id
+         WHERE ep.placement_min = 1 AND ep.placement_max = 1),
+       (SELECT count(*) FROM t
+          JOIN event_placements ep ON ep.event_id = t.id
+         WHERE ep.placement_min = 1 AND ep.placement_max = 1
+           AND t.name ~* '(call of duty|world league|cwl|cdl) championship')
+"""
+
+
+def title_set(conn: Conn) -> dict[str, int]:
+    """How many events the title rule admits, how many of them were won, and
+    how many of those wins are rings."""
+    row = conn.execute(_TITLE_SET_SQL).fetchone()
+    events, wins, rings = cast(tuple[int, int, int], row) if row else (0, 0, 0)
+    return {"title_events": int(events), "title_wins": int(wins), "rings": int(rings)}
+
+
 def chip_coverage(conn: Conn) -> dict[str, Any]:
     """Per published year: chips, and the ones a roster can answer for.
 
@@ -230,6 +258,7 @@ def chip_coverage(conn: Conn) -> dict[str, Any]:
         "title_rule": TITLE_RULE,
         "ring_rule": RING_RULE,
         "from_year": PUBLISH_FROM_YEAR,
+        **title_set(conn),
         "years": years,
         "years_short": [year["year"] for year in short],
         "years_without_a_chip": absent,

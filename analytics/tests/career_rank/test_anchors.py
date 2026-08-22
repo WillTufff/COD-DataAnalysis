@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from cdlhub_analytics.career_rank import PUBLISH_FROM_YEAR, anchors
+from cdlhub_analytics.career_rank import PUBLISH_FROM_YEAR, anchors, titles
 
 
 class FakeConn:
@@ -24,6 +24,7 @@ class FakeConn:
         roster_years: tuple[int, int] | None = None,
         last_season: int = 2026,
         coverage: list[tuple[Any, ...]] | None = None,
+        title_set: tuple[int, int, int] = (0, 0, 0),
     ) -> None:
         self.players = players
         # (player_id, chips, rings, events, first_year, last_year)
@@ -32,11 +33,15 @@ class FakeConn:
         self.last_season = last_season
         # one row per year: (year, wins, attributable, unattributable event names)
         self.coverage = coverage if coverage is not None else _covered(last_season)
+        # (title events, title wins, rings)
+        self.title_set = title_set
         self._result: list[tuple[Any, ...]] = []
         self._one: tuple[Any, ...] | None = None
 
     def execute(self, sql: str, _params: Any = None) -> FakeConn:
-        if "WITH wins AS" in sql:
+        if "WITH t AS" in sql:
+            self._result, self._one = [], self.title_set
+        elif "WITH wins AS" in sql:
             self._result, self._one = self.coverage, None
         elif "FROM event_rosters" in sql and "placement_min" in sql:
             self._result, self._one = self.resume, None
@@ -211,3 +216,29 @@ def test_load_reresolves_after_a_merge(monkeypatch: pytest.MonkeyPatch) -> None:
     assert loaded["unresolved"] == []
     assert loaded["frozen_sha256"] == pointer["sha256"]
     assert loaded["sha256"] != pointer["sha256"]
+
+
+def test_an_event_with_no_tier_is_not_a_title() -> None:
+    """The rule reads a missing tier as "not a title", not as tier 1.
+
+    This is a text check because the predicate is SQL and the thing being
+    guarded is one token inside it. `coalesce(e.tier, '1')` admitted six
+    2014-2016 tournaments that carry no numeric tier, on nothing but the
+    absence of the field, and a fixture cannot fail on a default that only
+    exists in the query.
+    """
+    assert "coalesce(e.tier," not in titles.TITLE_EVENT
+    assert "e.tier IN ('1', '2')" in titles.TITLE_EVENT
+
+
+def test_title_set_totals_come_back_as_counts() -> None:
+    """The size of the set, beside the coverage of it.
+
+    A chip count is only as good as the set it counts over, so the run has to
+    publish that set's size for a later one to be held against it.
+    """
+    conn = FakeConn([(1, "One")], title_set=(137, 135, 14))
+    coverage = anchors.chip_coverage(conn)  # type: ignore[arg-type]
+    assert coverage["title_events"] == 137
+    assert coverage["title_wins"] == 135
+    assert coverage["rings"] == 14

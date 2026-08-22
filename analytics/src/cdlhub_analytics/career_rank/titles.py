@@ -18,11 +18,16 @@ The rule, and why each part of it is here:
   own word for the event, and it removes the CDL Major qualifiers and the
   All-Star weekends.
 - A name that says qualifier, relegation, play-in, regional final or regular
-  season does not count. The 2013-2016 archive carries no tier at all, so the
-  name is the only thing that separates `MLG Pro League 2015 Season 1 Playoffs`,
-  which is a title, from `Call of Duty Championship 2015/Europe Regional Final`,
-  which is a route into one.
-- Where a tier is known, only tiers 1 and 2 count.
+  season does not count. The wiki stamps a route into a championship with the
+  same tier as the championship itself: `Call of Duty Championship 2015/Europe
+  Regional Final` is Major, the same word `MLG Pro League 2015 Season 1
+  Playoffs` carries, so only the name separates the two.
+- Where a tier is known, only tiers 1 and 2 count, and where none is known the
+  event is not a title. An unknown tier used to default to the top one, which
+  read six 2014-2016 tournaments as titles on the strength of a missing field.
+  The wiki publishes Premier and Major for the ones that are, and
+  `codwiki.results` stamps those onto `tier` as 1 and 2, so the default has
+  nothing left to carry.
 
 What is out of scope never reaches the database: Challengers, Call of Duty King
 and the Esports World Cup are dropped at the pull by the pipeline's
@@ -35,7 +40,7 @@ from __future__ import annotations
 # A SQL predicate over an `events` row aliased `e`.
 TITLE_EVENT = """(
     coalesce(e.tier_type, '') NOT IN ('Qualifier', 'Showmatch')
-    AND coalesce(e.tier, '1') IN ('1', '2')
+    AND e.tier IN ('1', '2')
     AND e.name !~* '(qualif|relegation|play-in|regional final|regular season)'
 )"""
 
@@ -47,8 +52,9 @@ CHAMPIONSHIP_EVENT = """(
 )"""
 
 RULE = (
-    "tier 1 or 2, tier_type not Qualifier or Showmatch, and a name that does "
-    "not say qualifier, relegation, play-in, regional final or regular season"
+    "a known tier of 1 or 2, tier_type not Qualifier or Showmatch, and a name "
+    "that does not say qualifier, relegation, play-in, regional final or "
+    "regular season"
 )
 
 RING_RULE = "a title event whose name is a Call of Duty, CWL or CDL championship"

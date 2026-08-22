@@ -106,6 +106,18 @@ def _prize(row: dict[str, Any]) -> float | None:
 TIER_NUMBER = {"Premier": "1", "Major": "2"}
 TIER_TYPES = {"Qualifier": "Qualifier", "Showmatch": "Showmatch"}
 
+# Events whose numeric tier is set from the competition they belong to rather
+# than from the wiki's word for them. The 2016 season ran stage playoffs in
+# three regions; North America and Europe are Premier and Australia-New Zealand
+# is Minor, on a prize pool a third the size. Taking the word at face value
+# would admit two regions' stage titles and refuse the third's, which is a
+# regional cut wearing a tier's clothes. The structure is identical, so the
+# tier is.
+TIER_BY_STRUCTURE = {
+    "CWL/2016 Season/Australia-New Zealand/Stage 1/Playoffs": "1",
+    "CWL/2016 Season/Australia-New Zealand/Stage 2/Playoffs": "1",
+}
+
 # What a currency symbol in `Prizepool` is worth in dollars. The pools are
 # published in the tournament's own currency and the resume weight is the root
 # of a dollar figure, so a pound read as a dollar understates an event by a
@@ -318,14 +330,20 @@ class ResultsLoader:
         the whole archive weighs 1 in `career_rank.resume`, which makes a world
         championship and a regional open the same size.
 
+        The window is the event's own date. A season is cut by game title, not
+        by calendar, so `PlayStation Experience Invitational` on 2016-12-03 and
+        `CWL/2017 Season/Las Vegas Open` on 2016-12-16 both sit in an Infinite
+        Warfare season stamped 2017. Windowing on the season year left the
+        first of those with no tier and no pool at all, and an event with no
+        tier used to read as a title.
+
         `COALESCE(events.tier, ...)` keeps a tier another source already wrote:
         the 2017 seasons carry Liquipedia tiers and the box-score load created
         a handful of their pages under wiki names.
         """
         for row in self.conn.execute(
-            "SELECT e.id, e.name FROM events e JOIN seasons s ON s.id = e.season_id "
-            "WHERE s.year < %s",
-            (WINDOW_END.year,),
+            "SELECT e.id, e.name FROM events e WHERE e.start_date < %s",
+            (WINDOW_END,),
         ).fetchall():
             entry = meta.get(cast(str, row[1]))
             if entry is None:
@@ -347,7 +365,7 @@ class ResultsLoader:
                 """,
                 (
                     word or None,
-                    TIER_NUMBER.get(word),
+                    TIER_BY_STRUCTURE.get(cast(str, row[1])) or TIER_NUMBER.get(word),
                     TIER_TYPES.get(word),
                     pool,
                     cast(int, row[0]),
