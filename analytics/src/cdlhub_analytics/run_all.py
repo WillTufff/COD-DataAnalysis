@@ -978,8 +978,10 @@ def main(argv: list[str] | None = None) -> int:
             f"match_context run {mc_run}: {len(context_art['per_cohort'])} cohort-features "
             f"over {len(panels)} cohorts"
         )
-        for family, verdict in context_art["ablation"]["verdicts"].items():
-            stats = context_art["ablation"]["by_family"][family]
+        ablation = context_art["ablation"]
+        amended = ablation["verdicts_with_min_effect"]
+        for family, verdict in ablation["verdicts"].items():
+            stats = ablation["by_family"][family]
             move = (stats.get("leaderboard_move") or {}).get("median")
             delta = (stats.get("oof_rmse_delta") or {}).get("median")
             print(
@@ -987,6 +989,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"out-of-fold RMSE {delta:+} on "
                 f"{stats.get('cohorts_improved')}/{stats.get('cohorts_measured')} cohorts"
             )
+            if amended[family] != verdict:
+                print(f"    with MIN_EFFECT {ablation['min_effect']:g} — {amended[family]}")
         venue_finding = context_art["venue_effect"]
         print(
             f"  per-player venue effect: {venue_finding['n_clearing_interval']} of "
@@ -1361,10 +1365,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 cur.executemany(
                     "INSERT INTO player_career_rank (run_id, player_id, qualified, n_seasons, "
-                    "total, total_sd, peak, peak_season_id, best_three, "
+                    "total, total_sd, mean_season, peak, peak_season_id, best_three, "
                     "best_three_start_season_id, chips, rings, rings_covered_from, "
                     "seasons_covered, coverage_from_year, components_present) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                    "%s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1373,6 +1378,7 @@ def main(argv: list[str] | None = None) -> int:
                             row.career.n_seasons,
                             row.career.total,
                             row.career.total_sd,
+                            row.career.mean_season,
                             row.career.peak,
                             row.career.peak_season_id,
                             row.career.best_three,

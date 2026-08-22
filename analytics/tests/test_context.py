@@ -204,3 +204,26 @@ def test_the_two_leagues_are_split_at_the_first_call_of_duty_league_season() -> 
     assert ctx.league_of(2019) == "CWL"
     assert ctx.league_of(2020) == "CDL"
     assert ctx.league_of(None) == "CWL"
+
+
+def test_min_effect_drops_a_family_that_clears_the_share_on_a_rounding_move() -> None:
+    """The amendment is a floor on magnitude and never on the share.
+
+    `prize_pool` crossed KEEP_SHARE by one cohort on a median move of 1e-5,
+    which is a count of rounding rather than a count of wins. The declared rule
+    keeps it and has to go on saying so; the amended rule does not.
+    """
+    summary = _summary(improved=18, measured=20, move=1e-5)
+    assert ctx.verdicts(summary)["venue"].startswith("kept")
+    amended = ctx.verdicts(summary, ctx.MIN_EFFECT)["venue"]
+    assert amended.startswith("dropped: clears the share on a move too small")
+
+
+def test_min_effect_can_only_make_the_rule_harder() -> None:
+    """Nothing the declared rule dropped may be kept by the amendment."""
+    for improved, move in ((2, 0.4), (18, 0.4), (18, 1e-5), (10, 0.0)):
+        summary = _summary(improved=improved, measured=20, move=move)
+        declared = ctx.verdicts(summary)["venue"]
+        amended = ctx.verdicts(summary, ctx.MIN_EFFECT)["venue"]
+        if declared.startswith("dropped"):
+            assert amended.startswith("dropped")

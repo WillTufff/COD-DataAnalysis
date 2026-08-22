@@ -1067,9 +1067,37 @@ def summarize_ablation(rows: Sequence[AblationRow]) -> dict[str, dict[str, Any]]
 # before any fit ran.
 KEEP_SHARE = 0.5
 
+# Amendment, 2026-08-22. The declared rule counts cohorts and never asks how
+# large the improvement was, so a family can cross `KEEP_SHARE` on a median
+# improvement of 1e-5 — which `prize_pool` did, by one cohort, when the
+# pre-2017 prize pools loaded. A count of wins that small is a count of
+# rounding.
+#
+# It has to be said plainly that this floor was written after a result made the
+# gap visible, because a threshold rewritten once a result is in is usually not
+# a threshold. Two things keep it defensible. It is a floor on magnitude and
+# not a change to the share, so it can only ever make the rule harder to pass,
+# never easier. And the number is not chosen from the distribution it will be
+# applied to: 0.01 cohort standard deviations is the magnitude this same
+# function already used, as a bare literal, to separate "moves the table
+# without predicting" from "does nothing either way". Naming that literal and
+# applying it to both branches is what the amendment is. Any family that clears
+# the share and moves the table less than the amount the rule already called
+# negligible is reported as too small to keep.
+#
+# Both verdicts are published side by side for one release, the declared rule's
+# and the amended rule's, with the effect size beside each. Nothing downstream
+# reads either: `run_all` prints these and no box score is corrected from them.
+MIN_EFFECT = 0.01
+MIN_EFFECT_AMENDED_ON = "2026-08-22"
 
-def verdicts(summary: Mapping[str, dict[str, Any]]) -> dict[str, str]:
-    """Kept or not, per family, against the rule declared before fitting."""
+
+def verdicts(summary: Mapping[str, dict[str, Any]], min_effect: float = 0.0) -> dict[str, str]:
+    """Kept or not, per family, against the rule declared before fitting.
+
+    `min_effect` at 0.0 is the rule as declared. `MIN_EFFECT` is the amendment
+    above. Both are computed every run and published together.
+    """
     out: dict[str, str] = {}
     for family, stats in summary.items():
         measured = stats.get("cohorts_measured", 0)
@@ -1078,12 +1106,32 @@ def verdicts(summary: Mapping[str, dict[str, Any]]) -> dict[str, str]:
             continue
         share = stats["cohorts_improved"] / measured
         moved = (stats.get("leaderboard_move") or {}).get("median", 0.0)
-        if share > KEEP_SHARE:
+        if share > KEEP_SHARE and (moved or 0.0) >= min_effect:
             out[family] = "kept: lowers out-of-fold error on most cohorts"
-        elif moved and moved > 0.01:
+        elif share > KEEP_SHARE:
+            out[family] = (
+                "dropped: clears the share on a move too small to keep "
+                f"({moved:g} < {min_effect:g})"
+            )
+        elif moved and moved > MIN_EFFECT:
             out[family] = "dropped: moves the table without predicting"
         else:
             out[family] = "dropped: does nothing either way"
+    return out
+
+
+def effect_sizes(summary: Mapping[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The two numbers each verdict turns on, per family, so a reader can check
+    the rule rather than take the word."""
+    out: dict[str, dict[str, Any]] = {}
+    for family, stats in summary.items():
+        measured = stats.get("cohorts_measured", 0)
+        out[family] = {
+            "cohorts_improved": stats.get("cohorts_improved", 0),
+            "cohorts_measured": measured,
+            "share": (stats.get("cohorts_improved", 0) / measured) if measured else None,
+            "median_leaderboard_move": (stats.get("leaderboard_move") or {}).get("median"),
+        }
     return out
 
 
@@ -1224,8 +1272,15 @@ def artifact(
         "ablation": {
             "declared_before_fitting": True,
             "keep_share": KEEP_SHARE,
+            "min_effect": MIN_EFFECT,
+            "min_effect_amended_on": MIN_EFFECT_AMENDED_ON,
             "by_family": summary,
+            "effect_sizes": effect_sizes(summary),
+            # The rule as declared, and the rule with the magnitude floor. Both,
+            # because the floor was written after a result made the gap visible
+            # and publishing only the amended table would hide that.
             "verdicts": verdicts(summary),
+            "verdicts_with_min_effect": verdicts(summary, MIN_EFFECT),
             "by_cohort": [
                 {
                     **_cohort_label(row.key, seasons, modes),
