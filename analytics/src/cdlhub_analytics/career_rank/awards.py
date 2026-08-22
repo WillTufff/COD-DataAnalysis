@@ -110,10 +110,6 @@ def load_award_rows(conn: Conn) -> list[AwardRow]:
     ]
 
 
-def load_award_credits(conn: Conn) -> list[AwardCredit]:
-    return credits(load_award_rows(conn))
-
-
 def credits(rows: Sequence[AwardRow]) -> list[AwardCredit]:
     """One row per (player, season) with an award, points additive within the
     season but each capped by tier before the season sum, so five second-team
@@ -197,10 +193,6 @@ def score(rows: Sequence[AwardRow]) -> list[SeasonAccolade]:
             )
         )
     return out
-
-
-def build(conn: Conn) -> list[SeasonAccolade]:
-    return score(load_award_rows(conn))
 
 
 def density(
