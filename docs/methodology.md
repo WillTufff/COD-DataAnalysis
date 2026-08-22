@@ -151,6 +151,15 @@ not exist for this era either, and the per-map forms take over exactly as they d
 when that title's own rows carry enough non-zero values for it, so the thin columns drop
 out of their own accord.
 
+**Every pre-2017 event now carries its own size.** The wiki publishes a prize pool and a
+tier for each tournament, and both are loaded onto the 76 events held from these years.
+Before that a world championship and a regional open weighed the same, which is a
+difference of about eleven times inside 2013 once the pool is known. Pools published in
+sterling, euros or Australian dollars are converted at period averages for the years
+involved. One event paid medals. Its pool is unknown, and no event is ever stored at
+zero. The tier word is kept as the wiki writes it, in a column of its own, so loading it
+cannot quietly change which events count as titles.
+
 **Rotations before 2017 were not one rulebook.** MLG, UMG, ESWC and Gfinity each set
 their own map order, so the best-of-five rollup declares a rotation only where the era
 actually held one. Black Ops 2 and Black Ops 3 held theirs. Ghosts opened on Domination,
@@ -160,15 +169,19 @@ splits three ways, so no order was a rule both teams knew in advance. Advanced W
 series take no rollup, and the count of series that got none is published with the
 model.
 
-**No season score is published for these years, and that is deliberate.** A season
-score standardizes a player against everyone who cleared the map floor in their season
-and title. Before 2017 that field is an open bracket: the same event holds the best
-team in the world and a team that qualified that morning, so the same performance
-scores differently for a reason that has nothing to do with the player. The rule that
-makes an open field comparable to a closed league is not built yet. Until it is, the
-2013-2016 maps are loaded, the plus-minus is fitted on them, the era shows on a
-player's page, and **the number that would rank a 2014 season against a 2024 season is
-withheld.** The count of withheld seasons is published with the career-rank artifact.
+**These seasons are ranked, and two rules make them comparable.** A season score
+standardizes a player against everyone who cleared the map floor in their season and
+title. Before 2017 that field is an open bracket: the same event holds the best team in
+the world and a team that qualified that morning. The first rule is that the comparison
+happens inside one season, so an open field is never scored against a league one. The
+second is that every season is then pulled toward its own season's mean by how many maps
+it is, described under [career rank](#career-rank). That is what stops a 40-map season
+from posting a number a 124-map season could not reach.
+
+A per-map rating is still withheld here. `maprows.PUBLISHED_FROM_YEAR` stays at 2017 for
+the site's own season ratings and for the evaluation harness, where a forward test run
+on seasons nobody can see measures nothing. The all-time board asks a different
+question and carries its own floor.
 
 **Identity is quarantined, never guessed.** A handle in this era can belong to several
 people, and the wiki says so by naming its pages `Realize (Derrek Jordan)` and `Realize
@@ -2426,12 +2439,27 @@ own noise. The families that did nothing are published as families that did noth
 
 | Family | Median move (cohort sd) | Median Δ out-of-fold RMSE | Cohorts improved | Verdict |
 |---|---|---|---|---|
-| `venue` | 0.0000 | 0.00000 | 7/52 | dropped: does nothing either way |
-| `stakes` | 0.0085 | 0.00000 | 17/52 | dropped: does nothing either way |
-| `elimination` | 0.0037 | +0.00001 | 10/52 | dropped: does nothing either way |
-| `prize_pool` | 0.0069 | 0.00000 | 16/52 | dropped: does nothing either way |
-| `host_team` | 0.0000 | 0.00000 | 6/52 | dropped: does nothing either way |
-| **`map_identity`** | **0.0936** | **−0.12261** | **45/52** | **kept** |
+| `venue` | 0.0000 | 0.00000 | 10/60 | dropped: does nothing either way |
+| `stakes` | 0.0078 | 0.00000 | 19/60 | dropped: does nothing either way |
+| `elimination` | 0.0027 | +0.00001 | 9/60 | dropped: does nothing either way |
+| `prize_pool` | 0.0167 | −0.00001 | 31/60 | kept, by one cohort |
+| `host_team` | 0.0000 | 0.00000 | 6/60 | dropped: does nothing either way |
+| **`map_identity`** | **0.0931** | **−0.12088** | **51/60** | **kept** |
+
+**`prize_pool` changed verdict on 2026-08-21, and the reason is a data load rather than a
+result.** The 2013-2016 events carried no prize pool at all until the wiki's was loaded
+onto them, so in those cohorts the column was a constant and could not lower any error.
+With the pools on, the family goes from 21 of 60 cohorts improved to 31, which clears the
+0.5 share declared before fitting by a single cohort.
+
+Read the size beside the count. The median improvement is 0.00001 of a per-map rate, and
+almost all of the gain is in two pre-2017 Hardpoint cohorts, Black Ops 2 in 2013 at
+−0.148 and Black Ops 3 in 2016 at −0.019. The rule counts cohorts and does not weigh
+them, so a family can pass it on a margin this thin. The rule is not being changed after
+seeing that, because a threshold rewritten once the result is visible is not a threshold.
+What is published is the verdict the declared rule returns, next to the effect size that
+says how little is behind it. No published number moves either way: these verdicts are
+reported, and no family is applied as a correction to any box score.
 
 `prize_pool` was predicted in advance to be event tier under another name, and it is. So are
 four of the other five. On the shorter record three of the five moved the table without
@@ -3264,13 +3292,55 @@ number of percentile points on top of the season score, capped at 100.
 **A career needs at least three qualified seasons for an overall row.** Below that
 floor, season scores still compute and no total, peak or best-three is published.
 
-**Nothing before 2017 is published here.** A 2013-2016 season is scored and withheld, for
-the reason given under [archive coverage](#archive-coverage): the field it would be
-standardized inside is an open bracket and is not yet comparable to a league one. The
-engine publishes the count it withheld, 507 seasons on this run, and a career that started
-before 2017 is ranked on its 2017-onward seasons alone. Peak,
-best three consecutive and total are the same three columns career value publishes,
-computed over the breadth score instead.
+**The board starts in 2013, and the shrinkage is what lets it.** Every season the
+archive holds is scored and ranked. A career that started in 2013 is ranked on the
+seasons it played.
+
+The floor is this model's own constant, not the site's. `maprows.PUBLISHED_FROM_YEAR`
+holds the floor for the season ratings a player page shows and for the evaluation
+harness, and it stays at 2017. A board that admitted no season before 2017 did not rank
+that era low. It left the era out, and the era-balance test failed on an unrepresented
+era for exactly that reason.
+
+**Each season is pulled toward its own season's mean by its map count.** A score sits at
+`maps / (maps + 15.48)` of its distance from the mean of the players who played that
+season. A 40-map season is a noisier reading of a player than a 124-map one, so left
+alone it reaches further from the middle in both directions.
+
+The constant comes from a measurement. Season scores centred inside their own season
+have a variance that falls as one over the map count, so binning 1,196 season deviations
+by map count and regressing each bin's variance on the reciprocal of its mean map count
+splits the spread into a true part and a sampling part. The fit read 144.11 and 2,231.4,
+putting their ratio at 15.48 maps, at a weighted R-squared of 0.837. The same estimator
+against the surviving stat count reads 0.798, which is why the basis is maps. The number
+is frozen in the module and refitted beside every run, so a drift away from it shows on
+this page.
+
+What it does to the width of a season score:
+
+| Era | Seasons | Median stats | Median maps | SD before | SD after |
+|---|---|---|---|---|---|
+| 2013-2016 | 504 | 18 | 40 | 18.41 | 10.60 |
+| CWL | 497 | 35 | 35 | 15.17 | 9.68 |
+| CDL | 457 | 31 | 124 | 14.86 | 11.10 |
+
+The spread across eras falls from 3.55 to 1.42 and the order flips, leaving the CDL the
+widest era, which is what 124 maps against 35 and 40 should produce.
+
+**The era gate does not rest on that correction.** This was measured. Admitting the era and applying the shrinkage were run as four separate
+configurations. With the 2017 floor the era-balance test fails either way, at a worst
+skew of 2.15 unshrunk and 2.28 shrunk, both on an unrepresented era. With the 2013 floor
+it passes either way at 1.86, and the top-25 peaks per era are identical with and
+without the shrinkage: 7 for 2013-2016, 4 for the CDL, 14 for the CWL. The coverage
+change carries the gate on its own.
+
+**One difference the shrinkage does not touch.** A 2013-2016 season is a mean of about
+18 percentiles where a league season is a mean of 31 to 35, because the kill-feed and
+round-card stats do not exist for those years. That is a difference in what was
+recorded. No weighting by maps makes 18 stats say what 35 say.
+
+Peak, best three consecutive and total are the same three columns career value
+publishes, computed over the breadth score instead.
 
 **CWL years count at full weight here, unlike the plus-minus axis.** The plus-minus
 stores one pooled coefficient per player per CWL era because that axis's season unit is

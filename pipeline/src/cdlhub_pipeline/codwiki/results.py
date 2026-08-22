@@ -95,6 +95,60 @@ def _prize(row: dict[str, Any]) -> float | None:
         return None
 
 
+# The wiki's tier word against the numeric tier the rest of `events` carries.
+# Premier and Major are 1 and 2, the two `career_rank.titles.TITLE_EVENT`
+# admits. Minor maps to nothing: no post-2017 event in this database carries a
+# numeric tier below 2, so a number invented for it would silently decide
+# whether five 2013-2016 tournaments are titles. It keeps its word in
+# `source_tier` and leaves `tier` null, which the title rule already reads as
+# "no tier known". Qualifier is not a tier at all; it goes to `tier_type`,
+# where LPDB puts the same word.
+TIER_NUMBER = {"Premier": "1", "Major": "2"}
+TIER_TYPES = {"Qualifier": "Qualifier", "Showmatch": "Showmatch"}
+
+# What a currency symbol in `Prizepool` is worth in dollars. The pools are
+# published in the tournament's own currency and the resume weight is the root
+# of a dollar figure, so a pound read as a dollar understates an event by a
+# third. These are period averages against the years the affected events fall
+# in — sterling 2013-2014, the euro 2014, the Australian dollar 2016 — and the
+# root halves whatever error they carry.
+CURRENCY_USD = {
+    "$": 1.0,
+    "US$": 1.0,
+    "\u00a3": 1.55,
+    "GBP": 1.55,
+    "\u20ac": 1.33,
+    "EUR": 1.33,
+    "A$": 0.75,
+    "AUD": 0.75,
+}
+
+_POOL = re.compile(r"^\s*([^\d\s]*)\s*([\d,.]+)\s*$")
+
+
+def _pool_usd(raw: str) -> tuple[float | None, str | None]:
+    """A published prize pool in dollars, and the reason when there is none.
+
+    `MLG X Games Invitational 2014` pays `Medals`. A pool that is not a number
+    is not zero and not a guess: it returns None, and `resume.event_weight`
+    falls back to the smallest pool its year does publish.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None, "no pool published"
+    match = _POOL.match(text)
+    if match is None:
+        return None, f"pool is not an amount: {text}"
+    symbol, amount = match.group(1), match.group(2).replace(",", "")
+    rate = CURRENCY_USD.get(symbol or "$")
+    if rate is None:
+        return None, f"unknown currency: {symbol}"
+    try:
+        return float(amount) * rate, None
+    except ValueError:
+        return None, f"pool is not an amount: {text}"
+
+
 # The one award kind loaded outside the window: see the module docstring.
 ALL_LEAGUE_OUTSIDE_WINDOW = {"CWL All-Star"}
 
@@ -147,6 +201,8 @@ class Report:
     unresolved_players: list[str] = field(default_factory=list)
     collisions: list[dict[str, str]] = field(default_factory=list)
     events_created: list[str] = field(default_factory=list)
+    pools_unread: list[dict[str, str]] = field(default_factory=list)
+    tiers: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -155,6 +211,8 @@ class Report:
             "unresolved_players": sorted(set(self.unresolved_players)),
             "collisions": self.collisions,
             "events_created": sorted(self.events_created),
+            "pools_unread": self.pools_unread,
+            "tiers": dict(self.tiers),
         }
 
 
@@ -251,6 +309,51 @@ class ResultsLoader:
         return self._event_ids[page]
 
     # --- loads ----------------------------------------------------------
+
+    def load_event_meta(self, meta: dict[str, Any]) -> None:
+        """Stamp the wiki's prize pool and tier onto the events we already hold.
+
+        Every 2013-2016 event in this database is named for its wiki page, so
+        the join is the page name and nothing is matched by hand. Without this
+        the whole archive weighs 1 in `career_rank.resume`, which makes a world
+        championship and a regional open the same size.
+
+        `COALESCE(events.tier, ...)` keeps a tier another source already wrote:
+        the 2017 seasons carry Liquipedia tiers and the box-score load created
+        a handful of their pages under wiki names.
+        """
+        for row in self.conn.execute(
+            "SELECT e.id, e.name FROM events e JOIN seasons s ON s.id = e.season_id "
+            "WHERE s.year < %s",
+            (WINDOW_END.year,),
+        ).fetchall():
+            entry = meta.get(cast(str, row[1]))
+            if entry is None:
+                self.report.skipped["event not in the tournament snapshot"] += 1
+                continue
+            word = str(entry.get("Tier") or "").strip()
+            pool, reason = _pool_usd(str(entry.get("Prizepool") or ""))
+            if reason is not None and str(entry.get("Prizepool") or "").strip():
+                self.report.pools_unread.append({"event": cast(str, row[1]), "reason": reason})
+            self.report.tiers[word or "<none>"] += 1
+            self.conn.execute(
+                """
+                UPDATE events SET
+                  source_tier = %s,
+                  tier        = COALESCE(tier, %s),
+                  tier_type   = COALESCE(tier_type, %s),
+                  prize_pool  = COALESCE(prize_pool, %s)
+                WHERE id = %s
+                """,
+                (
+                    word or None,
+                    TIER_NUMBER.get(word),
+                    TIER_TYPES.get(word),
+                    pool,
+                    cast(int, row[0]),
+                ),
+            )
+            self.report.counts["events_stamped"] += 1
 
     def load_placements(self, rows: list[dict[str, Any]], meta: dict[str, Any]) -> None:
         for row in rows:
@@ -428,6 +531,9 @@ def load(conn: psycopg.Connection[tuple[object, ...]], aliases: Aliases) -> dict
     loader.load_placements(results, meta)
     loader.load_rosters(rosters, meta)
     loader.load_awards(awards, meta)
+    # Last: the stamp covers every event this run created as well as the ones
+    # it found.
+    loader.load_event_meta(meta)
 
     report = loader.report.as_dict()
     report["scope"] = {

@@ -3084,7 +3084,29 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
             </p>
             <p>
               <strong className="text-ink">
-                Map identity is the one family that earns its place.
+                What the event paid crossed the line, by one cohort.
+              </strong>{" "}
+              The 2013&ndash;2016 events carried no prize pool until the wiki&rsquo;s
+              was loaded, so for those cohorts this column was a constant and
+              could not predict anything. With the pools on, the family lowers
+              out-of-fold error on{" "}
+              {matchContext.ablation.by_family.prize_pool?.cohorts_improved ?? 0}{" "}
+              of{" "}
+              {matchContext.ablation.by_family.prize_pool?.cohorts_measured ?? 0}{" "}
+              cohorts, against 21 of 60 before. Read the size beside the count.
+              The median improvement is{" "}
+              {matchContext.ablation.by_family.prize_pool?.oof_rmse_delta?.median?.toFixed(
+                5,
+              ) ?? "—"}{" "}
+              and almost all of the gain sits in two pre-2017 Hardpoint cohorts.
+              The threshold was declared before any of this was fitted and it
+              counts cohorts without weighing them, so a family can clear it on
+              a margin this thin. The verdict is what the rule returns. It is
+              not evidence that prize money explains a box score.
+            </p>
+            <p>
+              <strong className="text-ink">
+                Map identity is the family that earns its place outright.
               </strong>{" "}
               It is fitted as a random effect rather than as one dummy per map —
               the rotation changes every title and several maps carry a few
@@ -3463,6 +3485,69 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               but no total is published. Of {careerRank.career.n_players}{" "}
               players scored, {careerRank.career.n_qualified} clear that
               floor.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The board starts in {careerRank.publish_from_year}.
+              </strong>{" "}
+              Every season the archive holds is scored and ranked. What makes
+              the early years comparable is not the calendar. A season is
+              standardized against the players who played it, and then pulled
+              toward that season&rsquo;s own average by how many maps it is:
+              a score sits at{" "}
+              <span className="tabular-nums">
+                maps / (maps + {careerRank.shrinkage.k.toFixed(2)})
+              </span>{" "}
+              of its distance from the season mean. A 40-map season is a
+              noisier reading of a player than a 124-map one, so untouched it
+              reaches further from the middle in both directions and posts
+              peaks the longer season could not.
+            </p>
+            <p>
+              The constant comes from a measurement. Season scores centred
+              inside their own season have a variance that falls as one over
+              the map count, and splitting that into a true part and a
+              sampling part puts their ratio at{" "}
+              {careerRank.shrinkage.k.toFixed(2)} maps. It is frozen, and
+              refitted beside every run so a drift shows: this run&rsquo;s rows
+              put it at {careerRank.shrinkage.refit.k.toFixed(2)} over{" "}
+              {careerRank.shrinkage.refit.n.toLocaleString()} seasons.
+            </p>
+            <p>
+              What that does to the width of a season score, by era:
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Era</th>
+                    <th className="py-2 pr-4 text-right font-normal">Seasons</th>
+                    <th className="py-2 pr-4 text-right font-normal">Median stats</th>
+                    <th className="py-2 pr-4 text-right font-normal">Median maps</th>
+                    <th className="py-2 pr-4 text-right font-normal">SD before</th>
+                    <th className="py-2 text-right font-normal">SD after</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  {careerRank.era_season_scores.map((row) => (
+                    <tr key={row.era} className="border-b border-hairline/50">
+                      <td className="py-2 pr-4">{row.era}</td>
+                      <td className="py-2 pr-4 text-right">{row.seasons}</td>
+                      <td className="py-2 pr-4 text-right">{row.median_metrics}</td>
+                      <td className="py-2 pr-4 text-right">{row.median_maps}</td>
+                      <td className="py-2 pr-4 text-right">{row.sd_before.toFixed(2)}</td>
+                      <td className="py-2 text-right">{row.sd_after.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              One thing the shrinkage does not fix. A 2013&ndash;2016 season is
+              a mean of about 18 percentiles where a league season is a mean of
+              31 to 35, because the kill-feed and round-card stats do not exist
+              for those years. That is a difference in what was recorded, and
+              no weighting of maps makes 18 stats say what 35 say.
             </p>
             <p>
               <strong className="text-ink">

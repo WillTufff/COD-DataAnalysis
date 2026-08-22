@@ -33,7 +33,7 @@ from typing import Any, cast
 import psycopg
 
 from .. import artifacts
-from ..maprows import PUBLISHED_FROM_YEAR
+from . import PUBLISH_FROM_YEAR
 from .titles import CHAMPIONSHIP_EVENT, RING_RULE, TITLE_EVENT
 from .titles import RULE as TITLE_RULE
 
@@ -220,16 +220,16 @@ def chip_coverage(conn: Conn) -> dict[str, Any]:
             "attributable": int(cast(int, row[2])),
             "unattributable_events": sorted(cast(list[str], row[3] or [])),
         }
-        for row in conn.execute(_CHIP_COVERAGE_SQL, (PUBLISHED_FROM_YEAR,)).fetchall()
+        for row in conn.execute(_CHIP_COVERAGE_SQL, (PUBLISH_FROM_YEAR,)).fetchall()
     ]
     short = [year for year in years if int(year["attributable"]) < int(year["chips"])]
     seen = {int(year["year"]) for year in years}
-    published = range(PUBLISHED_FROM_YEAR, _last_published_year(conn) + 1)
+    published = range(PUBLISH_FROM_YEAR, _last_published_year(conn) + 1)
     absent = [year for year in published if year not in seen]
     return {
         "title_rule": TITLE_RULE,
         "ring_rule": RING_RULE,
-        "from_year": PUBLISHED_FROM_YEAR,
+        "from_year": PUBLISH_FROM_YEAR,
         "years": years,
         "years_short": [year["year"] for year in short],
         "years_without_a_chip": absent,
@@ -249,9 +249,9 @@ def chips_are_complete(conn: Conn) -> bool:
 
 def _last_published_year(conn: Conn) -> int:
     row = conn.execute(
-        "SELECT max(year) FROM seasons WHERE year >= %s", (PUBLISHED_FROM_YEAR,)
+        "SELECT max(year) FROM seasons WHERE year >= %s", (PUBLISH_FROM_YEAR,)
     ).fetchone()
-    return int(cast(int, row[0])) if row and row[0] is not None else PUBLISHED_FROM_YEAR
+    return int(cast(int, row[0])) if row and row[0] is not None else PUBLISH_FROM_YEAR
 
 
 def build(conn: Conn) -> dict[str, Any]:

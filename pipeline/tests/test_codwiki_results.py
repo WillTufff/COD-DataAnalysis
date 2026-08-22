@@ -1,6 +1,15 @@
 from datetime import date
 
-from cdlhub_pipeline.codwiki.results import RANKING_TYPE, _in_window, _places, _prize, award_kind
+from cdlhub_pipeline.codwiki.results import (
+    RANKING_TYPE,
+    TIER_NUMBER,
+    TIER_TYPES,
+    _in_window,
+    _places,
+    _pool_usd,
+    _prize,
+    award_kind,
+)
 
 
 def test_a_shared_place_keeps_both_ends() -> None:
@@ -51,3 +60,45 @@ def test_a_prize_reads_through_its_thousands_separator() -> None:
 
 def test_the_window_bounds_are_the_ones_the_owner_set() -> None:
     assert _in_window(date(2015, 6, 1).isoformat())
+
+
+# ------------------------------------------------------- prize pools and tiers
+
+
+def test_a_pool_in_dollars_reads_as_published() -> None:
+    assert _pool_usd("$ 1,000,000") == (1_000_000.0, None)
+    assert _pool_usd("$ 5,000") == (5_000.0, None)
+
+
+def test_a_pool_in_another_currency_is_converted_and_not_read_as_dollars() -> None:
+    """A pound taken for a dollar understates an event by a third."""
+    pounds, reason = _pool_usd("£ 6,000")
+    assert reason is None
+    assert pounds is not None
+    assert pounds > 6_000.0
+
+    aussie, reason = _pool_usd("A$ 60,000")
+    assert reason is None
+    assert aussie is not None
+    assert aussie < 60_000.0
+
+
+def test_a_pool_that_is_not_money_is_unknown_rather_than_zero() -> None:
+    """`MLG X Games Invitational 2014` pays Medals; nothing is worth zero."""
+    pool, reason = _pool_usd("Medals")
+    assert pool is None
+    assert reason is not None
+
+
+def test_no_pool_published_is_unknown_and_says_so() -> None:
+    assert _pool_usd("") == (None, "no pool published")
+
+
+def test_only_premier_and_major_take_a_numeric_tier() -> None:
+    """The title rule reads `events.tier`, so a word it does not admit deletes
+    a title. Minor has no number here and keeps its word in `source_tier`."""
+    assert TIER_NUMBER["Premier"] == "1"
+    assert TIER_NUMBER["Major"] == "2"
+    assert "Minor" not in TIER_NUMBER
+    assert "Qualifier" not in TIER_NUMBER
+    assert TIER_TYPES["Qualifier"] == "Qualifier"

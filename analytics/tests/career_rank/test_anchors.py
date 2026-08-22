@@ -11,8 +11,7 @@ from typing import Any
 
 import pytest
 
-from cdlhub_analytics.career_rank import anchors
-from cdlhub_analytics.maprows import PUBLISHED_FROM_YEAR
+from cdlhub_analytics.career_rank import PUBLISH_FROM_YEAR, anchors
 
 
 class FakeConn:
@@ -58,7 +57,7 @@ class FakeConn:
 
 def _covered(last_season: int) -> list[tuple[Any, ...]]:
     """Every published year carrying one title that a roster answers for."""
-    return [(year, 1, 1, None) for year in range(PUBLISHED_FROM_YEAR, last_season + 1)]
+    return [(year, 1, 1, None) for year in range(PUBLISH_FROM_YEAR, last_season + 1)]
 
 
 @pytest.fixture(autouse=True)
@@ -164,15 +163,17 @@ def test_chips_are_incomplete_while_one_year_cannot_attribute_one() -> None:
     The year that fails is named, because the reason a zero is unsafe is a
     particular year's missing rosters and not the record as a whole.
     """
+    first = PUBLISH_FROM_YEAR
     short = FakeConn(
         [(1, "One")],
         coverage=[
-            (year, 2, 1 if year == 2017 else 2, ["CWL Atlanta Open 2017"]) for year in (2017, 2018)
+            (year, 2, 1 if year == first else 2, ["CWL Atlanta Open 2017"])
+            for year in range(first, first + 2)
         ],
-        last_season=2018,
+        last_season=first + 1,
     )
     assert anchors.chips_are_complete(short) is False  # type: ignore[arg-type]
-    assert anchors.chip_coverage(short)["years_short"] == [2017]  # type: ignore[arg-type]
+    assert anchors.chip_coverage(short)["years_short"] == [first]  # type: ignore[arg-type]
 
     covered = FakeConn([(1, "One")], last_season=2026)
     assert anchors.chips_are_complete(covered) is True  # type: ignore[arg-type]
@@ -184,12 +185,13 @@ def test_a_published_year_with_no_chip_at_all_is_incomplete() -> None:
     Reading the highest roster year called that complete, which is how a 2017
     with one event of thirteen passed while 2026 was being loaded.
     """
+    first = PUBLISH_FROM_YEAR
     missing = FakeConn(
         [(1, "One")],
-        coverage=[(2018, 1, 1, None)],
-        last_season=2018,
+        coverage=[(year, 1, 1, None) for year in range(first + 1, first + 3)],
+        last_season=first + 2,
     )
-    assert anchors.chip_coverage(missing)["years_without_a_chip"] == [2017]  # type: ignore[arg-type]
+    assert anchors.chip_coverage(missing)["years_without_a_chip"] == [first]  # type: ignore[arg-type]
     assert anchors.chips_are_complete(missing) is False  # type: ignore[arg-type]
 
 

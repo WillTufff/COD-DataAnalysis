@@ -15,7 +15,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 import psycopg
@@ -40,6 +40,34 @@ ROUND_CARD_KEYS = {
 # Minimum surviving stats for a (season, mode) slice to count at all, matching
 # the page's own floor on `buildMetricCards`.
 MIN_SLICE_STATS = 2
+
+# The map count at which a season's score is worth half its distance from the
+# season mean. It comes from a measurement. Season scores centred inside their
+# own season have a variance that falls as 1/maps, so binning by map count and
+# regressing the bin variance on the reciprocal of its mean map count splits
+# the spread into a true part and a sampling part, and their ratio is this
+# number. `estimate_shrink_k` below is that fit; on the 1,196 season deviations
+# the archive held on 2026-08-21 it read a true variance of 144.11 and a
+# sampling term of 2,231.43, so K = 15.48, at a weighted R^2 of 0.837. The same
+# estimator against the surviving stat count reads 0.798, which is why the
+# basis is maps.
+#
+# The value here is whatever that estimator returned, never a number arrived at
+# some other way: a constant fitted by one implementation and published beside
+# another is the drift the run report exists to catch.
+#
+# It is frozen rather than refitted each run, for the reason the
+# pre-registration gives: a parameter that moves with the data is a target.
+# `estimate_shrink_k` is published beside the run so the drift is visible.
+SHRINK_K = 15.4838
+
+# A season needs a field before it has a mean to shrink toward.
+MIN_SHRINK_COHORT = 5
+
+SHRINK_RULE = (
+    f"score = season mean + (score - season mean) * maps / (maps + {SHRINK_K}); "
+    f"a season in a cohort smaller than {MIN_SHRINK_COHORT} is left alone"
+)
 
 _NORMALIZED = re.compile(r"^(.+)_(p10|pm)$")
 
@@ -149,6 +177,103 @@ class SeasonBreadth:
     n_slices: int
     n_stats: int
     maps: int
+
+
+def shrink(rows: Sequence[SeasonBreadth], k: float = SHRINK_K) -> list[SeasonBreadth]:
+    """Pull each season toward its own season's mean by how many maps it is.
+
+    A 40-map season is a noisier estimate of a player than a 124-map season, so
+    left alone it reaches further from the middle in both directions. That is
+    the whole of the difference between a 2013-2016 season and a CDL one on
+    this scale — 18 percentiles over 40 maps against 31 over 124 — and a board
+    that admits both without this reads the noise as a peak.
+
+    The mean is the season's own field, so this never moves a season against
+    another era: it moves it against the players it played.
+
+    `sd` is the width of the same deviation and scales with it. A season alone
+    in its cohort has no mean to shrink toward and is returned untouched.
+    """
+    by_season: dict[int, list[SeasonBreadth]] = defaultdict(list)
+    for row in rows:
+        by_season[row.season_id].append(row)
+
+    out: list[SeasonBreadth] = []
+    for _season_id, cohort in sorted(by_season.items()):
+        if len(cohort) < MIN_SHRINK_COHORT:
+            out.extend(cohort)
+            continue
+        mean = sum(row.score for row in cohort) / len(cohort)
+        for row in cohort:
+            weight = row.maps / (row.maps + k) if row.maps > 0 else 0.0
+            out.append(
+                replace(
+                    row,
+                    score=mean + (row.score - mean) * weight,
+                    sd=None if row.sd is None else row.sd * weight,
+                )
+            )
+    return sorted(out, key=lambda row: (row.player_id, row.season_id))
+
+
+def estimate_shrink_k(rows: Sequence[SeasonBreadth], bins: int = 10) -> dict[str, float | int]:
+    """Refit `SHRINK_K` from the rows in hand, for reporting only.
+
+    Bins the season deviations by map count, takes each bin's variance, and
+    regresses it on the reciprocal of the bin's mean map count weighted by bin
+    size. The intercept is the variance a season of unlimited length would
+    still have and the slope is the sampling part; K is their ratio. Nothing
+    reads the number it returns — it is published beside the run so a drift
+    away from the frozen constant is visible rather than silent.
+    """
+    by_season: dict[int, list[SeasonBreadth]] = defaultdict(list)
+    for row in rows:
+        by_season[row.season_id].append(row)
+    points: list[tuple[int, float]] = []
+    for cohort in by_season.values():
+        if len(cohort) < MIN_SHRINK_COHORT:
+            continue
+        mean = sum(row.score for row in cohort) / len(cohort)
+        points.extend((row.maps, row.score - mean) for row in cohort if row.maps > 0)
+    if len(points) < bins * MIN_SHRINK_COHORT:
+        return {"n": len(points), "k": SHRINK_K, "fitted": 0}
+
+    points.sort()
+    per_bin = len(points) // bins
+    xs: list[float] = []
+    ys: list[float] = []
+    ws: list[float] = []
+    for index in range(bins):
+        chunk = points[index * per_bin : (index + 1) * per_bin if index < bins - 1 else len(points)]
+        if len(chunk) < MIN_SHRINK_COHORT:
+            continue
+        mean_maps = sum(maps for maps, _ in chunk) / len(chunk)
+        centre = sum(dev for _, dev in chunk) / len(chunk)
+        variance = sum((dev - centre) ** 2 for _, dev in chunk) / (len(chunk) - 1)
+        xs.append(1.0 / mean_maps)
+        ys.append(variance)
+        ws.append(float(len(chunk)))
+
+    total = sum(ws)
+    mean_x = sum(w * x for w, x in zip(ws, xs, strict=True)) / total
+    mean_y = sum(w * y for w, y in zip(ws, ys, strict=True)) / total
+    covariance = sum(w * (x - mean_x) * (y - mean_y) for w, x, y in zip(ws, xs, ys, strict=True))
+    spread = sum(w * (x - mean_x) ** 2 for w, x in zip(ws, xs, strict=True))
+    slope = covariance / spread if spread else 0.0
+    intercept = mean_y - slope * mean_x
+    residual = sum(
+        w * (y - (intercept + slope * x)) ** 2 for w, x, y in zip(ws, xs, ys, strict=True)
+    )
+    about_mean = sum(w * (y - mean_y) ** 2 for w, y in zip(ws, ys, strict=True))
+    return {
+        "n": len(points),
+        "bins": len(xs),
+        "true_variance": intercept,
+        "sampling_variance_per_map": slope,
+        "r_squared": 1.0 - residual / about_mean if about_mean else 0.0,
+        "k": slope / intercept if intercept > 0 else SHRINK_K,
+        "fitted": 1,
+    }
 
 
 def build(

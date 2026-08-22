@@ -1451,10 +1451,10 @@ def positive_control(
     """Recover an opponent effect that was put there on purpose.
 
     The placebo says the machinery reports nothing from nothing. It does not say
-    the machinery reports the right thing from something, and no test anywhere
-    in this plan did until here. A league is generated with known per-player
-    offensive and defensive effects and a schedule that pairs teams at random;
-    the rung then has to recover the defensive ones it was never told.
+    the machinery reports the right thing from something. Here a league is built
+    with known per-player offensive and defensive effects and a schedule that
+    pairs teams at random; the rung then has to recover the defensive ones it
+    was never told.
     """
     generator = np.random.default_rng(seed)
     own_effect = generator.normal(0.0, 1.0, players)

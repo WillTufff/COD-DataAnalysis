@@ -942,10 +942,28 @@ def test_an_unpinned_page_figure_is_reported_and_does_not_fail(
 ) -> None:
     monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", None)
     monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "team_strength_proxy", None)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
 
     found = gates.page_figure_failures(
         {"cells_before_total": 2517},
-        {"team_strength_proxy_check": {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81}},
+        {
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
     )
 
     assert found
@@ -959,10 +977,28 @@ def test_a_page_figure_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None
         "team_strength_proxy",
         {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
     )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
 
     found = gates.page_figure_failures(
         {"cells_before_total": 2600},
-        {"team_strength_proxy_check": {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81}},
+        {
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
     )
 
     assert len(found) == 1
@@ -977,6 +1013,15 @@ def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
         {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
     )
 
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+
     assert (
         gates.page_figure_failures(
             {"cells_before_total": 2517},
@@ -985,8 +1030,49 @@ def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
                     "n_team_seasons": 200,
                     "pearson": 0.7702,
                     "spearman": 0.81,
-                }
+                },
+                "shrinkage": {"k": 14.55},
+                "era_season_scores": [
+                    {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+                ],
             },
         )
         == []
     )
+
+
+def test_an_era_whose_spread_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The table exists to show the era gate is not clearing on a variance
+    artifact, so the run has to still produce the spread the page prints."""
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 14.86}
+            ],
+        },
+    )
+
+    assert len(found) == 1
+    assert "era spread CDL sd_after" in found[0]

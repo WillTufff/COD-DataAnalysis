@@ -285,6 +285,22 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # covers more of a career. Two merges took 5,079 cells to 5,061.
     "retrodiction_cells_before": 5061,
     "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
+    # The table /methodology prints for the map-count shrinkage, pinned on the
+    # day it was published. Its whole purpose is to show that admitting the
+    # 2013-2016 era did not clear the era-balance gate on a variance artifact,
+    # and a table making that argument with nothing comparing it to the run is
+    # the class of failure `retained_three_way` was added for. `sd_before` is
+    # the season score as `breadth.build` returns it and `sd_after` is the same
+    # score shrunk, both within one era.
+    "career_rank_era_spread": {
+        "on": "2026-08-21",
+        "shrink_k": 15.4838,
+        "eras": {
+            "2013-2016": {"seasons": 504, "sd_before": 18.4127, "sd_after": 10.5987},
+            "CWL": {"seasons": 497, "sd_before": 15.1735, "sd_after": 9.6784},
+            "CDL": {"seasons": 457, "sd_before": 14.8609, "sd_after": 11.1006},
+        },
+    },
     "persistence_pairs": 566,
     "persistence_delta_r": -0.2188,
     "delta_r_tol": 5e-4,

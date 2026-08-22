@@ -803,6 +803,24 @@ def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, An
     pinned = evalspec.PUBLISHED_FIGURES.get("team_strength_proxy") or {}
     for key, tol in (("n_team_seasons", 0.0), ("pearson", 5e-3), ("spearman", 5e-3)):
         checks.append((f"team-strength proxy {key}", proxy.get(key), pinned.get(key), tol))
+
+    # The era-spread table. It is the evidence that the era-balance gate is not
+    # clearing on a variance artifact, so it has to be held against the run
+    # that computes it.
+    spread = evalspec.PUBLISHED_FIGURES.get("career_rank_era_spread") or {}
+    checks.append(
+        (
+            "career-rank shrinkage constant",
+            (career_rank.get("shrinkage") or {}).get("k"),
+            spread.get("shrink_k"),
+            0.0,
+        )
+    )
+    measured = {row["era"]: row for row in career_rank.get("era_season_scores") or []}
+    for era, want in (spread.get("eras") or {}).items():
+        got = measured.get(era, {})
+        for key, tol in (("seasons", 0.0), ("sd_before", 5e-3), ("sd_after", 5e-3)):
+            checks.append((f"era spread {era} {key}", got.get(key), want.get(key), tol))
     for what, got, _want in [(c[0], c[1], c[2]) for c in checks if c[2] is None]:
         bad.append(f"{REPORTED}{what} is not pinned yet; the run computes {got}")
     for what, got, want, tol in checks:
