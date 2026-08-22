@@ -821,6 +821,33 @@ def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, An
         got = measured.get(era, {})
         for key, tol in (("seasons", 0.0), ("sd_before", 5e-3), ("sd_after", 5e-3)):
             checks.append((f"era spread {era} {key}", got.get(key), want.get(key), tol))
+
+    # Phase C's three. The convergent check is the only outside referent the
+    # career engine has, the era gap is what Phase C was gated on, and the
+    # VALUE coverage says how much of the run the blended half reached. A
+    # figure on the page that nothing compares against is a figure that
+    # drifts, which is the whole reason this function exists.
+    convergent = career_rank.get("convergent") or {}
+    pinned_convergent = evalspec.PUBLISHED_FIGURES.get("career_rank_convergent") or {}
+    for key, tol in (("n_seasons", 0.0), ("n_player_seasons", 0.0), ("median_rho", 5e-4)):
+        checks.append(
+            (f"career-rank convergent {key}", convergent.get(key), pinned_convergent.get(key), tol)
+        )
+    era_gap = career_rank.get("era_gap") or {}
+    pinned_gap = evalspec.PUBLISHED_FIGURES.get("career_rank_era_gap") or {}
+    for key, tol in (
+        ("n_players", 0.0),
+        ("mean", 5e-4),
+        ("median", 5e-4),
+        ("share_higher_in_cwl", 5e-4),
+    ):
+        checks.append((f"career-rank era gap {key}", era_gap.get(key), pinned_gap.get(key), tol))
+    backbone = career_rank.get("value_backbone") or {}
+    pinned_backbone = evalspec.PUBLISHED_FIGURES.get("career_rank_value_coverage") or {}
+    for key in ("n_seasons", "n_with_value", "breadth_weight", "value_weight"):
+        checks.append(
+            (f"career-rank VALUE {key}", backbone.get(key), pinned_backbone.get(key), 0.0)
+        )
     for what, got, _want in [(c[0], c[1], c[2]) for c in checks if c[2] is None]:
         bad.append(f"{REPORTED}{what} is not pinned yet; the run computes {got}")
     for what, got, want, tol in checks:

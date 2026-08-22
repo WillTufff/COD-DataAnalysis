@@ -306,14 +306,48 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # `shrink_k` and the `sd_after` column moved again in the same session, when
     # the constant was re-derived on the repaired input. `sd_before` did not:
     # the shrinkage cannot reach a score before it is applied.
+    #
+    # Re-pinned again 2026-08-22 for Phase C. The slice score became the mean
+    # over its live metric families rather than the mean over every surviving
+    # metric, so `sd_before` moved for the first time in this block's history:
+    # the score itself is a different number. `shrink_k` was refit on it, as
+    # its module's rule requires, and reads 21.8718. Season counts and median
+    # stat counts are untouched — the families change how the metrics are
+    # averaged, not which ones survive.
     "career_rank_era_spread": {
         "on": "2026-08-22",
-        "shrink_k": 19.9228,
+        "shrink_k": 21.8718,
         "eras": {
-            "2013-2016": {"seasons": 504, "sd_before": 18.5252, "sd_after": 11.0062},
-            "CWL": {"seasons": 497, "sd_before": 15.2136, "sd_after": 9.9053},
-            "CDL": {"seasons": 457, "sd_before": 14.8168, "sd_after": 10.9087},
+            "2013-2016": {"seasons": 504, "sd_before": 18.1919, "sd_after": 10.3922},
+            "CWL": {"seasons": 497, "sd_before": 15.1118, "sd_after": 9.6278},
+            "CDL": {"seasons": 457, "sd_before": 14.6518, "sd_after": 10.5245},
         },
+    },
+    # Phase C's own three figures, pinned the day they were published. The
+    # first is the outside referent nothing in the engine was fitted to; it
+    # reaches one era and the pin says which. The second is the gate's number,
+    # the within-player CWL-minus-CDL gap. The third is how far the VALUE half
+    # reached.
+    "career_rank_convergent": {
+        "on": "2026-08-22",
+        "eras_covered": ["CDL"],
+        "n_seasons": 7,
+        "n_player_seasons": 457,
+        "median_rho": 0.8076,
+    },
+    "career_rank_era_gap": {
+        "on": "2026-08-22",
+        "n_players": 90,
+        "mean": 8.7335,
+        "median": 10.3181,
+        "share_higher_in_cwl": 0.8444,
+    },
+    "career_rank_value_coverage": {
+        "on": "2026-08-22",
+        "n_seasons": 1458,
+        "n_with_value": 1447,
+        "breadth_weight": 0.75,
+        "value_weight": 0.25,
     },
     "persistence_pairs": 566,
     "persistence_delta_r": -0.2188,

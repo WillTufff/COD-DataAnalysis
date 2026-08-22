@@ -3279,9 +3279,10 @@ their season score.
 ### Career rank: a second all-time axis, over the metric basket instead of VALUE
 
 Career value sums a rating fitted against map outcome. Career rank sums a different
-quantity, a **breadth score**: the coverage-weighted mean percentile across every
-gold-tier stat a player's own page shows that season, weighted by each mode's share of
-that season's maps. The metric table also carries a pooled row per player-season,
+quantity: three parts a **breadth score** to one part the season rating, blended per
+season. Breadth is the coverage-weighted mean percentile across every gold-tier stat a
+player's own page shows that season, weighted by each mode's share of that season's
+maps. The metric table also carries a pooled row per player-season,
 aggregated over the same maps as the mode rows beside it. Beside a mode row it is the
 season counted twice and is ignored; where no single mode clears the surviving-stat
 floor it is the only reading of the season there is, and the season scores on it at its
@@ -3293,6 +3294,69 @@ its timed form never double count the same signal. A season needs at least two s
 stats to score at all, the same floor the player page itself uses to decide whether a
 card renders. Award status (First/Second Team, MVPs, Rookie of the Year) adds a fixed
 number of percentile points on top of the season score, capped at 100.
+
+**A slice averages its metric families, not its metrics.** The catalog holds 43 gold
+metrics in the basket, and how many of them measure a given thing is an accident of what
+the archive recorded. Seven read slaying volume and six read slaying efficiency against
+three for discipline, and four of the modern slaying metrics read one underlying event.
+Averaging every surviving percentile at equal weight turned that into a weight of four.
+Each metric is assigned to one of six families, each live family contributes the mean of
+its own surviving percentiles, and the slice is the unweighted mean over the families
+that are there. A family with no surviving metric leaves the mean rather than entering
+it as a zero — a season the archive did not record a family for is thin coverage, not
+bad play.
+
+The assignment is authored metric by metric and was fixed before the first run that used
+it. The catalog's own category field is not it: that field holds twelve mode-shaped
+labels, which say which mode a metric comes from and not what it measures.
+
+| Family | Metrics |
+|---|---|
+| Slaying volume | kills per map, kills per 10, EKIA per 10, damage per map, damage per 10, kill share, S&D kills per round |
+| Slaying efficiency | deaths per map, deaths per 10, plus/minus per map, plus/minus per 10, non-traded kill rate, S&D deaths per round |
+| Objective | hill time per map, per 10 and as a share, contested hill share, zone captures, flag captures, flag returns, carry efficiency, carry time, flag involvement, Domination captures, Blitz captures, Uplink points, dunk rate, sneak defuses |
+| Discipline | time per life, kills answered rate, clean kill rate |
+| Opening duel | Control first-blood rate, first-death rate, first-blood net per round and opening-duel win, S&D first-blood rate, first-death rate and opening-duel win |
+| Streaks | deep streaks per map, Blitz index, scorestreak kills per 10, S&D multikill round rate, aces |
+
+**What the families do not fix.** Family weighting was adopted on the argument that it
+would make a 14-metric 2013 season comparable to a 26-metric league one. It does not,
+and the measurement is why. Family coverage is partitioned by era rather than merely
+thinned:
+
+| Era | Seasons | Median families | Volume | Efficiency | Objective | Discipline | Opening | Streaks |
+|---|---|---|---|---|---|---|---|---|
+| 2013-2016 | 504 | 3 | 100% | 100% | 64.7% | 0% | 0% | 0% |
+| CWL | 497 | 5 | 99.2% | 99.2% | 75.7% | 31.2% | 69.2% | 99.2% |
+| CDL | 457 | 4 | 100% | 100% | 94.7% | 0% | 95.4% | 0% |
+
+A 2013-2016 season reaches three families at most and a CDL season four. Only the CWL
+years reach five, and 132 of their 497 seasons carry all six. Renormalizing over the
+live families still sets a score built from three families beside one built from five,
+and those are different constructs rather than the same construct measured more or less
+precisely. What the change is worth is the repair inside an era: a season is no longer
+worth how many metrics happened to point at its slaying. Every season row publishes the
+families it was scored on, so the coverage is readable rather than assumed.
+
+**The season rating enters at a quarter weight, fixed before the run.** Breadth is this
+engine's declared season unit; the season rating (the same VALUE career value sums)
+enters as a corroborant, because its construction does not change across eras where the
+breadth basket demonstrably does. Within each season the rating is mapped onto the
+breadth score's own location and scale before the two are combined, so the blend can
+never move a season against another era — it moves a season against the players it
+played. The two are not independent: within season they already agree at a Spearman of
+0.785 in 2013-2016, 0.769 in the CDL and 0.550 in the CWL, so a larger weight would buy
+less new information than its size suggests while displacing the declared unit. A season
+with no rating, or one in a field too small or too flat to map against, is scored on
+breadth alone at full weight; that is 11 of 1,458 seasons, all of them CWL. Both halves
+are published beside the score.
+
+**The engine is checked against an outside referent, in the one era that has one.** The
+source that supplies the modern archive carries its own per-map rating, on 53,832 rows,
+and nothing in this project is fitted to it. Against the published season score it reads
+a within-season Spearman of 0.808 across the seven CDL seasons, from 0.668 to 0.890 over
+457 player-seasons. It says nothing about 2013-2016 or the CWL: every row carrying such
+a rating is a CDL row, so this is a check on one era and is reported as one.
 
 **A career needs at least three qualified seasons for an overall row.** Below that
 floor, season scores still compute and no total, peak or best-three is published.
@@ -3308,7 +3372,7 @@ that era low. It left the era out, and the era-balance test failed on an unrepre
 era for exactly that reason.
 
 **Each season is pulled toward its own season's mean by its map count.** A score sits at
-`maps / (maps + 19.92)` of its distance from the mean of the players who played that
+`maps / (maps + 21.87)` of its distance from the mean of the players who played that
 season. A 40-map season is a noisier reading of a player than a 124-map one, so left
 alone it reaches further from the middle in both directions.
 
@@ -3329,24 +3393,33 @@ dropped were exactly the thin ones the regression is trying to characterise. A
 sampling-noise-per-map term fitted with the low-map end cut off is biased by
 construction.
 
-With the pooled row answered for by its own grouping set, the fit runs on all 1,458 and
-reads 141.22 and 2,813.5, a ratio of **19.92 maps** at a weighted R-squared of **0.989**,
-against the earlier 0.837. That is the constant in force. What changed is the input and
-not the estimator: this number has always been whatever the estimator returns, and it now
-returns it from a sample with nothing cut off. Refitting on the run that applies it
-reproduces 19.92 exactly, so the constant is a fixed point of its own derivation.
+With the pooled row answered for by its own grouping set, the fit ran on all 1,458 and
+read 141.22 and 2,813.5, a ratio of 19.92 maps at a weighted R-squared of 0.989 against
+the earlier 0.837. What changed there was the input and not the estimator.
+
+**The constant was refit once more when the families landed.** It is the ratio of the
+true season-to-season variance to the sampling variance per map *of the score it
+shrinks*, and the family averaging changed what that score is, so a constant fitted
+against the old one would have been fitted against a distribution that no longer exists.
+Same estimator, same 1,458 seasons: 131.48 and 2,875.7, a ratio of **21.87 maps** at a
+weighted R-squared of **0.986**. That is the constant in force. The refit was declared
+before the run that applied it, with its acceptance written first — it was allowed to
+move the board, and if a face-validity test had degraded the constant would have stood
+and the degradation would be published here.
 
 What it does to the width of a season score:
 
 | Era | Seasons | Median stats | Median maps | SD before | SD after |
 |---|---|---|---|---|---|
-| 2013-2016 | 504 | 14 | 40 | 18.53 | 11.01 |
-| CWL | 497 | 26 | 35 | 15.21 | 9.91 |
-| CDL | 457 | 25 | 124 | 14.82 | 10.91 |
+| 2013-2016 | 504 | 14 | 40 | 18.19 | 10.39 |
+| CWL | 497 | 26 | 35 | 15.11 | 9.63 |
+| CDL | 457 | 25 | 124 | 14.65 | 10.52 |
 
-The spread across eras falls from 3.71 to 1.10. The CDL is no longer the widest after
-the correction; 2013-2016 is, by 0.10 points, which is what 40 maps against 124 should
-produce once the shrinkage has done its work.
+The spread across eras falls from 3.54 to 0.90. Before the shrinkage the earliest era is
+the widest by 3.54 points on a third of the maps, which is the reading the shrinkage
+exists to correct; after it the three eras sit within 0.90 of each other, and the CDL is
+the widest by 0.13 over 2013-2016. Which era ends up nominally widest moves with the
+basket and is not the claim — the claim is that the gap between them closes.
 
 **The era gate does not rest on that correction.** This was measured. Admitting the era and applying the shrinkage were run as four separate
 configurations. With the 2017 floor the era-balance test fails either way, at a worst
@@ -3355,13 +3428,25 @@ it passes either way at 1.86, and the top-25 peaks per era are identical with an
 without the shrinkage: 7 for 2013-2016, 4 for the CDL, 14 for the CWL. The coverage
 change carries the gate on its own.
 
-**One difference the shrinkage does not touch.** A 2013-2016 season is a mean of about
-14 percentiles where a league season is a mean of 25 to 26, because the kill-feed and
-round-card stats do not exist for those years. That is a difference in what was
-recorded. No weighting by maps makes 14 stats say what 26 say.
+**One difference neither the shrinkage nor the families touches.** A 2013-2016 season is
+a mean of about 14 percentiles where a league season is a mean of 25 to 26, because the
+kill-feed and round-card stats do not exist for those years. That is a difference in what
+was recorded. No weighting by maps makes 14 stats say what 26 say, and grouping them into
+families does not either — it only stops the count of metrics inside a family from
+setting the family's weight.
+
+The board's own reading of that difference is published every run. Within the 90 players
+holding scored seasons in both, a CWL season scores **8.73 points higher than the same
+player's CDL seasons** on average (median 10.32, 84.4% of them higher in the CWL). The
+mechanism is cohort composition: the CWL years ran open-bracket events, so an elite
+player's percentile there was measured against a field that included amateur teams, where
+the CDL is a closed twelve-team league in which every opponent is a professional. The gap
+was 13.4 when it was first measured and 9.63 before this phase; the families and the
+season-rating blend took it to 8.73. It is reported, not corrected — the correction would
+be a per-era adjustment fitted to the thing it is meant to measure.
 
 Peak, best three consecutive and total are the same three columns career value
-publishes, computed over the breadth score instead.
+publishes, computed over the season score instead.
 
 **CWL years count at full weight here, unlike the plus-minus axis.** The plus-minus
 stores one pooled coefficient per player per CWL era because that axis's season unit is
@@ -3393,11 +3478,16 @@ is repeated rather than remembered.
 
 **Every total carries a standard deviation**, the same convention career value follows.
 It comes from how much the gold-tier basket disagreed with itself that season: not a
-measurement error on any one stat, but the spread across the stats in the basket. A
-season where the metrics mostly agree gets a tight SD; a season where they scatter gets
-a wide one. A career total's SD compounds the season SDs as independent variances, the
-same simplification career value's own total_sd makes. That understates the true width,
-because the underlying metric fits share a cohort across years.
+measurement error on any one stat, but the spread across the basket. It is read at the
+level the score is a mean of — across the metric families where a slice has more than
+one, and across the single family's own metrics where it does not, because a lone family
+disagreeing with itself is then the whole of the disagreement there is. Family means
+cancel some of what individual metrics scatter, so these are narrower than the
+per-metric widths this column carried before. A season where the families mostly agree
+gets a tight SD; a season where they scatter gets a wide one. A career total's SD
+compounds the season SDs as independent variances, the same simplification career value's
+own total_sd makes. That understates the true width, because the underlying metric fits
+share a cohort across years.
 
 ### Aging: three curves, because one curve would be wrong
 

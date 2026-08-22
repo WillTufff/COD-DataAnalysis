@@ -937,6 +937,37 @@ def test_a_floor_neither_number_accounts_for_still_fails() -> None:
 # MARK: the two figures the page states
 
 
+# Phase C's three pins and the run that satisfies them. They go through the
+# same comparison loop as the two figures these tests are about, so each test
+# stubs them to agreement and asserts on the figure it names.
+_PHASE_C_PINS = {
+    "career_rank_convergent": {"n_seasons": 7, "n_player_seasons": 457, "median_rho": 0.8},
+    "career_rank_era_gap": {
+        "n_players": 90,
+        "mean": 8.7,
+        "median": 10.3,
+        "share_higher_in_cwl": 0.84,
+    },
+    "career_rank_value_coverage": {
+        "n_seasons": 1458,
+        "n_with_value": 1447,
+        "breadth_weight": 0.75,
+        "value_weight": 0.25,
+    },
+}
+
+_PHASE_C_RUN = {
+    "convergent": _PHASE_C_PINS["career_rank_convergent"],
+    "era_gap": _PHASE_C_PINS["career_rank_era_gap"],
+    "value_backbone": _PHASE_C_PINS["career_rank_value_coverage"],
+}
+
+
+def _unpin_phase_c(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in _PHASE_C_PINS.items():
+        monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, key, value)
+
+
 def test_an_unpinned_page_figure_is_reported_and_does_not_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -950,6 +981,7 @@ def test_an_unpinned_page_figure_is_reported_and_does_not_fail(
             "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
         },
     )
+    _unpin_phase_c(monkeypatch)
 
     found = gates.page_figure_failures(
         {"cells_before_total": 2517},
@@ -959,6 +991,7 @@ def test_an_unpinned_page_figure_is_reported_and_does_not_fail(
                 "pearson": 0.77,
                 "spearman": 0.81,
             },
+            **_PHASE_C_RUN,
             "shrinkage": {"k": 14.55},
             "era_season_scores": [
                 {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
@@ -985,6 +1018,7 @@ def test_a_page_figure_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None
             "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
         },
     )
+    _unpin_phase_c(monkeypatch)
 
     found = gates.page_figure_failures(
         {"cells_before_total": 2600},
@@ -994,6 +1028,7 @@ def test_a_page_figure_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None
                 "pearson": 0.77,
                 "spearman": 0.81,
             },
+            **_PHASE_C_RUN,
             "shrinkage": {"k": 14.55},
             "era_season_scores": [
                 {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
@@ -1021,6 +1056,7 @@ def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
             "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
         },
     )
+    _unpin_phase_c(monkeypatch)
 
     assert (
         gates.page_figure_failures(
@@ -1031,6 +1067,7 @@ def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
                     "pearson": 0.7702,
                     "spearman": 0.81,
                 },
+                **_PHASE_C_RUN,
                 "shrinkage": {"k": 14.55},
                 "era_season_scores": [
                     {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
@@ -1058,6 +1095,7 @@ def test_an_era_whose_spread_moved_fails(monkeypatch: pytest.MonkeyPatch) -> Non
             "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
         },
     )
+    _unpin_phase_c(monkeypatch)
 
     found = gates.page_figure_failures(
         {"cells_before_total": 2517},
@@ -1067,6 +1105,7 @@ def test_an_era_whose_spread_moved_fails(monkeypatch: pytest.MonkeyPatch) -> Non
                 "pearson": 0.77,
                 "spearman": 0.81,
             },
+            **_PHASE_C_RUN,
             "shrinkage": {"k": 14.55},
             "era_season_scores": [
                 {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 14.86}
@@ -1076,3 +1115,90 @@ def test_an_era_whose_spread_moved_fails(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert len(found) == 1
     assert "era spread CDL sd_after" in found[0]
+
+
+def test_a_convergent_check_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The only outside referent the career engine has, held against the run.
+
+    Nothing in the engine is fitted to it, which is exactly why a drift in it
+    has to be read rather than published quietly.
+    """
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            **_PHASE_C_RUN,
+            "convergent": {**_PHASE_C_RUN["convergent"], "median_rho": 0.41},
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+    )
+
+    assert len(found) == 1
+    assert "convergent median_rho" in found[0]
+
+
+def test_the_declared_value_weight_cannot_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The weight was fixed before the run and is not a tuned parameter.
+
+    A weight that can move between runs without anything noticing is a weight
+    that was never declared, so it is pinned at zero tolerance like the
+    shrinkage constant beside it.
+    """
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            **_PHASE_C_RUN,
+            "value_backbone": {**_PHASE_C_RUN["value_backbone"], "value_weight": 0.5},
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+    )
+
+    assert len(found) == 1
+    assert "VALUE value_weight" in found[0]
