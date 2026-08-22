@@ -328,19 +328,35 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # reaches one era and the pin says which. The second is the gate's number,
     # the within-player CWL-minus-CDL gap. The third is how far the VALUE half
     # reached.
+    # Both re-pinned 2026-08-22 for Phase D. Award credit left the season
+    # score, so the score these two are measured against is a different
+    # number. The convergent rho fell, 0.8076 to 0.7918, and the fall is
+    # published: an award vote tracks the same thing a per-map rating does, so
+    # taking it out of a performance score costs agreement with an outside
+    # rating. That is the price of the component being a component.
     "career_rank_convergent": {
         "on": "2026-08-22",
         "eras_covered": ["CDL"],
         "n_seasons": 7,
         "n_player_seasons": 457,
-        "median_rho": 0.8076,
+        "median_rho": 0.7918,
     },
     "career_rank_era_gap": {
         "on": "2026-08-22",
         "n_players": 90,
-        "mean": 8.7335,
-        "median": 10.3181,
-        "share_higher_in_cwl": 0.8444,
+        "mean": 7.9441,
+        "median": 9.2566,
+        "share_higher_in_cwl": 0.8667,
+    },
+    # Phase D's own numbers. The thin-year rule and the stack ceiling are both
+    # declared rules, and a declared rule nothing checks is a rule that drifts.
+    "career_rank_accolade": {
+        "on": "2026-08-22",
+        "n_player_seasons": 134,
+        "unresolved_rows": 11,
+        "thin_years": [2013, 2014, 2015],
+        "stack_16": 2,
+        "stack_12": 22,
     },
     "career_rank_value_coverage": {
         "on": "2026-08-22",

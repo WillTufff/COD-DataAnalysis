@@ -937,9 +937,10 @@ def test_a_floor_neither_number_accounts_for_still_fails() -> None:
 # MARK: the two figures the page states
 
 
-# Phase C's three pins and the run that satisfies them. They go through the
-# same comparison loop as the two figures these tests are about, so each test
-# stubs them to agreement and asserts on the figure it names.
+# Phase C's three pins and Phase D's one, with the run that satisfies them.
+# They go through the same comparison loop as the two figures these tests are
+# about, so each test stubs them to agreement and asserts on the figure it
+# names.
 _PHASE_C_PINS = {
     "career_rank_convergent": {"n_seasons": 7, "n_player_seasons": 457, "median_rho": 0.8},
     "career_rank_era_gap": {
@@ -954,12 +955,25 @@ _PHASE_C_PINS = {
         "breadth_weight": 0.75,
         "value_weight": 0.25,
     },
+    "career_rank_accolade": {
+        "n_player_seasons": 134,
+        "unresolved_rows": 11,
+        "thin_years": [2013, 2014, 2015],
+        "stack_16": 2,
+        "stack_12": 22,
+    },
 }
 
-_PHASE_C_RUN = {
+_PHASE_C_RUN: dict[str, Any] = {
     "convergent": _PHASE_C_PINS["career_rank_convergent"],
     "era_gap": _PHASE_C_PINS["career_rank_era_gap"],
     "value_backbone": _PHASE_C_PINS["career_rank_value_coverage"],
+    "accolade": {
+        "n_player_seasons": 134,
+        "unresolved_rows": 11,
+        "thin_years": [2013, 2014, 2015],
+        "stack_distribution": {"4": 58, "8": 57, "12": 22, "16": 2},
+    },
 }
 
 
@@ -1158,6 +1172,85 @@ def test_a_convergent_check_that_moved_fails(monkeypatch: pytest.MonkeyPatch) ->
 
     assert len(found) == 1
     assert "convergent median_rho" in found[0]
+
+
+def _page_figures(run: dict[str, Any]) -> list[str]:
+    return gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            **_PHASE_C_RUN,
+            **run,
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+    )
+
+
+def _pin_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+
+def test_a_thin_year_that_stopped_being_silenced_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The floor decides which years contribute award credit at all.
+
+    It was declared before the run that applied it, so a year quietly joining
+    or leaving the silenced set is the formula changing without anyone saying
+    so.
+    """
+    _pin_the_rest(monkeypatch)
+    accolade = {**_PHASE_C_RUN["accolade"], "thin_years": [2013, 2014]}
+    found = _page_figures({"accolade": accolade})
+    assert len(found) == 1
+    assert "thin years" in found[0]
+
+
+def test_a_tier_stack_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tiers stack by a declared rule, and how far they reach is published.
+
+    A stack that grew without the rule changing means the award record moved
+    underneath it, which is worth reading before a board is published on it.
+    """
+    _pin_the_rest(monkeypatch)
+    accolade = {
+        **_PHASE_C_RUN["accolade"],
+        "stack_distribution": {"4": 58, "8": 57, "12": 22, "16": 9},
+    }
+    found = _page_figures({"accolade": accolade})
+    assert len(found) == 1
+    assert "accolade stack 16" in found[0]
+
+
+def test_an_award_row_that_started_resolving_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eleven award rows reach no player. That count is the one number a
+    reload can move without anything else on the page moving with it."""
+    _pin_the_rest(monkeypatch)
+    accolade = {**_PHASE_C_RUN["accolade"], "unresolved_rows": 9}
+    found = _page_figures({"accolade": accolade})
+    assert len(found) == 1
+    assert "accolade unresolved_rows" in found[0]
 
 
 def test_the_declared_value_weight_cannot_drift(monkeypatch: pytest.MonkeyPatch) -> None:

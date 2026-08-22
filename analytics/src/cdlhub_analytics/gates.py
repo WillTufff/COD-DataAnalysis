@@ -842,6 +842,32 @@ def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, An
         ("share_higher_in_cwl", 5e-4),
     ):
         checks.append((f"career-rank era gap {key}", era_gap.get(key), pinned_gap.get(key), tol))
+    # Phase D's component. The thin-year floor and the tier stack are declared
+    # rules, and the count of award rows the record cannot attach to a player
+    # is the one number a reload could move without anybody noticing.
+    accolade = career_rank.get("accolade") or {}
+    pinned_accolade = evalspec.PUBLISHED_FIGURES.get("career_rank_accolade") or {}
+    for key in ("n_player_seasons", "unresolved_rows"):
+        checks.append(
+            (f"career-rank accolade {key}", accolade.get(key), pinned_accolade.get(key), 0.0)
+        )
+    want_thin = pinned_accolade.get("thin_years")
+    got_thin = accolade.get("thin_years")
+    if want_thin is not None and list(got_thin or []) != list(want_thin):
+        bad.append(
+            f"published figure drifted from /methodology — career-rank thin years: "
+            f"run {got_thin}, page {want_thin}"
+        )
+    stack = accolade.get("stack_distribution") or {}
+    for points in ("16", "12"):
+        checks.append(
+            (
+                f"career-rank accolade stack {points}",
+                stack.get(points),
+                pinned_accolade.get(f"stack_{points}"),
+                0.0,
+            )
+        )
     backbone = career_rank.get("value_backbone") or {}
     pinned_backbone = evalspec.PUBLISHED_FIGURES.get("career_rank_value_coverage") or {}
     for key in ("n_seasons", "n_with_value", "breadth_weight", "value_weight"):
