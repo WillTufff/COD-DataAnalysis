@@ -593,8 +593,9 @@ export default async function PlayersPage({
           </div>
           <p className="mt-3 max-w-3xl text-xs text-ink-muted">
             The score blends every gold-tier stat on a player&rsquo;s page,
-            weighted by each mode&rsquo;s share of that season&rsquo;s maps,
-            plus award credit. Its ±sd reflects how much that basket
+            weighted by each mode&rsquo;s share of that season&rsquo;s maps.
+            Awards are published beside it and are not in it. Its ±sd
+            reflects how much that basket
             disagreed with itself that season, not a measurement error on any
             one stat. A CWL year counts at full weight, same as a CDL season.
             The full spec is on{" "}

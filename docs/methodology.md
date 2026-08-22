@@ -3292,8 +3292,7 @@ metrics a reader sees on the player page, minus the kill-feed categories (IW/WWI
 and the round-card keys. The per-map twin of any per-10 pair is dropped so a rate and
 its timed form never double count the same signal. A season needs at least two surviving
 stats to score at all, the same floor the player page itself uses to decide whether a
-card renders. Award status (First/Second Team, MVPs, Rookie of the Year) adds a fixed
-number of percentile points on top of the season score, capped at 100.
+card renders.
 
 **A slice averages its metric families, not its metrics.** The catalog holds 43 gold
 metrics in the basket, and how many of them measure a given thing is an accident of what
@@ -3354,9 +3353,35 @@ are published beside the score.
 **The engine is checked against an outside referent, in the one era that has one.** The
 source that supplies the modern archive carries its own per-map rating, on 53,832 rows,
 and nothing in this project is fitted to it. Against the published season score it reads
-a within-season Spearman of 0.808 across the seven CDL seasons, from 0.668 to 0.890 over
+a within-season Spearman of 0.792 across the seven CDL seasons, from 0.676 to 0.885 over
 457 player-seasons. It says nothing about 2013-2016 or the CWL: every row carrying such
 a rating is a CDL row, so this is a check on one era and is reported as one.
+
+**Awards are their own component and are not inside the season score.** Award status
+used to add a fixed number of percentile points on top of the season score, capped at
+100. That made a first-team vote a performance measurement, which it is not. It is a
+fact about what a season was recognised as, and it now sits beside the score as ACCOLADE
+with its own weight, the same shape the finish record already has.
+
+A season's accolade is its share of every award point its year handed out. The points
+themselves are unchanged: 8 for a first team or a season MVP, 4 for a second team, an
+event MVP or a mode award, 4 for a Rookie of the Year on the first season that qualifies
+for it. Points are capped per tier before the season sum, so five event MVPs cannot
+out-credit one first team, and the tiers stack, because three recognitions in one season
+is more than one. That stack reaches its ceiling of 16 on two seasons in the whole
+archive and 12 on 22 more.
+
+The per-year division is what makes 2016 and 2024 comparable. 2016 named eighteen
+first-team slots across its events and 2024 named four, so an unnormalized point is
+worth whatever the year happened to hand out. A year that named no season-level honour
+at all contributes nothing: 2013, 2014 and 2015 hold five event MVPs between them and no
+first team, no season MVP and no rookie award, and dividing by one event MVP would give
+that player the whole of his year. Those three years are silenced by a rule written
+before the run, and the raw points are still published so the division can be undone.
+
+Eleven award rows do not resolve to a player. They are published as unresolved and
+reduce nobody's season. The awards a season held are listed on the player page beside
+its score.
 
 **A career needs at least three qualified seasons for an overall row.** Below that
 floor, season scores still compute and no total, peak or best-three is published.
@@ -3436,13 +3461,14 @@ families does not either — it only stops the count of metrics inside a family 
 setting the family's weight.
 
 The board's own reading of that difference is published every run. Within the 90 players
-holding scored seasons in both, a CWL season scores **8.73 points higher than the same
-player's CDL seasons** on average (median 10.32, 84.4% of them higher in the CWL). The
+holding scored seasons in both, a CWL season scores **7.94 points higher than the same
+player's CDL seasons** on average (median 9.26, 86.7% of them higher in the CWL). The
 mechanism is cohort composition: the CWL years ran open-bracket events, so an elite
 player's percentile there was measured against a field that included amateur teams, where
 the CDL is a closed twelve-team league in which every opponent is a professional. The gap
-was 13.4 when it was first measured and 9.63 before this phase; the families and the
-season-rating blend took it to 8.73. It is reported, not corrected — the correction would
+was 13.4 when it was first measured and 9.63 before the families landed; the families
+and the season-rating blend took it to 8.73, and taking the award credit out of the
+season score took it to 7.94. It is reported, not corrected — the correction would
 be a per-era adjustment fitted to the thing it is meant to measure.
 
 Peak, best three consecutive and total are the same three columns career value

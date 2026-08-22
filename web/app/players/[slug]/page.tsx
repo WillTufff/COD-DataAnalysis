@@ -1390,6 +1390,7 @@ function CareerRankSection({
               <th className="py-1 pr-4 font-normal">Score</th>
               <th className="py-1 pr-4 font-normal">Breadth · value</th>
               <th className="py-1 pr-4 font-normal">Families</th>
+              <th className="py-1 pr-4 font-normal">Awards</th>
               <th className="py-1 pr-4 font-normal">Net of teammates</th>
               <th className="py-1 font-normal">Opponent strength</th>
             </tr>
@@ -1452,6 +1453,21 @@ function CareerRankSection({
                   )}
                 </td>
                 <td className="py-1 pr-4">
+                  {s.awardsPresent.length === 0 ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    <span title={s.awardsPresent.join(", ")}>
+                      {s.awardsPresent.length}
+                      {s.accolade !== null && s.accolade > 0 && (
+                        <span className="text-ink-muted">
+                          {" · "}
+                          {(s.accolade * 100).toFixed(1)}% of the year
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </td>
+                <td className="py-1 pr-4">
                   {s.netOfTeammates === null ? (
                     <span className="text-ink-muted">—</span>
                   ) : (
@@ -1477,7 +1493,9 @@ function CareerRankSection({
           rather than how many stats happen to measure the same thing. The
           season rating is put on the breadth scale inside its own season
           before it is blended, and a season with no rating is scored on the
-          basket alone. Award credit is added on top.
+          basket alone. Awards are not in it: they sit beside it as their own
+          component, each season&rsquo;s share of every award point its year handed
+          out, and carry no weight in the score.
         </p>
         <p className="mt-2 text-xs leading-relaxed text-ink-muted">
           The family count says what the archive reached, not how well the

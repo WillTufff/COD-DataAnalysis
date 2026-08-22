@@ -3560,8 +3560,8 @@ export async function getPlayerCareer(
 // ---------- Career rank ----------
 //
 // A second, independent all-time axis: peak/best-three/total over the
-// gold-tier metric basket (plus award credit) instead of over VALUE or
-// SKILL, published by `career_rank.engine`. See
+// gold-tier metric basket instead of over VALUE or SKILL, published by
+// `career_rank.engine`. See
 // docs/methodology.md#career-rank for what it is measuring and why it
 // disagrees with `player_career` where it does.
 
@@ -3707,6 +3707,11 @@ export type PlayerCareerRankSeason = {
   // where the season was scored on breadth alone.
   breadth: number | null;
   valueScaled: number | null;
+  // The award component, on its own scale: a share of every award point the
+  // season's year handed out. Zero where the year named no season-level
+  // honour. It carries no weight in the score above it.
+  accolade: number | null;
+  awardsPresent: string[];
   netOfTeammates: number | null;
   opponentStrength: number | null;
 };
@@ -3732,7 +3737,8 @@ export async function getPlayerCareerRank(
       SELECT r.season_id, s.year, s.league, r.score, r.sd,
              coalesce(r.components_present, '{}') AS components_present,
              coalesce(r.families_present, '{}') AS families_present,
-             r.breadth, r.value_scaled,
+             r.breadth, r.value_scaled, r.accolade,
+             coalesce(r.awards_present, '{}') AS awards_present,
              r.net_of_teammates, r.opponent_strength
       FROM player_season_rank r
       JOIN seasons s ON s.id = r.season_id
@@ -3787,6 +3793,8 @@ export async function getPlayerCareerRank(
         families_present: string[] | null;
         breadth: number | null;
         value_scaled: number | null;
+        accolade: number | null;
+        awards_present: string[] | null;
         net_of_teammates: number | null;
         opponent_strength: number | null;
       }[]
@@ -3800,6 +3808,8 @@ export async function getPlayerCareerRank(
       familiesPresent: r.families_present ?? [],
       breadth: r.breadth === null ? null : Number(r.breadth),
       valueScaled: r.value_scaled === null ? null : Number(r.value_scaled),
+      accolade: r.accolade === null ? null : Number(r.accolade),
+      awardsPresent: r.awards_present ?? [],
       netOfTeammates:
         r.net_of_teammates === null ? null : Number(r.net_of_teammates),
       opponentStrength:
