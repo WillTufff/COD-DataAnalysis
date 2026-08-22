@@ -33,14 +33,14 @@ def test_a_per_map_metric_with_no_twin_survives() -> None:
 
 
 def test_a_slice_below_the_minimum_stat_count_does_not_score() -> None:
-    points = [point(1, 19, HP, "obj_a", 0.9)]  # only one stat
+    points = [point(1, 19, HP, "kills_pm", 0.9)]  # only one stat
     slice_maps = {(1, 19, HP): 10}
     out = breadth.build(points, slice_maps)
     assert out == []
 
 
 def test_a_slice_at_the_minimum_stat_count_scores() -> None:
-    points = [point(1, 19, HP, "obj_a", 0.9), point(1, 19, HP, "obj_b", 0.7)]
+    points = [point(1, 19, HP, "kills_pm", 0.9), point(1, 19, HP, "deaths_pm", 0.7)]
     slice_maps = {(1, 19, HP): 10}
     out = breadth.build(points, slice_maps)
     assert len(out) == 1
@@ -52,10 +52,10 @@ def test_a_slice_at_the_minimum_stat_count_scores() -> None:
 
 def test_season_score_is_weighted_by_each_modes_share_of_maps() -> None:
     points = [
-        point(1, 19, HP, "a", 1.0),
-        point(1, 19, HP, "b", 1.0),  # HP slice: 100
-        point(1, 19, SND, "c", 0.0),
-        point(1, 19, SND, "d", 0.0),  # SND slice: 0
+        point(1, 19, HP, "kills_pm", 1.0),
+        point(1, 19, HP, "deaths_pm", 1.0),  # HP slice: 100
+        point(1, 19, SND, "snd_kpr", 0.0),
+        point(1, 19, SND, "snd_dpr", 0.0),  # SND slice: 0
     ]
     # HP played 3x as much as SND this season.
     slice_maps = {(1, 19, HP): 30, (1, 19, SND): 10}
@@ -66,7 +66,7 @@ def test_season_score_is_weighted_by_each_modes_share_of_maps() -> None:
 
 def test_a_mode_only_played_once_gets_a_floor_weight_of_one() -> None:
     """A slice missing from slice_maps must not zero out its own weight."""
-    points = [point(1, 19, HP, "a", 1.0), point(1, 19, HP, "b", 1.0)]
+    points = [point(1, 19, HP, "kills_pm", 1.0), point(1, 19, HP, "deaths_pm", 1.0)]
     out = breadth.build(points, {})
     assert out[0].score == pytest.approx(100.0)
 
@@ -75,13 +75,13 @@ def test_a_mode_only_played_once_gets_a_floor_weight_of_one() -> None:
 
 
 def test_sd_is_zero_when_the_baskets_metrics_fully_agree() -> None:
-    points = [point(1, 19, HP, "a", 0.5), point(1, 19, HP, "b", 0.5)]
+    points = [point(1, 19, HP, "kills_pm", 0.5), point(1, 19, HP, "deaths_pm", 0.5)]
     out = breadth.build(points, {(1, 19, HP): 10})
     assert out[0].sd == pytest.approx(0.0)
 
 
 def test_sd_is_positive_when_the_baskets_metrics_disagree() -> None:
-    points = [point(1, 19, HP, "a", 0.9), point(1, 19, HP, "b", 0.1)]
+    points = [point(1, 19, HP, "kills_pm", 0.9), point(1, 19, HP, "deaths_pm", 0.1)]
     out = breadth.build(points, {(1, 19, HP): 10})
     assert out[0].sd is not None
     assert out[0].sd > 0.0
@@ -89,10 +89,10 @@ def test_sd_is_positive_when_the_baskets_metrics_disagree() -> None:
 
 def test_more_disagreement_produces_a_wider_sd() -> None:
     tight = breadth.build(
-        [point(1, 19, HP, "a", 0.55), point(1, 19, HP, "b", 0.45)], {(1, 19, HP): 10}
+        [point(1, 19, HP, "kills_pm", 0.55), point(1, 19, HP, "deaths_pm", 0.45)], {(1, 19, HP): 10}
     )
     wide = breadth.build(
-        [point(1, 19, HP, "a", 0.95), point(1, 19, HP, "b", 0.05)], {(1, 19, HP): 10}
+        [point(1, 19, HP, "kills_pm", 0.95), point(1, 19, HP, "deaths_pm", 0.05)], {(1, 19, HP): 10}
     )
     assert tight[0].sd is not None
     assert wide[0].sd is not None
@@ -193,9 +193,9 @@ def test_the_pooled_slice_is_ignored_beside_a_qualifying_mode_slice() -> None:
     alone.
     """
     points = [
-        breadth.MetricPoint(1, 10, 2, "kd", 0.90),
+        breadth.MetricPoint(1, 10, 2, "kill_share", 0.90),
         breadth.MetricPoint(1, 10, 2, "kills_p10", 0.90),
-        breadth.MetricPoint(1, 10, None, "kd", 0.10),
+        breadth.MetricPoint(1, 10, None, "kill_share", 0.10),
         breadth.MetricPoint(1, 10, None, "kills_p10", 0.10),
     ]
     rows = breadth.build(points, {(1, 10, 2): 40, (1, 10, None): 40})
@@ -215,9 +215,9 @@ def test_the_pooled_slice_carries_a_season_no_mode_qualifies() -> None:
     weighs it honestly.
     """
     points = [
-        breadth.MetricPoint(1, 10, 2, "kd", 0.90),
-        breadth.MetricPoint(1, 10, 3, "kd", 0.90),
-        breadth.MetricPoint(1, 10, None, "kd", 0.80),
+        breadth.MetricPoint(1, 10, 2, "kill_share", 0.90),
+        breadth.MetricPoint(1, 10, 3, "kill_share", 0.90),
+        breadth.MetricPoint(1, 10, None, "kill_share", 0.80),
         breadth.MetricPoint(1, 10, None, "kills_p10", 0.80),
     ]
     rows = breadth.build(points, {(1, 10, 2): 20, (1, 10, 3): 20, (1, 10, None): 40})
@@ -245,12 +245,86 @@ def test_a_slice_with_no_map_count_is_floored_and_not_dropped() -> None:
     is the smallest a mode can weigh, and never the whole season.
     """
     points = [
-        breadth.MetricPoint(1, 10, 2, "kd", 0.90),
+        breadth.MetricPoint(1, 10, 2, "kill_share", 0.90),
         breadth.MetricPoint(1, 10, 2, "kills_p10", 0.90),
-        breadth.MetricPoint(1, 10, 3, "kd", 0.10),
+        breadth.MetricPoint(1, 10, 3, "kill_share", 0.10),
         breadth.MetricPoint(1, 10, 3, "kills_p10", 0.10),
     ]
     # Mode 2 is answered for with 99 maps; mode 3 is not answered for at all.
     rows = breadth.build(points, {(1, 10, 2): 99})
     assert len(rows) == 1
     assert rows[0].score > 88.0
+
+
+# ------------------------------------------------------------------ families
+
+
+def test_every_basket_metric_is_assigned_a_family() -> None:
+    """The one guard that keeps the authored table honest.
+
+    The families are authored metric by metric because the catalog's own
+    `category` is twelve mode-shaped labels and not them. A gold metric added
+    later with no family would otherwise reach `build` and raise there; this
+    fails first, and it fails before a run rather than during one.
+    """
+    basket = set(breadth.gold_basket())
+    assert basket - set(breadth.FAMILY) == set()
+    assert set(breadth.FAMILY) - basket == set()
+
+
+def test_every_family_has_at_least_one_metric() -> None:
+    assigned = set(breadth.FAMILY.values())
+    assert assigned == set(breadth.FAMILIES)
+
+
+def test_a_family_with_many_metrics_does_not_outweigh_one_with_few() -> None:
+    """The whole point of the change: a slice is worth what it measured.
+
+    Five slaying-volume metrics agreeing at 1.0 against one discipline metric
+    at 0.0 used to score 83.3, because volume happened to be measured five
+    ways. The families each carry half.
+    """
+    points = [
+        point(1, 19, HP, key, 1.0)
+        for key in ("kills_pm", "ekia_p10", "damage_pm", "kill_share", "snd_kpr")
+    ] + [point(1, 19, HP, "clean_kill_rate", 0.0)]
+    out = breadth.build(points, {(1, 19, HP): 10})
+    assert out[0].score == pytest.approx(50.0)
+
+
+def test_an_absent_family_is_not_a_zero() -> None:
+    """A family with no surviving metric leaves the mean rather than entering it.
+
+    Two families agreeing at 0.8 score 80 whether or not the other four exist.
+    Scoring the absent four as zero would read a 2013-2016 season, which
+    carries three families at most, as a bad season instead of a thin one.
+    """
+    points = [point(1, 19, HP, "kills_pm", 0.8), point(1, 19, HP, "clean_kill_rate", 0.8)]
+    out = breadth.build(points, {(1, 19, HP): 10})
+    assert out[0].score == pytest.approx(80.0)
+    assert out[0].families == ("volume", "discipline")
+
+
+def test_family_coverage_is_the_union_across_the_slices_that_scored() -> None:
+    points = [
+        point(1, 19, HP, "kills_pm", 0.5),
+        point(1, 19, HP, "hill_time_pm", 0.5),
+        point(1, 19, SND, "snd_kpr", 0.5),
+        point(1, 19, SND, "snd_fb_rate", 0.5),
+    ]
+    out = breadth.build(points, {(1, 19, HP): 10, (1, 19, SND): 10})
+    assert out[0].families == ("volume", "objective", "opening")
+
+
+def test_families_are_reported_in_a_fixed_order() -> None:
+    """Order comes from `FAMILIES`, never from what the slice happened to hold,
+    so two seasons with the same coverage compare equal as written."""
+    forward = breadth.build(
+        [point(1, 19, HP, "kills_pm", 0.5), point(1, 19, HP, "clean_kill_rate", 0.5)],
+        {(1, 19, HP): 10},
+    )
+    reverse = breadth.build(
+        [point(1, 19, HP, "clean_kill_rate", 0.5), point(1, 19, HP, "kills_pm", 0.5)],
+        {(1, 19, HP): 10},
+    )
+    assert forward[0].families == reverse[0].families
