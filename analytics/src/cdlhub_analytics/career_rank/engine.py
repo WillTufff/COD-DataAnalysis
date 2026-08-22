@@ -167,15 +167,26 @@ def _sd(values: list[float]) -> float:
     return round(math.sqrt(variance), 4)
 
 
+def _stack_distribution(award_rows: list[awards.AwardRow]) -> dict[str, int]:
+    """How far the tiers stack, over the whole archive. Published because the
+    stack is a declared rule rather than an artefact: three recognitions in one
+    season is more than one, and the reader is entitled to see how rare that is
+    before deciding whether the rule paid for itself.
+    """
+    counted: dict[str, int] = {}
+    for credit in awards.credits(award_rows):
+        key = f"{credit.points:g}"
+        counted[key] = counted.get(key, 0) + 1
+    return dict(sorted(counted.items(), key=lambda pair: float(pair[0])))
+
+
 def params() -> dict[str, Any]:
     return {
         "publish_from_year": PUBLISH_FROM_YEAR,
         "shrink_k": breadth.SHRINK_K,
         "basket_size": len(breadth.gold_basket()),
         "min_seasons_floor": evalpop.MIN_SEASONS,
-        "award_top_tier_points": awards.TOP_TIER_POINTS,
-        "award_second_tier_points": awards.SECOND_TIER_POINTS,
-        "award_rookie_points": awards.ROOKIE_POINTS,
+        **awards.params(),
         **resume.params(),
     }
 
@@ -184,7 +195,7 @@ def params() -> dict[str, Any]:
 class PlayerRow:
     player_id: int
     career: blend.CareerRank
-    seasons: dict[int, float]  # season_id -> season score, blend and award applied
+    seasons: dict[int, float]  # season_id -> season score, breadth and VALUE blended
     season_sd: dict[int, float]  # season_id -> the blend's carried width
     # The two halves of the season score, published beside it. `season_value`
     # is absent where the season was scored on breadth alone.
@@ -198,6 +209,9 @@ class PlayerRow:
     opponent_strength: dict[int, float]
     resume: dict[int, float]  # season_id -> finish credit, share of the year
     resume_credit: dict[int, float]  # the same, before the per-year division
+    accolade: dict[int, float]  # season_id -> award credit, share of the year
+    accolade_credit: dict[int, float]  # the same, before the per-year division
+    season_awards: dict[int, tuple[str, ...]]  # season_id -> the awards that season held
     # season_id -> the components that season carried. Its keys are every
     # season the career touches, which `seasons` alone is not: a season with a
     # finish and no box score appears here and not there.
@@ -222,15 +236,14 @@ def build(
     shrink_fit = breadth.estimate_shrink_k(raw_breadth)
 
     # The VALUE backbone, blended onto the shrunk breadth at the declared
-    # weight. Order matters and is declared: the shrinkage characterises the
-    # breadth score's own sampling noise, the award is credit on the finished
-    # performance, and the blend sits between them.
+    # weight. This is the whole of the season score: award credit used to be
+    # added on top of it, and is now ACCOLADE, its own component with its own
+    # weight, fixed at the career blend rather than hidden inside a
+    # performance number.
     season_value = roster_strength.load_season_value(conn)
     blended = value_backbone.blend(season_breadth, season_value)
     blended_by_key = {(row.player_id, row.season_id): row for row in blended}
     families_by_key = {(row.player_id, row.season_id): row.families for row in raw_breadth}
-
-    award_credits = {(c.player_id, c.season_id): c for c in awards.load_award_credits(conn)}
 
     season_score_by_key: dict[tuple[int, int], float] = {}
     season_sd_by_key: dict[tuple[int, int], float] = {}
@@ -246,9 +259,7 @@ def build(
             withheld += 1
             continue
         row = blended_by_key[key]
-        credit = award_credits.get(key)
-        final = awards.apply(row.score, credit)
-        season_score_by_key[key] = final
+        season_score_by_key[key] = row.score
         breadth_by_key[key] = row.breadth
         if row.value_scaled is not None:
             value_by_key[key] = row.value_scaled
@@ -292,6 +303,26 @@ def build(
         resume_credit_by_player.setdefault(entry.player_id, {})[entry.season_id] = entry.credit
     rings_covered_from = resume.coverage_from(conn)
 
+    # Award credit is normalised against its own year over the whole archive
+    # and then scoped to this run, on the same rule the finish credit keeps: a
+    # 2016 first team is worth a share of 2016 whoever else the run happens to
+    # publish.
+    accolade_by_player: dict[int, dict[int, float]] = {}
+    accolade_credit_by_player: dict[int, dict[int, float]] = {}
+    awards_by_player: dict[int, dict[int, tuple[str, ...]]] = {}
+    award_rows = awards.load_award_rows(conn)
+    unresolved_awards = awards.load_unresolved(conn)
+    accolade_withheld = 0
+    for honour in awards.score(award_rows):
+        if restrict_to is not None and honour.player_id not in restrict_to:
+            continue
+        if seasons[honour.season_id].year < PUBLISH_FROM_YEAR:
+            accolade_withheld += 1
+            continue
+        accolade_by_player.setdefault(honour.player_id, {})[honour.season_id] = honour.accolade
+        accolade_credit_by_player.setdefault(honour.player_id, {})[honour.season_id] = honour.credit
+        awards_by_player.setdefault(honour.player_id, {})[honour.season_id] = honour.awards
+
     seasons_by_player: dict[int, dict[int, float]] = {}
     for (player_id, season_id), score in season_score_by_key.items():
         seasons_by_player.setdefault(player_id, {})[season_id] = score
@@ -313,15 +344,20 @@ def build(
     # reaches the blend as a RESUME-only entry; the blend renormalizes over
     # what is there and never scores the absent half as zero.
     scored: list[blend.SeasonScore] = []
-    for player_id in sorted(set(seasons_by_player) | set(resume_by_player)):
+    for player_id in sorted(
+        set(seasons_by_player) | set(resume_by_player) | set(accolade_by_player)
+    ):
         performance = seasons_by_player.get(player_id, {})
         finishes = resume_by_player.get(player_id, {})
-        for season_id in sorted(set(performance) | set(finishes)):
+        honours = accolade_by_player.get(player_id, {})
+        for season_id in sorted(set(performance) | set(finishes) | set(honours)):
             components: dict[str, float] = {}
             if season_id in performance:
                 components[blend.PERFORMANCE] = performance[season_id]
             if season_id in finishes:
                 components[blend.RESUME] = finishes[season_id]
+            if season_id in honours:
+                components[blend.ACCOLADE] = honours[season_id]
             scored.append(
                 blend.SeasonScore(
                     player_id=player_id,
@@ -350,6 +386,9 @@ def build(
                 opponent_strength=opp_by_player.get(career_row.player_id, {}),
                 resume=resume_by_player.get(career_row.player_id, {}),
                 resume_credit=resume_credit_by_player.get(career_row.player_id, {}),
+                accolade=accolade_by_player.get(career_row.player_id, {}),
+                accolade_credit=accolade_credit_by_player.get(career_row.player_id, {}),
+                season_awards=awards_by_player.get(career_row.player_id, {}),
                 components={
                     entry.season_id: entry.present
                     for entry in scored
@@ -397,12 +436,12 @@ def build(
             "refit": shrink_fit,
         },
         "era_season_scores": _era_season_scores(raw_breadth, season_breadth, seasons),
-        # The gate's own number. Re-pinned at +9.63 on the board this phase
+        # The gate's own number. Re-pinned at +8.7335 on the board Phase D
         # opened against; the +13.4 the anatomy document recorded predates
         # Phase A and Phase B and is kept here as the historical figure.
         "era_gap": {
             **_era_gap(season_score_by_key, seasons),
-            "previous_published": 9.63,
+            "previous_published": 8.7335,
             "anatomy_figure": 13.4,
         },
         # An outside referent nothing in this engine was fitted to. It reaches
@@ -422,6 +461,25 @@ def build(
             "n_without_performance": sum(
                 1 for row in out for season_id in row.resume if season_id not in row.seasons
             ),
+        },
+        # The accolade component. Like the finish credit it does not enter
+        # `career` — the fixed-weight blend is R7 — so this is the whole of
+        # what the run says about it.
+        "accolade": {
+            **awards.params(),
+            "n_player_seasons": sum(len(row.accolade) for row in out),
+            "seasons_withheld_below_floor": accolade_withheld,
+            "thin_years": sorted(awards.thin_years(award_rows)),
+            # Award rows the record cannot attach to a player. They are never a
+            # loss to anybody and never reduce a season.
+            "unresolved_rows": len(unresolved_awards),
+            # Seasons carrying an award and no breadth row. They used to be
+            # scored as a bump on a score that did not exist.
+            "n_without_performance": sum(
+                1 for row in out for season_id in row.accolade if season_id not in row.seasons
+            ),
+            "stack_distribution": _stack_distribution(award_rows),
+            "density": awards.density(award_rows, unresolved_awards),
         },
         "career": blend.artifact([r.career for r in out], n_unrankable=unrankable),
         # Every scored player, not just the top ten: the metric-diff harness

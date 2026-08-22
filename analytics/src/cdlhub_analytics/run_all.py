@@ -1328,8 +1328,8 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         # A second, independent career axis: peak/best-three/total over the
-        # gold-tier metric basket (plus award credit) instead of over VALUE or
-        # SKILL. Full archive, not the frozen evaluation population — the
+        # gold-tier metric basket instead of over VALUE or SKILL. Full
+        # archive, not the frozen evaluation population — the
         # frozen set exists to keep the formula honest during development
         # against the pre-registration, not to gate what the site
         # publishes.
@@ -1344,8 +1344,10 @@ def main(argv: list[str] | None = None) -> int:
                 cur.executemany(
                     "INSERT INTO player_season_rank (run_id, player_id, season_id, score, "
                     "sd, net_of_teammates, opponent_strength, resume, resume_credit, "
-                    "components_present, families_present, breadth, value_scaled) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "components_present, families_present, breadth, value_scaled, "
+                    "accolade, accolade_credit, awards_present) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                    "%s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1364,6 +1366,9 @@ def main(argv: list[str] | None = None) -> int:
                             list(row.season_families.get(season_id, ())) or None,
                             row.season_breadth.get(season_id),
                             row.season_value.get(season_id),
+                            row.accolade.get(season_id),
+                            row.accolade_credit.get(season_id),
+                            list(row.season_awards.get(season_id, ())) or None,
                         )
                         for row in cr_rows
                         for season_id, present in row.components.items()
@@ -1407,6 +1412,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  resume on {cr_resume['n_player_seasons']} player-seasons, "
             f"chips and rings complete from {cr_resume['rings_covered_from']}"
+        )
+        cr_accolade = cr_payload["accolade"]
+        thin = cr_accolade["thin_years"]
+        silenced = ", ".join(str(year) for year in thin) if thin else "none"
+        print(
+            f"  accolade on {cr_accolade['n_player_seasons']} player-seasons, "
+            f"{cr_accolade['unresolved_rows']} award rows unresolved, "
+            f"thin years silenced: {silenced}"
         )
 
         # The same seasons on an age axis, and the selection problem that makes

@@ -1,5 +1,5 @@
-"""Career blend: peak / best-three / total over the award-weighted breadth
-score, per the pre-registration.
+"""Career blend: peak / best-three / total over the season score, per the
+pre-registration.
 
 CWL years count at full per-year weight, same sequence as CDL — a deliberate
 departure from `career.py`'s plus-minus era pooling, justified in the
@@ -23,17 +23,18 @@ from .evalpop import MIN_SEASONS
 
 PERFORMANCE = "PERFORMANCE"
 RESUME = "RESUME"
+ACCOLADE = "ACCOLADE"
 
 # What a component is worth inside a season score, and the only place that is
-# declared. PERFORMANCE is the whole of it here: RESUME is built per season and
-# stored on the row, and it does not enter the ranking until the career blend
-# fixes its weight against the other components. A component with no weight is
-# recorded and never scored.
+# declared. PERFORMANCE is the whole of it here: RESUME and ACCOLADE are built
+# per season and stored on the row, and neither enters the ranking until the
+# career blend fixes its weight against the other components. A component with
+# no weight is recorded and never scored.
 #
 # Each component is held on its own scale, because the scales differ — breadth
-# is 0..100 and resume is a share of the year, 0..1. Nothing reads a second
-# component until the blend puts them on a common scale first, so the mismatch
-# cannot reach a number from here.
+# is 0..100 while resume and accolade are shares of the year, 0..1. Nothing
+# reads a second component until the blend puts them on a common scale first,
+# so the mismatch cannot reach a number from here.
 SEASON_COMPONENT_WEIGHTS: Mapping[str, float] = {PERFORMANCE: 1.0}
 
 
@@ -61,10 +62,11 @@ class SeasonScore:
     player_id: int
     season_id: int
     # Component name -> value, each on its own scale. PERFORMANCE is the
-    # breadth score with award credit applied, 0..100; RESUME is the season's
-    # share of the year's winnable finish credit, 0..1.
+    # breadth score blended with VALUE, 0..100; RESUME is the season's share of
+    # the year's winnable finish credit and ACCOLADE its share of the year's
+    # awarded credit, both 0..1.
     components: Mapping[str, float] = field(default_factory=dict)
-    sd: float | None = None  # from breadth.SeasonBreadth.sd; award credit adds no variance
+    sd: float | None = None  # from breadth.SeasonBreadth.sd
 
     @property
     def present(self) -> tuple[str, ...]:
