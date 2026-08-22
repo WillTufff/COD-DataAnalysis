@@ -182,3 +182,75 @@ def test_the_refit_recovers_a_planted_sampling_variance() -> None:
     fit = breadth.estimate_shrink_k(rows)
     assert fit["fitted"] == 1
     assert planted * 0.6 < fit["k"] < planted * 1.6
+
+
+def test_the_pooled_slice_is_ignored_beside_a_qualifying_mode_slice() -> None:
+    """Beside a mode row the pooled row is the same maps counted twice.
+
+    It used to enter as a seventh slice at the `max(1, 0)` floor, weighing one
+    map against modes weighing hundreds. Here the pooled row would drag a
+    strong season down if it counted; the score has to read the mode slice
+    alone.
+    """
+    points = [
+        breadth.MetricPoint(1, 10, 2, "kd", 0.90),
+        breadth.MetricPoint(1, 10, 2, "kills_p10", 0.90),
+        breadth.MetricPoint(1, 10, None, "kd", 0.10),
+        breadth.MetricPoint(1, 10, None, "kills_p10", 0.10),
+    ]
+    rows = breadth.build(points, {(1, 10, 2): 40, (1, 10, None): 40})
+    assert len(rows) == 1
+    assert rows[0].n_slices == 1
+    assert rows[0].score == pytest.approx(90.0)
+    assert rows[0].maps == 40
+
+
+def test_the_pooled_slice_carries_a_season_no_mode_qualifies() -> None:
+    """A season spread thin across modes is measured, not missing.
+
+    Each mode falls below the surviving-stat floor while the pooled row clears
+    it, which is coverage and not performance. Dropping the pooled row here
+    removed the season from the board for having been spread out; it scores on
+    the pooled reading instead, at the season's own map count so the shrinkage
+    weighs it honestly.
+    """
+    points = [
+        breadth.MetricPoint(1, 10, 2, "kd", 0.90),
+        breadth.MetricPoint(1, 10, 3, "kd", 0.90),
+        breadth.MetricPoint(1, 10, None, "kd", 0.80),
+        breadth.MetricPoint(1, 10, None, "kills_p10", 0.80),
+    ]
+    rows = breadth.build(points, {(1, 10, 2): 20, (1, 10, 3): 20, (1, 10, None): 40})
+    assert len(rows) == 1
+    assert rows[0].n_slices == 1
+    assert rows[0].score == pytest.approx(80.0)
+    assert rows[0].maps == 40
+
+
+def test_the_maps_query_answers_for_the_pooled_slice() -> None:
+    """The pooled key needs its own grouping set.
+
+    `games.mode_id` is never null, so grouping by it alone gave the pooled key
+    no count and sent it to the `max(1, ...)` floor — a weight of one map, and
+    a shrinkage that pulls the season almost entirely onto its cohort mean.
+    """
+    assert "GROUPING SETS" in breadth._MAPS_SQL
+
+
+def test_a_slice_with_no_map_count_is_floored_and_not_dropped() -> None:
+    """The floor is a guard on a real mode, not a weight of its own.
+
+    A mode the map join cannot answer for still has to score something, or one
+    unanswerable slice takes the whole season to zero. It weighs one map, which
+    is the smallest a mode can weigh, and never the whole season.
+    """
+    points = [
+        breadth.MetricPoint(1, 10, 2, "kd", 0.90),
+        breadth.MetricPoint(1, 10, 2, "kills_p10", 0.90),
+        breadth.MetricPoint(1, 10, 3, "kd", 0.10),
+        breadth.MetricPoint(1, 10, 3, "kills_p10", 0.10),
+    ]
+    # Mode 2 is answered for with 99 maps; mode 3 is not answered for at all.
+    rows = breadth.build(points, {(1, 10, 2): 99})
+    assert len(rows) == 1
+    assert rows[0].score > 88.0

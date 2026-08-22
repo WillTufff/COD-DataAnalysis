@@ -3281,7 +3281,12 @@ their season score.
 Career value sums a rating fitted against map outcome. Career rank sums a different
 quantity, a **breadth score**: the coverage-weighted mean percentile across every
 gold-tier stat a player's own page shows that season, weighted by each mode's share of
-that season's maps. The basket is exactly `buildMetricCards`'s gold-tier set, the same
+that season's maps. The metric table also carries a pooled row per player-season,
+aggregated over the same maps as the mode rows beside it. Beside a mode row it is the
+season counted twice and is ignored; where no single mode clears the surviving-stat
+floor it is the only reading of the season there is, and the season scores on it at its
+own map count. A season spread thinly across four modes can clear that floor pooled and
+clear it in none of the four, and such a season is thin coverage rather than weak play. The basket is exactly `buildMetricCards`'s gold-tier set, the same
 metrics a reader sees on the player page, minus the kill-feed categories (IW/WWII only)
 and the round-card keys. The per-map twin of any per-10 pair is dropped so a rate and
 its timed form never double count the same signal. A season needs at least two surviving
@@ -3308,24 +3313,40 @@ season. A 40-map season is a noisier reading of a player than a 124-map one, so 
 alone it reaches further from the middle in both directions.
 
 The constant comes from a measurement. Season scores centred inside their own season
-have a variance that falls as one over the map count, so binning 1,196 season deviations
+have a variance that falls as one over the map count, so binning the season deviations
 by map count and regressing each bin's variance on the reciprocal of its mean map count
-splits the spread into a true part and a sampling part. The fit read 144.11 and 2,231.4,
-putting their ratio at 15.48 maps, at a weighted R-squared of 0.837. The same estimator
-against the surviving stat count reads 0.798, which is why the basis is maps. The number
-is frozen in the module and refitted beside every run, so a drift away from it shows on
-this page.
+splits the spread into a true part and a sampling part. The fit that set the constant
+read 144.11 and 2,231.4, putting their ratio at 15.48 maps, at a weighted R-squared of
+0.837, over 1,196 deviations. The same estimator against the surviving stat count reads
+0.798, which is why the basis is maps. The number is frozen in the module and refitted
+beside every run, so a drift away from it shows on this page.
+
+**That fit was reading 1,196 of 1,458 seasons, and the missing 262 were not random.** A
+season scored only on the pooled all-modes row carried no map count at all, because the
+map query grouped by mode and the pooled row is not a mode. A season with no maps cannot
+be binned by map count, so it fell out of the regression silently — and the seasons it
+dropped were exactly the thin ones the regression is trying to characterise. With the
+pooled row answered for by its own grouping set, the refit runs on all 1,458 and reads
+141.22 and 2,813.5, a ratio of **19.92 maps** at a weighted R-squared of **0.989**, up
+from 0.837.
+
+The applied constant stays 15.48. It is frozen by the pre-registration and moving it is
+a change to the formula, not a repair to it, so the gap is published here rather than
+closed quietly: seasons are currently shrunk slightly less than the best current
+estimate of the sampling noise would justify.
 
 What it does to the width of a season score:
 
 | Era | Seasons | Median stats | Median maps | SD before | SD after |
 |---|---|---|---|---|---|
-| 2013-2016 | 504 | 18 | 40 | 18.41 | 10.60 |
-| CWL | 497 | 35 | 35 | 15.17 | 9.68 |
-| CDL | 457 | 31 | 124 | 14.86 | 11.10 |
+| 2013-2016 | 504 | 14 | 40 | 18.53 | 11.78 |
+| CWL | 497 | 26 | 35 | 15.21 | 10.44 |
+| CDL | 457 | 25 | 124 | 14.82 | 11.41 |
 
-The spread across eras falls from 3.55 to 1.42 and the order flips, leaving the CDL the
-widest era, which is what 124 maps against 35 and 40 should produce.
+The spread across eras falls from 3.71 to 1.34, and the three eras end up within 1.34
+points of each other where they began 3.71 apart. The CDL is no longer the widest after
+the correction; 2013-2016 is, by 0.37 points, which is what 40 maps against 124 should
+produce once the shrinkage has done its work.
 
 **The era gate does not rest on that correction.** This was measured. Admitting the era and applying the shrinkage were run as four separate
 configurations. With the 2017 floor the era-balance test fails either way, at a worst
@@ -3335,9 +3356,9 @@ without the shrinkage: 7 for 2013-2016, 4 for the CDL, 14 for the CWL. The cover
 change carries the gate on its own.
 
 **One difference the shrinkage does not touch.** A 2013-2016 season is a mean of about
-18 percentiles where a league season is a mean of 31 to 35, because the kill-feed and
+14 percentiles where a league season is a mean of 25 to 26, because the kill-feed and
 round-card stats do not exist for those years. That is a difference in what was
-recorded. No weighting by maps makes 18 stats say what 35 say.
+recorded. No weighting by maps makes 14 stats say what 26 say.
 
 Peak, best three consecutive and total are the same three columns career value
 publishes, computed over the breadth score instead.

@@ -120,6 +120,10 @@ class SliceMaps:
     maps: int
 
 
+# Every slice the metric layer holds, pooled row included. `player_metric_season`
+# carries one row per mode plus a pooled row on `mode_id IS NULL`, aggregated
+# over the same maps (`metrics._fold`), and which of the two a season may use is
+# decided in `build` rather than here.
 _METRIC_SQL = """
 SELECT player_id, season_id, mode_id, metric, pctl
 FROM player_metric_season
@@ -128,13 +132,23 @@ WHERE run_id = (SELECT max(run_id) FROM player_metric_season)
   AND qualified
 """
 
+# Maps per slice, and the season's own total beside them. The grouping set on
+# (player, season) alone is what answers for the pooled slice: `games.mode_id`
+# is never null, so grouping by it alone left the pooled key with no count at
+# all, and the pooled slice fell to the `max(1, ...)` floor and weighed one map
+# against modes weighing hundreds. The shrinkage reads this same count, so a
+# missing one is not only a weight but a season pulled almost entirely onto its
+# cohort mean.
 _MAPS_SQL = """
 SELECT gps.player_id, ev.season_id, g.mode_id, count(*) AS maps
 FROM game_player_stats gps
 JOIN games g   ON g.id = gps.game_id
 JOIN series s  ON s.id = g.series_id
 JOIN events ev ON ev.id = s.event_id
-GROUP BY gps.player_id, ev.season_id, g.mode_id
+GROUP BY GROUPING SETS (
+    (gps.player_id, ev.season_id, g.mode_id),
+    (gps.player_id, ev.season_id)
+)
 """
 
 
@@ -316,7 +330,20 @@ def build(
         by_player_season[(player_id, season_id)].append((mode_id, score, n_stats, se))
 
     out: list[SeasonBreadth] = []
-    for (player_id, season_id), slices in sorted(by_player_season.items()):
+    for (player_id, season_id), all_slices in sorted(by_player_season.items()):
+        # Mode slices where there are any, the pooled slice only where there
+        # are none. The pooled row aggregates the same maps as the mode rows,
+        # so beside them it is the season counted twice; with no mode row
+        # qualifying it is the only reading of the season there is. A thin
+        # season spread across four modes can clear the coverage floor pooled
+        # and clear it in none of the four, and refusing it would drop the
+        # season for having been spread out rather than for being unmeasured.
+        by_mode = [entry for entry in all_slices if entry[0] is not None]
+        slices = by_mode or [entry for entry in all_slices if entry[0] is None]
+        # `max(1, ...)` guards a slice whose maps the join cannot answer for, so
+        # one unanswerable slice cannot take the whole season's weight to zero.
+        # The pooled slice is answered for by its own grouping set and no longer
+        # reaches this floor.
         weights = [
             max(1, slice_maps.get((player_id, season_id, mode_id), 0))
             for mode_id, _, _, _ in slices

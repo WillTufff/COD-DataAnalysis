@@ -292,13 +292,24 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # the class of failure `retained_three_way` was added for. `sd_before` is
     # the season score as `breadth.build` returns it and `sd_after` is the same
     # score shrunk, both within one era.
+    #
+    # Re-pinned 2026-08-22. The pooled all-modes row used to be scored as a
+    # seventh slice beside the six modes, so every season's stats were counted
+    # once per mode and once more pooled. It now scores a season only where no
+    # mode slice qualifies. The season counts are untouched — 504, 497 and 457,
+    # the same three numbers — because no season left the board; what moved is
+    # the width within each era, and the median stat count behind it, which
+    # fell from 18, 35 and 31 to 14, 26 and 25 as each metric stopped being
+    # counted twice. The spread the table exists to show reads 3.71 before and
+    # 1.34 after, against 3.55 and 1.42, so the correction does slightly more
+    # work than the published version claimed and the argument is unchanged.
     "career_rank_era_spread": {
-        "on": "2026-08-21",
+        "on": "2026-08-22",
         "shrink_k": 15.4838,
         "eras": {
-            "2013-2016": {"seasons": 504, "sd_before": 18.4127, "sd_after": 10.5987},
-            "CWL": {"seasons": 497, "sd_before": 15.1735, "sd_after": 9.6784},
-            "CDL": {"seasons": 457, "sd_before": 14.8609, "sd_after": 11.1006},
+            "2013-2016": {"seasons": 504, "sd_before": 18.5252, "sd_after": 11.7792},
+            "CWL": {"seasons": 497, "sd_before": 15.2136, "sd_after": 10.4424},
+            "CDL": {"seasons": 457, "sd_before": 14.8168, "sd_after": 11.4091},
         },
     },
     "persistence_pairs": 566,
