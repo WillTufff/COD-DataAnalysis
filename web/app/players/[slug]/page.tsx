@@ -1336,7 +1336,9 @@ function CareerRankSection({
     >
       <h2 className="lower-third">
         Career rank
-        <span className="lt-note">the gold-tier metric basket, blended by season</span>
+        <span className="lt-note">
+          the gold-tier metric basket, blended with each season&rsquo;s value
+        </span>
       </h2>
       <EraGap years={gap}>{gapReason}</EraGap>
       <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
@@ -1386,6 +1388,8 @@ function CareerRankSection({
             <tr>
               <th className="py-1 pr-4 font-normal">Season</th>
               <th className="py-1 pr-4 font-normal">Score</th>
+              <th className="py-1 pr-4 font-normal">Breadth · value</th>
+              <th className="py-1 pr-4 font-normal">Families</th>
               <th className="py-1 pr-4 font-normal">Net of teammates</th>
               <th className="py-1 font-normal">Opponent strength</th>
             </tr>
@@ -1414,6 +1418,40 @@ function CareerRankSection({
                   )}
                 </td>
                 <td className="py-1 pr-4">
+                  {s.breadth === null ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    <>
+                      {s.breadth.toFixed(1)}
+                      {" · "}
+                      {s.valueScaled === null ? (
+                        <span
+                          className="text-ink-muted"
+                          title="no season rating to blend; scored on the metric basket alone"
+                        >
+                          basket only
+                        </span>
+                      ) : (
+                        s.valueScaled.toFixed(1)
+                      )}
+                    </>
+                  )}
+                </td>
+                <td className="py-1 pr-4">
+                  {s.familiesPresent.length === 0 ? (
+                    <span className="text-ink-muted">—</span>
+                  ) : (
+                    <span
+                      title={s.familiesPresent.join(", ")}
+                      className={
+                        s.familiesPresent.length < 6 ? "text-ink-muted" : undefined
+                      }
+                    >
+                      {s.familiesPresent.length} of 6
+                    </span>
+                  )}
+                </td>
+                <td className="py-1 pr-4">
                   {s.netOfTeammates === null ? (
                     <span className="text-ink-muted">—</span>
                   ) : (
@@ -1432,11 +1470,23 @@ function CareerRankSection({
           </tbody>
         </table>
         <p className="mt-3 text-xs leading-relaxed text-ink-muted">
-          The score blends every gold-tier stat the player page shows,
-          weighted by how much each mode was played that season, plus award
-          credit. Its SD reflects how much that basket disagreed with itself,
-          not a measurement error on any one stat. Net of teammates and
-          opponent strength are context, not adjustments to the score.
+          The score is three parts breadth to one part season rating. Breadth
+          reads every gold-tier stat the player page shows, grouped into six
+          families — slaying volume, slaying efficiency, objective, discipline,
+          opening duel and streaks — so a season is worth what it measured
+          rather than how many stats happen to measure the same thing. The
+          season rating is put on the breadth scale inside its own season
+          before it is blended, and a season with no rating is scored on the
+          basket alone. Award credit is added on top.
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+          The family count says what the archive reached, not how well the
+          player played. A 2013-2016 season reaches three families at most and
+          a CDL season four; only the 2017-2019 seasons reach five or six, and
+          only some of them. Its SD reflects how much the
+          basket disagreed with itself, not a measurement error on any one
+          stat. Net of teammates and opponent strength are context, not
+          adjustments to the score.
         </p>
       </div>
     </section>

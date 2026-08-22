@@ -1344,8 +1344,8 @@ def main(argv: list[str] | None = None) -> int:
                 cur.executemany(
                     "INSERT INTO player_season_rank (run_id, player_id, season_id, score, "
                     "sd, net_of_teammates, opponent_strength, resume, resume_credit, "
-                    "components_present) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "components_present, families_present, breadth, value_scaled) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1358,6 +1358,12 @@ def main(argv: list[str] | None = None) -> int:
                             row.resume.get(season_id),
                             row.resume_credit.get(season_id),
                             list(present),
+                            # A season with no performance half has no families
+                            # and no breadth to publish; null there is the
+                            # archive not reaching it, not a zero.
+                            list(row.season_families.get(season_id, ())) or None,
+                            row.season_breadth.get(season_id),
+                            row.season_value.get(season_id),
                         )
                         for row in cr_rows
                         for season_id, present in row.components.items()

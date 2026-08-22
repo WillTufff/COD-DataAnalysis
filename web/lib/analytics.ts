@@ -3700,6 +3700,13 @@ export type PlayerCareerRankSeason = {
   score: number | null;
   sd: number | null;
   componentsPresent: string[];
+  // The metric families the season was scored on. No era carries all six, so
+  // a short list is thin coverage rather than a bad season.
+  familiesPresent: string[];
+  // The two halves of the score, published beside it. `valueScaled` is null
+  // where the season was scored on breadth alone.
+  breadth: number | null;
+  valueScaled: number | null;
   netOfTeammates: number | null;
   opponentStrength: number | null;
 };
@@ -3724,6 +3731,8 @@ export async function getPlayerCareerRank(
     db.execute(sql`
       SELECT r.season_id, s.year, s.league, r.score, r.sd,
              coalesce(r.components_present, '{}') AS components_present,
+             coalesce(r.families_present, '{}') AS families_present,
+             r.breadth, r.value_scaled,
              r.net_of_teammates, r.opponent_strength
       FROM player_season_rank r
       JOIN seasons s ON s.id = r.season_id
@@ -3775,6 +3784,9 @@ export async function getPlayerCareerRank(
         score: number | null;
         sd: number | null;
         components_present: string[] | null;
+        families_present: string[] | null;
+        breadth: number | null;
+        value_scaled: number | null;
         net_of_teammates: number | null;
         opponent_strength: number | null;
       }[]
@@ -3785,6 +3797,9 @@ export async function getPlayerCareerRank(
       score: r.score === null ? null : Number(r.score),
       sd: r.sd === null ? null : Number(r.sd),
       componentsPresent: r.components_present ?? [],
+      familiesPresent: r.families_present ?? [],
+      breadth: r.breadth === null ? null : Number(r.breadth),
+      valueScaled: r.value_scaled === null ? null : Number(r.value_scaled),
       netOfTeammates:
         r.net_of_teammates === null ? null : Number(r.net_of_teammates),
       opponentStrength:

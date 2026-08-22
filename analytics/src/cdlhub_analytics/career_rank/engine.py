@@ -14,7 +14,18 @@ import psycopg
 
 from .. import style, writeback
 from ..ratings.preflight import load_seasons
-from . import PUBLISH_FROM_YEAR, anchors, awards, blend, breadth, evalpop, resume, roster_strength
+from . import (
+    PUBLISH_FROM_YEAR,
+    anchors,
+    awards,
+    blend,
+    breadth,
+    convergent,
+    evalpop,
+    resume,
+    roster_strength,
+    value_backbone,
+)
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
@@ -70,6 +81,74 @@ def _era_season_scores(
     return out
 
 
+def _family_coverage(
+    rows: list[breadth.SeasonBreadth], seasons: dict[int, Any]
+) -> list[dict[str, Any]]:
+    """Per era: how many of the six families a season was actually built from.
+
+    Published because the source plan's claim is wrong and the measurement says
+    so. Family weighting does not make a 14-metric 2013 season comparable to a
+    26-metric league one: coverage is era-partitioned, not merely thin, and no
+    era carries all six. Renormalizing over the live families still compares a
+    score built from three families against one built from five. What the
+    weighting is worth is the within-era repair — a season stops being scored
+    on how many metrics happen to point at its slaying — and this table is what
+    keeps the larger claim from being read into it.
+    """
+    grouped: dict[str, list[breadth.SeasonBreadth]] = {}
+    for row in rows:
+        season = seasons.get(row.season_id)
+        if season is None:
+            continue
+        grouped.setdefault(season.era_key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for era, cohort in sorted(grouped.items()):
+        entry: dict[str, Any] = {
+            "era": era,
+            "seasons": len(cohort),
+            "median_families": _median([float(len(row.families)) for row in cohort]),
+        }
+        for family in breadth.FAMILIES:
+            present = sum(1 for row in cohort if family in row.families)
+            entry[family] = round(100.0 * present / len(cohort), 1)
+        out.append(entry)
+    return out
+
+
+def _era_gap(
+    season_scores: dict[tuple[int, int], float], seasons: dict[int, Any]
+) -> dict[str, Any]:
+    """The within-player CWL-minus-CDL gap, the figure Phase C is gated on.
+
+    Read within player and never pooled. Pooled, the marginals hide it
+    completely: the CWL cohorts were open-bracket fields and a percentile
+    earned against them is not the same percentile earned inside a closed
+    twelve-team league, so the same player scores higher in a CWL season for a
+    reason that is not the player.
+    """
+    by_player: dict[int, dict[str, list[float]]] = {}
+    for (player_id, season_id), score in season_scores.items():
+        season = seasons.get(season_id)
+        if season is None:
+            continue
+        by_player.setdefault(player_id, {}).setdefault(season.era_key, []).append(score)
+
+    gaps: list[float] = []
+    for eras in by_player.values():
+        if "CWL" in eras and "CDL" in eras:
+            gaps.append(sum(eras["CWL"]) / len(eras["CWL"]) - sum(eras["CDL"]) / len(eras["CDL"]))
+    if not gaps:
+        return {"n_players": 0}
+    return {
+        "n_players": len(gaps),
+        "mean": round(sum(gaps) / len(gaps), 4),
+        "median": _median(gaps),
+        "sd": _sd(gaps),
+        "share_higher_in_cwl": round(sum(1 for g in gaps if g > 0) / len(gaps), 4),
+    }
+
+
 def _median(values: list[float]) -> float:
     ordered = sorted(values)
     if not ordered:
@@ -105,8 +184,16 @@ def params() -> dict[str, Any]:
 class PlayerRow:
     player_id: int
     career: blend.CareerRank
-    seasons: dict[int, float]  # season_id -> breadth score, award applied
-    season_sd: dict[int, float]  # season_id -> breadth.SeasonBreadth.sd
+    seasons: dict[int, float]  # season_id -> season score, blend and award applied
+    season_sd: dict[int, float]  # season_id -> the blend's carried width
+    # The two halves of the season score, published beside it. `season_value`
+    # is absent where the season was scored on breadth alone.
+    season_breadth: dict[int, float]
+    season_value: dict[int, float]
+    # The metric families that season was built from. No era carries all six,
+    # so this is what stops the reader assuming a 2014 score and a 2023 one
+    # were built the same way.
+    season_families: dict[int, tuple[str, ...]]
     net_of_teammates: dict[int, float]
     opponent_strength: dict[int, float]
     resume: dict[int, float]  # season_id -> finish credit, share of the year
@@ -134,24 +221,41 @@ def build(
     season_breadth = breadth.shrink(raw_breadth)
     shrink_fit = breadth.estimate_shrink_k(raw_breadth)
 
+    # The VALUE backbone, blended onto the shrunk breadth at the declared
+    # weight. Order matters and is declared: the shrinkage characterises the
+    # breadth score's own sampling noise, the award is credit on the finished
+    # performance, and the blend sits between them.
+    season_value = roster_strength.load_season_value(conn)
+    blended = value_backbone.blend(season_breadth, season_value)
+    blended_by_key = {(row.player_id, row.season_id): row for row in blended}
+    families_by_key = {(row.player_id, row.season_id): row.families for row in raw_breadth}
+
     award_credits = {(c.player_id, c.season_id): c for c in awards.load_award_credits(conn)}
 
     season_score_by_key: dict[tuple[int, int], float] = {}
     season_sd_by_key: dict[tuple[int, int], float] = {}
+    breadth_by_key: dict[tuple[int, int], float] = {}
+    value_by_key: dict[tuple[int, int], float] = {}
+    families_by_published_key: dict[tuple[int, int], tuple[str, ...]] = {}
     withheld = 0
     for sb in season_breadth:
+        key = (sb.player_id, sb.season_id)
         if restrict_to is not None and sb.player_id not in restrict_to:
             continue
         if seasons[sb.season_id].year < PUBLISH_FROM_YEAR:
             withheld += 1
             continue
-        credit = award_credits.get((sb.player_id, sb.season_id))
-        final = awards.apply(sb.score, credit)
-        season_score_by_key[(sb.player_id, sb.season_id)] = final
-        if sb.sd is not None:
-            season_sd_by_key[(sb.player_id, sb.season_id)] = sb.sd
+        row = blended_by_key[key]
+        credit = award_credits.get(key)
+        final = awards.apply(row.score, credit)
+        season_score_by_key[key] = final
+        breadth_by_key[key] = row.breadth
+        if row.value_scaled is not None:
+            value_by_key[key] = row.value_scaled
+        families_by_published_key[key] = families_by_key.get(key, ())
+        if row.sd is not None:
+            season_sd_by_key[key] = row.sd
 
-    season_value = roster_strength.load_season_value(conn)
     team_season_value = roster_strength.build_team_season_value(conn, season_value)
     net_rows = roster_strength.net_of_teammates(conn, season_value)
     opp_rows = roster_strength.opponent_strength(conn, team_season_value)
@@ -194,6 +298,15 @@ def build(
     season_sd_by_player: dict[int, dict[int, float]] = {}
     for (player_id, season_id), sd in season_sd_by_key.items():
         season_sd_by_player.setdefault(player_id, {})[season_id] = sd
+    breadth_by_player: dict[int, dict[int, float]] = {}
+    for (player_id, season_id), value in breadth_by_key.items():
+        breadth_by_player.setdefault(player_id, {})[season_id] = value
+    value_by_player: dict[int, dict[int, float]] = {}
+    for (player_id, season_id), value in value_by_key.items():
+        value_by_player.setdefault(player_id, {})[season_id] = value
+    families_by_player: dict[int, dict[int, tuple[str, ...]]] = {}
+    for (player_id, season_id), live in families_by_published_key.items():
+        families_by_player.setdefault(player_id, {})[season_id] = live
 
     # One entry per season the career touches at all, carrying whichever
     # components that season has. A season with a finish and no box score
@@ -230,6 +343,9 @@ def build(
                 career=career_row,
                 seasons=seasons_by_player.get(career_row.player_id, {}),
                 season_sd=season_sd_by_player.get(career_row.player_id, {}),
+                season_breadth=breadth_by_player.get(career_row.player_id, {}),
+                season_value=value_by_player.get(career_row.player_id, {}),
+                season_families=families_by_player.get(career_row.player_id, {}),
                 net_of_teammates=net_by_player.get(career_row.player_id, {}),
                 opponent_strength=opp_by_player.get(career_row.player_id, {}),
                 resume=resume_by_player.get(career_row.player_id, {}),
@@ -258,6 +374,19 @@ def build(
             "would be standardized inside is not yet comparable to a league one"
         ),
         "basket_size": len(basket),
+        # The six families, authored metric by metric and fixed in the
+        # pre-registration before this ran. The catalog's own `category` is
+        # twelve mode-shaped labels and is not this.
+        "families": {
+            "rule": breadth.FAMILY_RULE,
+            "names": list(breadth.FAMILIES),
+            "sizes": {
+                family: sum(1 for f in breadth.FAMILY.values() if f == family)
+                for family in breadth.FAMILIES
+            },
+            "era_coverage": _family_coverage(raw_breadth, seasons),
+        },
+        "value_backbone": value_backbone.coverage(blended),
         # The map-count shrinkage, and what a refit on this run's rows would
         # have put the constant at. The constant is frozen; this is the drift
         # made visible.
@@ -268,6 +397,19 @@ def build(
             "refit": shrink_fit,
         },
         "era_season_scores": _era_season_scores(raw_breadth, season_breadth, seasons),
+        # The gate's own number. Re-pinned at +9.63 on the board this phase
+        # opened against; the +13.4 the anatomy document recorded predates
+        # Phase A and Phase B and is kept here as the historical figure.
+        "era_gap": {
+            **_era_gap(season_score_by_key, seasons),
+            "previous_published": 9.63,
+            "anatomy_figure": 13.4,
+        },
+        # An outside referent nothing in this engine was fitted to. It reaches
+        # one era and the payload says which.
+        "convergent": convergent.check(
+            season_score_by_key, convergent.load_third_party(conn), seasons
+        ),
         # The finish component. It does not enter `career` — the fixed-weight
         # blend is R7 — so this is the whole of what the run says about it.
         "resume": {
