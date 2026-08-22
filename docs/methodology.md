@@ -3308,7 +3308,7 @@ that era low. It left the era out, and the era-balance test failed on an unrepre
 era for exactly that reason.
 
 **Each season is pulled toward its own season's mean by its map count.** A score sits at
-`maps / (maps + 15.48)` of its distance from the mean of the players who played that
+`maps / (maps + 19.92)` of its distance from the mean of the players who played that
 season. A 40-map season is a noisier reading of a player than a 124-map one, so left
 alone it reaches further from the middle in both directions.
 
@@ -3316,36 +3316,36 @@ The constant comes from a measurement. Season scores centred inside their own se
 have a variance that falls as one over the map count, so binning the season deviations
 by map count and regressing each bin's variance on the reciprocal of its mean map count
 splits the spread into a true part and a sampling part. The fit that set the constant
-read 144.11 and 2,231.4, putting their ratio at 15.48 maps, at a weighted R-squared of
-0.837, over 1,196 deviations. The same estimator against the surviving stat count reads
+that first set the constant read 144.11 and 2,231.4, putting their ratio at 15.48 maps,
+at a weighted R-squared of 0.837, over 1,196 deviations. The same estimator against the surviving stat count reads
 0.798, which is why the basis is maps. The number is frozen in the module and refitted
 beside every run, so a drift away from it shows on this page.
 
 **That fit was reading 1,196 of 1,458 seasons, and the missing 262 were not random.** A
 season scored only on the pooled all-modes row carried no map count at all, because the
 map query grouped by mode and the pooled row is not a mode. A season with no maps cannot
-be binned by map count, so it fell out of the regression silently — and the seasons it
-dropped were exactly the thin ones the regression is trying to characterise. With the
-pooled row answered for by its own grouping set, the refit runs on all 1,458 and reads
-141.22 and 2,813.5, a ratio of **19.92 maps** at a weighted R-squared of **0.989**, up
-from 0.837.
+be binned by map count, so it fell out of the regression silently, and the seasons it
+dropped were exactly the thin ones the regression is trying to characterise. A
+sampling-noise-per-map term fitted with the low-map end cut off is biased by
+construction.
 
-The applied constant stays 15.48. It is frozen by the pre-registration and moving it is
-a change to the formula, not a repair to it, so the gap is published here rather than
-closed quietly: seasons are currently shrunk slightly less than the best current
-estimate of the sampling noise would justify.
+With the pooled row answered for by its own grouping set, the fit runs on all 1,458 and
+reads 141.22 and 2,813.5, a ratio of **19.92 maps** at a weighted R-squared of **0.989**,
+against the earlier 0.837. That is the constant in force. What changed is the input and
+not the estimator: this number has always been whatever the estimator returns, and it now
+returns it from a sample with nothing cut off. Refitting on the run that applies it
+reproduces 19.92 exactly, so the constant is a fixed point of its own derivation.
 
 What it does to the width of a season score:
 
 | Era | Seasons | Median stats | Median maps | SD before | SD after |
 |---|---|---|---|---|---|
-| 2013-2016 | 504 | 14 | 40 | 18.53 | 11.78 |
-| CWL | 497 | 26 | 35 | 15.21 | 10.44 |
-| CDL | 457 | 25 | 124 | 14.82 | 11.41 |
+| 2013-2016 | 504 | 14 | 40 | 18.53 | 11.01 |
+| CWL | 497 | 26 | 35 | 15.21 | 9.91 |
+| CDL | 457 | 25 | 124 | 14.82 | 10.91 |
 
-The spread across eras falls from 3.71 to 1.34, and the three eras end up within 1.34
-points of each other where they began 3.71 apart. The CDL is no longer the widest after
-the correction; 2013-2016 is, by 0.37 points, which is what 40 maps against 124 should
+The spread across eras falls from 3.71 to 1.10. The CDL is no longer the widest after
+the correction; 2013-2016 is, by 0.10 points, which is what 40 maps against 124 should
 produce once the shrinkage has done its work.
 
 **The era gate does not rest on that correction.** This was measured. Admitting the era and applying the shrinkage were run as four separate

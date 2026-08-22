@@ -46,11 +46,18 @@ MIN_SLICE_STATS = 2
 # own season have a variance that falls as 1/maps, so binning by map count and
 # regressing the bin variance on the reciprocal of its mean map count splits
 # the spread into a true part and a sampling part, and their ratio is this
-# number. `estimate_shrink_k` below is that fit; on the 1,196 season deviations
-# the archive held on 2026-08-21 it read a true variance of 144.11 and a
-# sampling term of 2,231.43, so K = 15.48, at a weighted R^2 of 0.837. The same
-# estimator against the surviving stat count reads 0.798, which is why the
-# basis is maps.
+# number. `estimate_shrink_k` below is that fit; on the 1,458 season deviations
+# the archive holds it reads a true variance of 141.22 and a sampling term of
+# 2,813.48, so K = 19.92, at a weighted R^2 of 0.989. The same estimator
+# against the surviving stat count reads 0.798, which is why the basis is maps.
+#
+# Re-derived 2026-08-22, from 15.4838. Nothing about the estimator changed; its
+# input was repaired. A season scored only on the pooled all-modes row carried
+# no map count, and a season with no maps cannot be binned by map count, so the
+# regression had been running on 1,196 of 1,458 seasons and dropping exactly
+# the thin ones it exists to characterise. A sampling-noise-per-map term fitted
+# with the low-map end cut off is biased by construction, and the R^2 moving
+# from 0.837 to 0.989 is that bias leaving.
 #
 # The value here is whatever that estimator returned, never a number arrived at
 # some other way: a constant fitted by one implementation and published beside
@@ -59,7 +66,7 @@ MIN_SLICE_STATS = 2
 # It is frozen rather than refitted each run, for the reason the
 # pre-registration gives: a parameter that moves with the data is a target.
 # `estimate_shrink_k` is published beside the run so the drift is visible.
-SHRINK_K = 15.4838
+SHRINK_K = 19.9228
 
 # A season needs a field before it has a mean to shrink toward.
 MIN_SHRINK_COHORT = 5

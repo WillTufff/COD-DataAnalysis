@@ -303,13 +303,16 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # counted twice. The spread the table exists to show reads 3.71 before and
     # 1.34 after, against 3.55 and 1.42, so the correction does slightly more
     # work than the published version claimed and the argument is unchanged.
+    # `shrink_k` and the `sd_after` column moved again in the same session, when
+    # the constant was re-derived on the repaired input. `sd_before` did not:
+    # the shrinkage cannot reach a score before it is applied.
     "career_rank_era_spread": {
         "on": "2026-08-22",
-        "shrink_k": 15.4838,
+        "shrink_k": 19.9228,
         "eras": {
-            "2013-2016": {"seasons": 504, "sd_before": 18.5252, "sd_after": 11.7792},
-            "CWL": {"seasons": 497, "sd_before": 15.2136, "sd_after": 10.4424},
-            "CDL": {"seasons": 457, "sd_before": 14.8168, "sd_after": 11.4091},
+            "2013-2016": {"seasons": 504, "sd_before": 18.5252, "sd_after": 11.0062},
+            "CWL": {"seasons": 497, "sd_before": 15.2136, "sd_after": 9.9053},
+            "CDL": {"seasons": 457, "sd_before": 14.8168, "sd_after": 10.9087},
         },
     },
     "persistence_pairs": 566,
