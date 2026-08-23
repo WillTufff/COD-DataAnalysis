@@ -3559,7 +3559,7 @@ export async function getPlayerCareer(
 
 // ---------- Career rank ----------
 //
-// A second, independent all-time axis: peak/best-three/total over the
+// A second, independent all-time axis: a five-component career blend over the
 // gold-tier metric basket instead of over VALUE or SKILL, published by
 // `career_rank.engine`. See
 // docs/methodology.md#career-rank for what it is measuring and why it
@@ -3576,6 +3576,52 @@ export type CareerRankArtifact = {
   basket_size: number;
   restricted: boolean;
   publish_from_year: number;
+  families: {
+    rule: string;
+    names: string[];
+    sizes: Record<string, number>;
+    era_coverage: ({ era: string; seasons: number; median_families: number } & Record<
+      string,
+      number | string
+    >)[];
+  };
+  value_backbone: {
+    rule: string;
+    n_seasons: number;
+    n_with_value: number;
+    n_breadth_only: number;
+    breadth_weight: number;
+    value_weight: number;
+  };
+  era_gap: {
+    n_players: number;
+    mean: number;
+    median: number;
+    sd: number;
+    share_higher_in_cwl: number;
+    previous_published: number;
+    anatomy_figure: number;
+  };
+  team_strength_proxy_check: {
+    signal: string;
+    n_team_seasons: number;
+    pearson: number;
+    spearman: number;
+    min_maps: number;
+  };
+  accolade: {
+    thin_years: number[];
+    unresolved_rows: number;
+    n_player_seasons: number;
+    stack_distribution: Record<string, number>;
+  };
+  component_coverage_years: { resume: number[]; accolade: number[] };
+  replacement: {
+    rule: string;
+    qualified_maps: number;
+    n_seasons_with_a_floor: number;
+    n_seasons_without_a_floor: number;
+  };
   shrinkage: {
     k: number;
     rule: string;
@@ -3620,6 +3666,51 @@ export function getCareerRankArtifact(
   runId: number,
 ): Promise<CareerRankArtifact | null> {
   return artifactPayload<CareerRankArtifact>(runId, "career_rank");
+}
+
+// The board's report card against the anchor set frozen before the rebuild,
+// written under the same run as the board itself by `career_rank.facevalidity`.
+export type CareerRankFaceValidity = {
+  anchor_set: {
+    cut: string;
+    sha256: string;
+    frozen_sha256: string;
+    matches_frozen: boolean;
+    tier_counts: Record<string, number>;
+    unresolved: string[];
+  };
+  board_rows: number;
+  passed: number;
+  failed: number;
+  inconclusive: number;
+  results: {
+    test: string;
+    verdict: string;
+    summary: string;
+    top_n?: number;
+    worst_rank?: number | null;
+    tier_a?: { handle: string; rank: number | null }[];
+    rho?: number;
+    n_pairs?: number;
+    depth?: number;
+    worst?: number;
+    max_skew?: number;
+    eras?: {
+      era: string;
+      top25_peaks: number;
+      player_seasons: number;
+      skew: number;
+    }[];
+  }[];
+};
+
+export function getCareerRankFaceValidity(
+  runId: number,
+): Promise<CareerRankFaceValidity | null> {
+  return artifactPayload<CareerRankFaceValidity>(
+    runId,
+    "career_rank_face_validity",
+  );
 }
 
 export type CareerRankLeaderboardRow = {

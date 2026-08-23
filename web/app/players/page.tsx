@@ -513,14 +513,14 @@ export default async function PlayersPage({
           <h2 className="lower-third">
             All-time
             <span className="lt-note">
-              career rank, the gold-tier metric basket blended by season
+              career rank, five components blended across a career
             </span>
           </h2>
           <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
-            A different question again: not one season&rsquo;s VALUE, but
-            every gold-tier stat a player&rsquo;s page shows, read across a
-            career of at least three qualified seasons and blended with what
-            that career finished and won.
+            A different question again. This one reads every gold-tier stat
+            a player&rsquo;s page shows across a career of at least three
+            qualified seasons, and blends it with what that career finished
+            and won.
           </p>
           <p className="mt-2 max-w-3xl text-sm text-ink-muted">
             This board covers 2013 onward. A season is scored against the

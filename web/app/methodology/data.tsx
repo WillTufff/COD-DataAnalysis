@@ -37,6 +37,7 @@ import {
   getRoundWinProb,
   getAging,
   getCareerRankArtifact,
+  getCareerRankFaceValidity,
   getCareerValue,
   getSegmentWinProb,
   getSeasonEras,
@@ -82,6 +83,17 @@ import { modeLabel } from "@/lib/modes";
 // record rather than a mode name a reader would recognise.
 // The regression outcomes of the role phase, in the words the rest of the site
 // uses for them.
+// The gloss each career-rank component gets in the blend table. The weights and
+// the coverage counts beside them come from the run, so a weight moving here is
+// a weight the page cannot state wrongly.
+const CAREER_COMPONENT_COPY: Record<string, string> = {
+  PEAK: "the single best season score",
+  PRIME: "the best three consecutive seasons",
+  LONGEVITY: "every season summed above that season's replacement level",
+  RESUME: "the career's finish credit, from the title record",
+  ACCOLADE: "the career's award credit, as a share of its year",
+};
+
 const ROLE_OUTCOME: Record<string, string> = {
   kd: "K/D",
   damage_per_map: "Damage per map",
@@ -578,6 +590,11 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
   const careerRankRun = await latestCareerRankRun();
   const careerRank = careerRankRun
     ? await getCareerRankArtifact(careerRankRun.id)
+    : null;
+  // The same run's report card. A board printed beside a verdict from an
+  // earlier run would be the drift this page exists to prevent.
+  const careerRankFace = careerRankRun
+    ? await getCareerRankFaceValidity(careerRankRun.id)
     : null;
   const agingRun = await latestAgingRun();
   const aging = agingRun ? await getAging(agingRun.id) : null;
@@ -3458,6 +3475,18 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
         </section>
       );
 
+      const careerBlendWeights = Object.entries(
+        careerRank?.career.career_component_weights ?? {},
+      ).sort((a, b) => b[1] - a[1]);
+      const careerCoverageYears = careerRank?.component_coverage_years;
+      const careerFaceTests = careerRankFace?.results ?? [];
+      const careerAbsent = careerFaceTests.find(
+        (t) => t.test === "absent_legend",
+      );
+      const careerRho = careerFaceTests.find(
+        (t) => t.test === "rank_correlation",
+      );
+
       const secCareerRank = careerRank && (
         <section id="career-rank" className="mt-12">
           <h2 className="font-display text-2xl font-semibold uppercase">
@@ -3466,25 +3495,104 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
           <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
             <p>
               A second, independent all-time axis. Career value sums a rating
-              fitted against map outcome. Career rank instead sums a{" "}
-              <strong className="text-ink">breadth score</strong>: the
-              coverage-weighted mean percentile across every gold-tier stat a
-              player&rsquo;s page shows that season ({careerRank.basket_size}{" "}
-              metrics), weighted by each mode&rsquo;s share of that
-              season&rsquo;s maps, with the per-map twin of any per-10 pair
-              dropped so a rate and its timed form never double count the same
-              signal. Award status (First/Second Team, MVPs, Rookie of the
-              Year) adds a fixed number of percentile points on top, capped at
-              100.
+              fitted against map outcome. Career rank scores every season a
+              player has on the gold-tier metric basket ({careerRank.basket_size}{" "}
+              metrics), then ranks the career on a blend of five components
+              built from those seasons. Of {careerRank.career.n_players}{" "}
+              players scored, {careerRank.career.n_qualified} clear the
+              three-season floor and are ranked.
             </p>
             <p>
-              A season needs at least two qualifying stats to score at all, the
-              same floor the player page itself uses to decide whether a card
-              renders. A career needs at least three qualified seasons to get
-              an overall row; below that floor, season scores still compute
-              but no total is published. Of {careerRank.career.n_players}{" "}
-              players scored, {careerRank.career.n_qualified} clear that
-              floor.
+              <strong className="text-ink">A season score is two parts.</strong>{" "}
+              It is{" "}
+              <span className="tabular-nums">
+                {careerRank.value_backbone.breadth_weight.toFixed(2)}
+              </span>{" "}
+              of a <strong className="text-ink">breadth score</strong> and{" "}
+              <span className="tabular-nums">
+                {careerRank.value_backbone.value_weight.toFixed(2)}
+              </span>{" "}
+              of that season&rsquo;s VALUE. The rating half is mapped onto the
+              breadth score&rsquo;s own location and scale inside the same
+              season, so bringing it in cannot move one season against another
+              era.{" "}
+              {careerRank.value_backbone.n_with_value.toLocaleString()} of the{" "}
+              {careerRank.value_backbone.n_seasons.toLocaleString()} scored
+              seasons carry a VALUE partner. The other{" "}
+              {careerRank.value_backbone.n_breadth_only} are scored on breadth
+              alone at full weight.
+            </p>
+            <p>
+              Breadth is the coverage-weighted mean percentile across every
+              gold-tier stat a player&rsquo;s own page shows that season,
+              weighted by each mode&rsquo;s share of that season&rsquo;s maps,
+              with the per-map twin of any per-10 pair dropped so a rate and its
+              timed form never double count the same signal. A season needs at
+              least two surviving stats to score at all, the same floor the
+              player page itself uses to decide whether a card renders. The
+              metric table also carries a pooled row per player-season,
+              aggregated over the same maps as the mode rows beside it. Beside a
+              mode row it is the season counted twice and is ignored. Where no
+              single mode clears the surviving-stat floor it is the only reading
+              of the season there is, and the season scores on it at its own map
+              count.
+            </p>
+            <p>
+              <strong className="text-ink">
+                A slice averages its metric families, not its metrics.
+              </strong>{" "}
+              How many metrics measure a given thing is an accident of what the
+              archive recorded: {careerRank.families.sizes.volume} read slaying
+              volume and {careerRank.families.sizes.efficiency} read slaying
+              efficiency against {careerRank.families.sizes.discipline} for
+              discipline. Counting metrics would let the recording schedule set
+              the weights. Each family contributes the mean of its own surviving
+              percentiles, and the slice is the unweighted mean over the
+              families that survive. A family with no surviving metric is absent
+              from that mean and never enters it as a zero.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Era</th>
+                    <th className="py-2 pr-4 text-right font-normal">Seasons</th>
+                    {careerRank.families.names.map((name) => (
+                      <th
+                        key={name}
+                        className="py-2 pr-4 text-right font-normal capitalize"
+                      >
+                        {name}
+                      </th>
+                    ))}
+                    <th className="py-2 text-right font-normal">Median</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  {careerRank.families.era_coverage.map((row) => (
+                    <tr key={row.era} className="border-b border-hairline/50">
+                      <td className="py-2 pr-4">{row.era}</td>
+                      <td className="py-2 pr-4 text-right">{row.seasons}</td>
+                      {careerRank.families.names.map((name) => (
+                        <td key={name} className="py-2 pr-4 text-right">
+                          {Number(row[name] ?? 0).toFixed(0)}%
+                        </td>
+                      ))}
+                      <td className="py-2 text-right">
+                        {row.median_families.toFixed(0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Read that table before reading the family weighting as a fix for
+              era comparability. It is not one. Coverage here is
+              era-partitioned and not merely thin: the pre-2017 seasons reach
+              three families at a median, a CDL season four, and only the CWL
+              reaches five. Family weighting repairs the within-era distortion,
+              which is what it is worth.
             </p>
             <p>
               <strong className="text-ink">
@@ -3543,11 +3651,177 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               </table>
             </div>
             <p>
-              One thing the shrinkage does not fix. A 2013&ndash;2016 season is
-              a mean of about 18 percentiles where a league season is a mean of
-              31 to 35, because the kill-feed and round-card stats do not exist
-              for those years. That is a difference in what was recorded, and
-              no weighting of maps makes 18 stats say what 35 say.
+              One thing the shrinkage does not fix. The median stat count per
+              season is{" "}
+              {careerRank.era_season_scores
+                .map((row) => row.median_metrics)
+                .join(", ")}{" "}
+              across the eras in that table, because the kill-feed and
+              round-card stats do not exist for the early years. That is a
+              difference in what was recorded, and no weighting of maps makes
+              the thin count say what the full one says.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The board publishes its own reading of that difference every
+                run.
+              </strong>{" "}
+              Within the {careerRank.era_gap.n_players} players holding scored
+              seasons in both, a CWL season scores{" "}
+              <span className="tabular-nums">
+                {careerRank.era_gap.mean.toFixed(2)}
+              </span>{" "}
+              points higher than the same player&rsquo;s CDL seasons on average
+              (median {careerRank.era_gap.median.toFixed(2)},{" "}
+              {(careerRank.era_gap.share_higher_in_cwl * 100).toFixed(1)}% of
+              them higher in the CWL). The mechanism is cohort composition. The
+              CWL years ran open-bracket events, so an elite player&rsquo;s
+              percentile there was measured against a field that included
+              amateur teams, where the CDL is a closed twelve-team league in
+              which every opponent is a professional. The gap was{" "}
+              {careerRank.era_gap.anatomy_figure} when it was first measured and{" "}
+              {careerRank.era_gap.previous_published} one release ago. It is
+              reported and never corrected: the correction would be a per-era
+              adjustment fitted to the thing it is meant to measure.
+            </p>
+            <p>
+              <strong className="text-ink">
+                The board ranks on a blend of five components, at weights fixed
+                before the run.
+              </strong>{" "}
+              A season score answers what a season was worth. A career is more
+              than a sum of them, and until this release the board added the
+              season scores up and ranked on that, which meant the finish record
+              and the award record were published beside the ranking without
+              entering it.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-ink-muted">
+                    <th className="py-2 pr-4 font-normal">Component</th>
+                    <th className="py-2 pr-4 text-right font-normal">Weight</th>
+                    <th className="py-2 pr-4 text-right font-normal">Careers</th>
+                    <th className="py-2 font-normal">What it is</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {careerBlendWeights.map(([name, weight]) => (
+                    <tr key={name} className="border-b border-hairline/50">
+                      <td className="py-2 pr-4 capitalize">
+                        {name.toLowerCase()}
+                      </td>
+                      <td className="py-2 pr-4 text-right tabular-nums">
+                        {weight.toFixed(0)}
+                      </td>
+                      <td className="py-2 pr-4 text-right tabular-nums">
+                        {careerRank.career.component_coverage[name] ?? 0}
+                      </td>
+                      <td className="py-2">
+                        {CAREER_COMPONENT_COPY[name] ?? ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              The season score itself stays PERFORMANCE alone. Giving the finish
+              record a season weight as well would count it twice, once inside
+              the peak season it lifted and again at{" "}
+              {(careerRank.career.career_component_weights.RESUME ?? 0).toFixed(
+                0,
+              )}{" "}
+              in the blend, and the double count would be invisible in the
+              published number.
+            </p>
+            <p>
+              Each component is scaled 0 to 100 across the players the board
+              ranks before the weights are applied, so the weights are shares of
+              one comparable scale and not of five different units. The scale is
+              fitted on the ranked cohort and applied to every career without
+              clamping, so a career below the three-season floor can read a
+              component outside that range and a total below zero. None of those
+              careers is ranked, and clamping the number would misreport what it
+              is.
+            </p>
+            <p>
+              Longevity is the sum over every season a career has of how far
+              that season sat above replacement, and replacement is the same
+              definition career value uses: the lowest season score among the
+              players with at least{" "}
+              {careerRank.replacement.qualified_maps} maps that season, taken
+              over the whole archive so that restricting a run cannot change
+              what a season is worth. A floor is built for{" "}
+              {careerRank.replacement.n_seasons_with_a_floor} of the seasons the
+              board scores and{" "}
+              {careerRank.replacement.n_seasons_without_a_floor} are left
+              without one. A season under the map floor can sit below a floor
+              built from seasons that cleared it, and it contributes zero
+              instead of subtracting.
+            </p>
+            <p>
+              <strong className="text-ink">
+                A component is absent only where the archive cannot see it.
+              </strong>{" "}
+              Never winning an award is a zero and is scored as one. The
+              alternative would make never winning one free, and delete a
+              10-weight component for most of the board. The finish record
+              reaches every year from{" "}
+              {careerCoverageYears?.resume[0] ?? careerRank.publish_from_year}{" "}
+              to{" "}
+              {careerCoverageYears?.resume[
+                careerCoverageYears.resume.length - 1
+              ] ?? ""}
+              , so a career with no credit there finished nothing. The award
+              axis reaches{" "}
+              {careerCoverageYears?.accolade.length ?? 0} of those years: a year
+              that named no season-level honour contributes nothing, which
+              silences{" "}
+              {careerRank.accolade.thin_years.join(", ")}. A career played
+              entirely inside those years has no award axis at all, and its
+              weight is carried by the other four components.{" "}
+              {careerRank.career.n_renormalized} careers are scored over fewer
+              than five.
+            </p>
+            <p>
+              The three-season window covers every published season here, which
+              is one difference from career value. That axis drops the pre-2017
+              years because its plus-minus has no comparable replacement scale
+              for them. This board&rsquo;s season unit is a percentile taken
+              inside the season&rsquo;s own field, so 2013 sits on the same
+              scale as 2023 by construction, and a component carrying a quarter
+              of the ranking cannot be measurable in two eras and missing in the
+              third. The window itself is unchanged: three seasons of the
+              sequence, and sitting one out costs what it cost.
+            </p>
+            <p>
+              The award component is a season&rsquo;s share of every award point
+              its year handed out, built over the whole archive so restricting a
+              run cannot change what a season is worth. It reaches{" "}
+              {careerRank.accolade.n_player_seasons} player-seasons. Award
+              status stacks additively across tiers, and the largest stack in
+              the archive is{" "}
+              {Object.keys(careerRank.accolade.stack_distribution)
+                .map(Number)
+                .sort((a, b) => b - a)[0] ?? 0}{" "}
+              points, reached by{" "}
+              {careerRank.accolade.stack_distribution[
+                String(
+                  Object.keys(careerRank.accolade.stack_distribution)
+                    .map(Number)
+                    .sort((a, b) => b - a)[0] ?? 0,
+                )
+              ] ?? 0}{" "}
+              seasons. {careerRank.accolade.unresolved_rows} award rows cannot
+              be attached to a player at all; they reduce nobody&rsquo;s season
+              and are counted here instead of passing quietly.
+            </p>
+            <p>
+              The plain sum of season scores is still published beside the
+              blend, with its standard deviation and its per-season average, so
+              a long career and a shorter better one can still be separated on
+              it.
             </p>
             <p>
               <strong className="text-ink">
@@ -3580,20 +3854,115 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               approximated as the mean VALUE of its modal-team players, since
               the project has no independent team rating) was checked against
               an outside signal before shipping: it correlates with season map
-              win rate at Pearson r = 0.77 and Spearman r = 0.81 over 200
-              team-seasons with at least 10 maps.
+              win rate at Pearson r ={" "}
+              {careerRank.team_strength_proxy_check.pearson.toFixed(2)} and
+              Spearman r ={" "}
+              {careerRank.team_strength_proxy_check.spearman.toFixed(2)} over{" "}
+              {careerRank.team_strength_proxy_check.n_team_seasons} team-seasons
+              with at least {careerRank.team_strength_proxy_check.min_maps}{" "}
+              maps.
             </p>
             <p>
               Every total carries a standard deviation, the same convention
               career value follows. It comes from how much the gold-tier
-              basket disagreed with itself that season. A wide spread of
-              percentiles across the metrics produces a wide season SD; a
-              tight spread produces a narrow one. The career total combines
-              those season SDs as independent variances, the same
-              simplification career value&rsquo;s own total_sd makes, and it
-              understates the true width because the underlying metric fits
-              share a cohort across years.
+              basket disagreed with itself that season, read at the level the
+              score is a mean of: across the metric families where a slice has
+              more than one, and across a single family&rsquo;s own metrics
+              where it does not, because a lone family disagreeing with itself
+              is then the whole of the disagreement there is. Family means
+              cancel some of what individual metrics scatter, so these are
+              narrower than the per-metric widths this column carried before.
+              The career total combines those season SDs as independent
+              variances, the same simplification career value&rsquo;s own
+              total_sd makes, and it understates the true width because the
+              underlying metric fits share a cohort across years.
             </p>
+            {careerRankFace && (
+              <>
+                <p>
+                  <strong className="text-ink">
+                    The board is checked against an outside referent that
+                    nothing in it was fitted to.
+                  </strong>{" "}
+                  {careerRankFace.anchor_set.tier_counts.A ?? 0} players named
+                  on three or more published all-time lists, plus{" "}
+                  {(careerRankFace.anchor_set.tier_counts.B ?? 0) +
+                    (careerRankFace.anchor_set.tier_counts.C ?? 0)}{" "}
+                  named on fewer, were frozen as{" "}
+                  <span className="tabular-nums">
+                    {careerRankFace.anchor_set.cut}
+                  </span>{" "}
+                  before any of this was rebuilt, and the five tests below were
+                  written at the same time. Tier is a count of lists and never a
+                  reading of placement. A failure sends the formula back and
+                  never the player, no weight may be chosen to move an anchor,
+                  and the correlation is reported and never optimised. The set
+                  in this run hashes to{" "}
+                  <span className="tabular-nums">
+                    {careerRankFace.anchor_set.sha256.slice(0, 8)}
+                  </span>
+                  , which{" "}
+                  {careerRankFace.anchor_set.matches_frozen
+                    ? "is the frozen digest"
+                    : "does not match the frozen digest"}
+                  .
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-hairline text-xs text-ink-muted">
+                        <th className="py-2 pr-4 font-normal">Test</th>
+                        <th className="py-2 pr-4 font-normal">Verdict</th>
+                        <th className="py-2 font-normal">Reading</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {careerFaceTests.map((row) => (
+                        <tr
+                          key={row.test}
+                          className="border-b border-hairline/50"
+                        >
+                          <td className="py-2 pr-4 font-mono text-xs">
+                            {row.test}
+                          </td>
+                          <td className="py-2 pr-4">{row.verdict}</td>
+                          <td className="py-2">{row.summary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p>
+                  {careerRankFace.passed} pass, {careerRankFace.failed} fail,{" "}
+                  {careerRankFace.inconclusive} inconclusive, and the
+                  correlation reports.{" "}
+                  {careerAbsent?.verdict === "pass" &&
+                    careerAbsent.worst_rank != null && (
+                      <>
+                        Read the margin beside the first verdict: the
+                        lowest-ranked tier A anchor sits at{" "}
+                        {careerAbsent.worst_rank} of a top{" "}
+                        {careerAbsent.top_n ?? 25}, so that test clears by{" "}
+                        {(careerAbsent.top_n ?? 25) - careerAbsent.worst_rank}{" "}
+                        {(careerAbsent.top_n ?? 25) - careerAbsent.worst_rank ===
+                        1
+                          ? "place"
+                          : "places"}
+                        .{" "}
+                      </>
+                    )}
+                  {careerRho?.rho != null && (
+                    <>
+                      The rank correlation against the mean published rank is
+                      rho = {careerRho.rho.toFixed(4)} over {careerRho.n_pairs}{" "}
+                      players inside the top {careerRho.depth}. Agreement with
+                      the published lists is partial, and this number is the
+                      size of it.
+                    </>
+                  )}
+                </p>
+              </>
+            )}
           </div>
         </section>
       );
