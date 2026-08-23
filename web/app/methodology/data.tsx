@@ -3922,11 +3922,10 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
                   <span className="tabular-nums">
                     {careerRankFace.anchor_set.sha256.slice(0, 8)}
                   </span>
-                  , which{" "}
+                  ,{" "}
                   {careerRankFace.anchor_set.matches_frozen
-                    ? "is the frozen digest"
-                    : "does not match the frozen digest"}
-                  .
+                    ? "which is the frozen digest."
+                    : "which does not match the frozen digest."}
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
@@ -3958,20 +3957,22 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
                   {careerRankFace.inconclusive} inconclusive, and the
                   correlation reports.{" "}
                   {careerAbsent?.verdict === "pass" &&
-                    careerAbsent.worst_rank != null && (
-                      <>
-                        Read the margin beside the first verdict: the
-                        lowest-ranked tier A anchor sits at{" "}
-                        {careerAbsent.worst_rank} of a top{" "}
-                        {careerAbsent.top_n ?? 25}, so that test clears by{" "}
-                        {(careerAbsent.top_n ?? 25) - careerAbsent.worst_rank}{" "}
-                        {(careerAbsent.top_n ?? 25) - careerAbsent.worst_rank ===
-                        1
-                          ? "place"
-                          : "places"}
-                        .{" "}
-                      </>
-                    )}
+                    careerAbsent.worst_rank != null &&
+                    (() => {
+                      // Places to spare, counting the seat the anchor is in:
+                      // last admitted place is a margin of one, not of zero.
+                      const depth = careerAbsent.top_n ?? 25;
+                      const margin = depth - careerAbsent.worst_rank + 1;
+                      return (
+                        <>
+                          Read the margin beside the first verdict. The
+                          lowest-ranked tier A anchor sits at{" "}
+                          {careerAbsent.worst_rank} of a top {depth}, so that
+                          test clears by {margin}{" "}
+                          {margin === 1 ? "place" : "places"}.{" "}
+                        </>
+                      );
+                    })()}
                   {careerRho?.rho != null && (
                     <>
                       The rank correlation against the mean published rank is
