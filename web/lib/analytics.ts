@@ -3642,7 +3642,11 @@ export type CareerRankArtifact = {
     career_blend_rule: string;
     longevity_rule: string;
     component_coverage: Record<string, number>;
+    // The same coverage over the careers the board ranks. Optional: a run from
+    // before Phase F published only the whole-board counts.
+    component_coverage_qualified?: Record<string, number>;
     n_renormalized: number;
+    n_renormalized_qualified?: number;
     component_scale: Record<string, { low: number; high: number }>;
     n_players: number;
     n_qualified: number;

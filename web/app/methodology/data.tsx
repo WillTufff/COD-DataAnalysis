@@ -94,6 +94,19 @@ const CAREER_COMPONENT_COPY: Record<string, string> = {
   ACCOLADE: "the career's award credit, as a share of its year",
 };
 
+const CAREER_COMPONENT_ORDER = [
+  "PEAK",
+  "PRIME",
+  "LONGEVITY",
+  "RESUME",
+  "ACCOLADE",
+];
+
+function careerComponentOrder(name: string): number {
+  const at = CAREER_COMPONENT_ORDER.indexOf(name);
+  return at === -1 ? CAREER_COMPONENT_ORDER.length : at;
+}
+
 const ROLE_OUTCOME: Record<string, string> = {
   kd: "K/D",
   damage_per_map: "Damage per map",
@@ -3475,9 +3488,16 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
         </section>
       );
 
+      // In the order the blend is argued, which is the order the methodology
+      // document lists them in. A component the run adds and this table does
+      // not name still prints, at the end.
       const careerBlendWeights = Object.entries(
         careerRank?.career.career_component_weights ?? {},
-      ).sort((a, b) => b[1] - a[1]);
+      ).sort(
+        (a, b) =>
+          careerComponentOrder(a[0]) - careerComponentOrder(b[0]) ||
+          a[0].localeCompare(b[0]),
+      );
       const careerCoverageYears = careerRank?.component_coverage_years;
       const careerFaceTests = careerRankFace?.results ?? [];
       const careerAbsent = careerFaceTests.find(
@@ -3680,7 +3700,8 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               amateur teams, where the CDL is a closed twelve-team league in
               which every opponent is a professional. The gap was{" "}
               {careerRank.era_gap.anatomy_figure} when it was first measured and{" "}
-              {careerRank.era_gap.previous_published} one release ago. It is
+              {careerRank.era_gap.previous_published.toFixed(2)} one release
+              ago. It is
               reported and never corrected: the correction would be a per-era
               adjustment fitted to the thing it is meant to measure.
             </p>
@@ -3752,9 +3773,9 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               players with at least{" "}
               {careerRank.replacement.qualified_maps} maps that season, taken
               over the whole archive so that restricting a run cannot change
-              what a season is worth. A floor is built for{" "}
-              {careerRank.replacement.n_seasons_with_a_floor} of the seasons the
-              board scores and{" "}
+              what a season is worth. Every one of the{" "}
+              {careerRank.replacement.n_seasons_with_a_floor} seasons the board
+              scores has a replacement level built for it, and{" "}
               {careerRank.replacement.n_seasons_without_a_floor} are left
               without one. A season under the map floor can sit below a floor
               built from seasons that cleared it, and it contributes zero
@@ -3777,12 +3798,12 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               axis reaches{" "}
               {careerCoverageYears?.accolade.length ?? 0} of those years: a year
               that named no season-level honour contributes nothing, which
-              silences{" "}
-              {careerRank.accolade.thin_years.join(", ")}. A career played
+              silences {careerRank.accolade.thin_years.join(", ")}. A career played
               entirely inside those years has no award axis at all, and its
               weight is carried by the other four components.{" "}
-              {careerRank.career.n_renormalized} careers are scored over fewer
-              than five.
+              {careerRank.career.n_renormalized_qualified != null
+                ? `${careerRank.career.n_renormalized} careers are scored over fewer than five, and ${careerRank.career.n_renormalized_qualified} of them are careers the board ranks.`
+                : `${careerRank.career.n_renormalized} careers are scored over fewer than five.`}
             </p>
             <p>
               The three-season window covers every published season here, which
