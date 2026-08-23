@@ -1511,3 +1511,64 @@ def test_the_declared_value_weight_cannot_drift(monkeypatch: pytest.MonkeyPatch)
 
     assert len(found) == 1
     assert "VALUE value_weight" in found[0]
+
+
+def _face(results: list[dict[str, Any]], matches_frozen: bool = True) -> dict[str, Any]:
+    return {
+        "anchor_set": {
+            "cut": "anchors-2026-08-18",
+            "matches_frozen": matches_frozen,
+            "unresolved": [],
+        },
+        "results": results,
+    }
+
+
+def test_face_validity_passes_when_every_gating_test_passes() -> None:
+    """The correlation reports and does not gate, so a clean board is one line."""
+    found = gates.face_validity_failures(
+        _face(
+            [
+                {"test": "absent_legend", "verdict": "pass", "summary": "0 of 7 outside"},
+                {"test": "unearned_top_ten", "verdict": "pass", "summary": "0 of the top 10"},
+                {"test": "rank_correlation", "verdict": "report", "summary": "rho = 0.5640"},
+                {"test": "era_balance", "verdict": "pass", "summary": "worst skew 1.93"},
+                {"test": "coverage_honesty", "verdict": "pass", "summary": "every row"},
+            ]
+        )
+    )
+
+    assert len(found) == 1
+    assert found[0].startswith(gates.REPORTED)
+
+
+def test_an_inconclusive_face_validity_test_fails() -> None:
+    """The pre-registration's own rule: a test that cannot be answered has not
+    been passed, and an archive that stops attributing championships is a
+    release problem rather than a quiet downgrade."""
+    found = gates.face_validity_failures(
+        _face(
+            [
+                {
+                    "test": "unearned_top_ten",
+                    "verdict": "inconclusive",
+                    "summary": "2 published years cannot attribute every chip",
+                }
+            ]
+        )
+    )
+
+    assert len(found) == 1
+    assert not found[0].startswith(gates.REPORTED)
+    assert "inconclusive" in found[0]
+
+
+def test_an_anchor_set_that_no_longer_matches_its_digest_fails() -> None:
+    found = gates.face_validity_failures(_face([], matches_frozen=False))
+
+    assert len(found) == 1
+    assert "moved target" in found[0]
+
+
+def test_a_run_with_no_report_card_fails_the_face_validity_gate() -> None:
+    assert gates.face_validity_failures({}) == ["the run wrote no face-validity report card"]

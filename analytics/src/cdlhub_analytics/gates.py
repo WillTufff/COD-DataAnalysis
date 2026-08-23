@@ -1040,6 +1040,43 @@ def page_figure_failures(
     return bad
 
 
+def face_validity_failures(payload: dict[str, Any]) -> list[str]:
+    """The five tests the anchor pre-registration declares gating.
+
+    They were written before the rebuild moved a weight, and the rule they were
+    written under is that a failure sends the formula back and never the
+    player. Until this gate existed they were published and enforced by
+    nobody, which is the same shape of hole the rest of this module was built
+    to close: a condition stated in a document, measured every run, and able to
+    degrade without stopping a release.
+
+    Inconclusive fails. That is the pre-registration's own rule — a test that
+    cannot be answered has not been passed — and it is what makes an archive
+    that stops attributing championships a release problem rather than a quiet
+    downgrade. `rank_correlation` is reported and never gated, because fitting
+    to it would turn the anchor set into a training label.
+    """
+    if not payload:
+        return ["the run wrote no face-validity report card"]
+    bad: list[str] = []
+    for result in payload.get("results") or []:
+        verdict = str(result.get("verdict"))
+        summary = str(result.get("summary"))
+        if verdict in {"fail", "inconclusive"}:
+            bad.append(f"{result.get('test')}: {verdict} — {summary}")
+        elif verdict == "report":
+            bad.append(f"{REPORTED}{result.get('test')}: {summary}")
+    anchor_set = payload.get("anchor_set") or {}
+    if not anchor_set.get("matches_frozen", False):
+        bad.append(
+            f"the anchor set '{anchor_set.get('cut')}' no longer hashes to the digest it "
+            "was frozen at, so the board is being judged against a moved target"
+        )
+    for handle in anchor_set.get("unresolved") or []:
+        bad.append(f"{REPORTED}anchor '{handle}' resolves to no player in this database")
+    return bad
+
+
 def career_population_failures(drift: dict[str, Any]) -> list[str]:
     """The career engine's population is held fixed the same way the map one is.
 
@@ -1308,6 +1345,12 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             ),
         ),
         ("career population", career_population_failures(career_evalpop.drift(conn))),
+        (
+            "face validity",
+            face_validity_failures(
+                optional_artifact(conn, career_rank.MODEL, career_facevalidity.ARTIFACT_NAME)
+            ),
+        ),
         (
             "page figures",
             page_figure_failures(

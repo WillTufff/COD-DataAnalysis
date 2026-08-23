@@ -3635,7 +3635,9 @@ would turn the anchor set into a training label.
 | Coverage honesty | Every published career row carries its coverage | yes |
 
 The verdicts run with the board and are published from the same run, so the site prints
-whatever the current board answers. On the release this document describes, four of the
+whatever the current board answers. They also gate a release. Four of the five stop a
+publish if they fail, an unanswerable test counts as a failure rather than a pass, and the
+correlation is printed beside them without gating anything. On the release this document describes, four of the
 four gating tests pass and the correlation reports. That is the first release in which
 `absent_legend` has passed since the tests were written, and the margin belongs beside
 the verdict: the lowest-ranked top-tier anchor sits at 25 of a top 25, which is a pass by
