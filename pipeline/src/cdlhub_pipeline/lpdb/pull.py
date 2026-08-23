@@ -110,6 +110,15 @@ PLACEMENTS = "([[mode::award_individual]] OR " + PREMIER + " OR [[liquipediatier
 # against a local event.
 ALL_TIERS = ""
 
+# The tournament pull above is keyed on the ten CWL/CDL-era game codes, and
+# that alone is why the snapshot holds nothing before 2017 — no tier filter is
+# involved. The pre-2017 events this project models come from `codwiki` and
+# from nowhere else, including their `tier` and `prize_pool`, and since B3 an
+# unknown tier is not a title. A date-bounded query is the whole second reading:
+# every game code, every tier, one condition, and the pages come back in a
+# handful of requests rather than one lookup per event.
+PRE2017 = "[[startdate::>2012-12-31]] AND [[startdate::<2017-01-01]]"
+
 PLACEMENTS_PATH = SNAPSHOT_ROOT / "placements.json"
 TEAMS_PATH = SNAPSHOT_ROOT / "teams.json"
 TOURNAMENTS_PATH = SNAPSHOT_ROOT / "tournaments.json"
@@ -117,6 +126,7 @@ SQUADPLAYERS_PATH = SNAPSHOT_ROOT / "squadplayers.json"
 TRANSFERS_PATH = SNAPSHOT_ROOT / "transfers.json"
 PLAYERS_PATH = SNAPSHOT_ROOT / "players.json"
 MATCHES_PATH = SNAPSHOT_ROOT / "matches.json"
+PRE2017_TOURNAMENTS_PATH = SNAPSHOT_ROOT / "tournaments-pre2017.json"
 
 
 def _per_game(
@@ -134,6 +144,14 @@ def _per_game(
         page = client.get_all(table, conditions=conditions, query=query, order=order)
         print(f"{table} {game}: {len(page)} rows")
         rows.extend(page)
+    return rows
+
+
+def _scoped(
+    client: LpdbClient, table: str, conditions: str, query: str, order: str
+) -> list[dict[str, Any]]:
+    rows = client.get_all(table, conditions=conditions, query=query, order=order)
+    print(f"{table} [{conditions}]: {len(rows)} rows")
     return rows
 
 
@@ -164,6 +182,10 @@ PULLS: dict[str, tuple[Path, Callable[[LpdbClient], list[dict[str, Any]]]]] = {
         lambda c: _whole(c, "transfer", TRANSFER_QUERY, "date ASC, objectname ASC"),
     ),
     "players": (PLAYERS_PATH, lambda c: _whole(c, "player", PLAYER_QUERY, "pagename ASC")),
+    "tournaments_pre2017": (
+        PRE2017_TOURNAMENTS_PATH,
+        lambda c: _scoped(c, "tournament", PRE2017, TOURNAMENT_QUERY, "pagename ASC"),
+    ),
     "matches": (
         MATCHES_PATH,
         lambda c: _per_game(c, "match", "", MATCH_QUERY, "date ASC, match2id ASC"),
