@@ -157,8 +157,9 @@ Before that a world championship and a regional open weighed the same, which is 
 difference of about eleven times inside 2013 once the pool is known. Pools published in
 sterling, euros or Australian dollars are converted at period averages for the years
 involved. One event paid medals. Its pool is unknown, and no event is ever stored at
-zero. The tier word is kept as the wiki writes it, in a column of its own, so loading it
-cannot quietly change which events count as titles.
+zero. The tier word is kept as the wiki writes it, in a column of its own, and the
+numeric tier the title rule reads is a separate column. What that rule admits, and what
+these four years cost it, is set out under [career rank](#career-rank).
 
 **Rotations before 2017 were not one rulebook.** MLG, UMG, ESWC and Gfinity each set
 their own map order, so the best-of-five rollup declares a rotation only where the era
@@ -2461,6 +2462,22 @@ What is published is the verdict the declared rule returns, next to the effect s
 says how little is behind it. No published number moves either way: these verdicts are
 reported, and no family is applied as a correction to any box score.
 
+**A floor on effect size was added beside the share, and this release it changes
+nothing.** The declared rule counts cohorts and never asks how large the improvement was,
+which is how a family clears it on a median move of 0.00001. The amendment leaves the
+0.5 share exactly where it was and adds a second condition: a family also has to move the
+leaderboard by at least 0.01 cohort standard deviations, the same magnitude this rule
+already used to separate "moves the table without predicting" from "does nothing either
+way". Naming that magnitude and applying it to both branches is the whole of the change,
+so it can only ever make a family harder to keep. It was written after the `prize_pool`
+result made the gap visible, which is stated here because a threshold written once a
+result is in usually is not a threshold.
+
+Both verdicts are published every run, the declared rule's and the amended rule's, with
+the effect size beside each. On this release they are identical: `prize_pool` clears the
+share at 31 of 60 on a median move of 0.01667, above the floor, so no family's verdict
+turns on the amendment. Nothing downstream reads either table.
+
 `prize_pool` was predicted in advance to be event tier under another name, and it is. So are
 four of the other five. On the shorter record three of the five moved the table without
 predicting anything; on this one none of them moves it either.
@@ -3494,6 +3511,45 @@ players with at least eight maps that season, taken over the whole archive so th
 restricting a run cannot change what a season is worth. A season under the map floor can
 sit below a floor built from seasons that cleared it, and it contributes nothing instead
 of subtracting.
+
+**The finish credit is the one component built from results and not from box scores.** A
+season's credit sums the title finishes its rosters earned. Each finish is scored on a
+curve that reaches exact zero at sixteenth, so a deep bracket run is worth something and
+a bracket appearance is worth nothing, and a win is four times a second place. Each event
+is weighted by the square root of its prize pool. Raw pool would make the 2020
+Championship worth 46 times a $100,000 event inside the same year, which lets one
+tournament own a season; the root makes it 6.8 times. The season's sum is then divided by
+the credit a team that won every title event that year would have earned, which is what
+makes 2020's thirteen titles and 2024's five comparable. Credit reaches a player through
+the event roster, so a finish nobody recorded a roster for pays nobody.
+
+**What counts as a title is one rule, read by the finish credit and the chip and ring
+counts alike.** A title event carries a known tier of 1 or 2, a `tier_type` that is
+neither Qualifier nor Showmatch, and a name that does not say qualifier, relegation,
+play-in, regional final or regular season. The name clause carries real weight, because
+the wiki stamps a route into a championship with the championship's own tier: `Call of
+Duty Championship 2015/Europe Regional Final` is Major, the same word `MLG Pro League
+2015 Season 1 Playoffs` carries. A chip is any title event won. A ring is a world
+championship, and there are fourteen of those in the archive.
+
+**An unknown tier used to count as the top one.** It no longer does, and the four events
+that change are all Minor with pools from $5,000 to $50,000: MLG Winter Invitational
+2014, Gfinity Summer Masters 2016, Totinos Invitational 2015, and the PlayStation
+Experience Invitational. The title set goes 141 to 137, its pre-2017 half 57 to 54, and
+title wins 138 to 135. The fourteen championships are untouched. Minor is left without a
+numeric tier on purpose: no post-2017 event in this database carries a tier below 2, so a
+number invented for the word would silently decide whether five 2013-2016 tournaments are
+titles.
+
+**Two events take their tier from the competition they sit in.** The 2016 season ran
+stage playoffs in three regions. North America and Europe are Premier and
+Australia-New Zealand is Minor on a pool a third the size, and admitting two regions'
+stage titles while refusing the third's is a regional cut wearing a tier's clothes. The
+structure is identical, so the tier is, and both Australia-New Zealand stage playoffs are
+stamped tier 1 in the loader. The PlayStation Experience Invitational needed no such
+judgement. The snapshot already called it Minor with a $20,000 pool, and it went unread
+because event metadata was matched on the season's year: it ran on 2016-12-03 inside a
+season the archive files as 2017. Metadata is now matched on the event's own date.
 
 **A component is absent only where the archive cannot see it.** Never winning an award is
 a zero and is scored as one. A career played entirely inside 2013, 2014 and 2015 has no
