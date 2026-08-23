@@ -26,7 +26,30 @@
     "Naux": "Hollow",
     "Replays": "Crowder",
     "Burnsoff": "Burns",
-    "Felony": "FeLo"
+    "Felony": "FeLo",
+    "Assauhlt": "Assault",
+    "Conor": "BBCONor",
+    "D1ablo": "Diablo",
+    "DREEALL": "dReal",
+    "EasyMac": "Easy Mac",
+    "Envidian": "EnvdiaN",
+    "Evas1on": "Evasion",
+    "Fastballa": "FA5TBALLA",
+    "GizMo": "Reaper",
+    "Iskatu": "Iskatuu",
+    "Kivi (Kevin Fiala)": "Kivi",
+    "Matt": "Stumpfy",
+    "Nels": "Nelson",
+    "Saint": "Saintt",
+    "Sin": "SinfuL",
+    "Study": "StuDyy",
+    "Swiftaz0r": "Swiftazor",
+    "TISCH47": "Tisch",
+    "TonyJ's": "TonyJs",
+    "TonyJaaa": "TonyJs",
+    "Traix": "Traixx",
+    "Viiox": "BrianViiox",
+    "ZeeK": "Zeeked"
   },
   "_comment_scoped": "'players_by_source' is a per-archive spelling map, applied only to the archive it is listed under. A handle that means one person in one source and another person elsewhere cannot be merged globally: 'Zerg' is Deleo Devitt in the CWL archive and is a different handle in the wiki record.",
   "players_by_source": {
@@ -592,8 +615,20 @@
       "dReal"
     ],
     [
+      "Apox",
+      "AzoX"
+    ],
+    [
+      "Brack",
+      "Brock"
+    ],
+    [
       "Cammy",
       "Sammy"
+    ],
+    [
+      "Carry",
+      "Harry"
     ],
     [
       "Denz",
@@ -604,24 +639,76 @@
       "Pazy"
     ],
     [
+      "FLawLesS",
+      "Lawless"
+    ],
+    [
+      "Fame",
+      "Fate"
+    ],
+    [
+      "Fate",
+      "Hate"
+    ],
+    [
       "FeLo",
       "Fero"
+    ],
+    [
+      "FeLo",
+      "Melo"
+    ],
+    [
+      "Fero",
+      "Kero"
     ],
     [
       "Fero",
       "Nero"
     ],
     [
+      "Huke",
+      "Luke"
+    ],
+    [
+      "JTee",
+      "Joee"
+    ],
+    [
+      "JaayZ",
+      "Jayz"
+    ],
+    [
+      "Jhaze",
+      "Phaze"
+    ],
+    [
       "Johnny",
       "oJohnny"
+    ],
+    [
+      "Kero",
+      "Nero"
+    ],
+    [
+      "Lgend",
+      "Lqgend"
+    ],
+    [
+      "Mamba",
+      "RaMba"
     ],
     [
       "Maux",
       "Naux"
     ],
     [
-      "Methodz",
-      "MethodZsick"
+      "MeLoN",
+      "Melo"
+    ],
+    [
+      "MethodZsick",
+      "Methodz"
     ],
     [
       "Nelson",
@@ -644,8 +731,28 @@
       "Purj"
     ],
     [
+      "RaMba",
+      "Rambo"
+    ],
+    [
+      "RaMba",
+      "Ramby"
+    ],
+    [
+      "Rambo",
+      "Ramby"
+    ],
+    [
+      "Saints",
+      "Saintt"
+    ],
+    [
       "Scump",
       "Stump"
+    ],
+    [
+      "Yosh",
+      "mosh"
     ],
     [
       "Zer0",
@@ -658,7 +765,10 @@
     "MethodZsick": "MethodZ",
     "Vortex": null,
     "Realize": null,
-    "Melo": null
+    "Melo": null,
+    "Diablo": "Diablo",
+    "Swiftazor": "Swiftaz0r",
+    "Traixx": "Traix"
   },
   "real_names": {
     "Royalty": "Matthew Faithfull"
