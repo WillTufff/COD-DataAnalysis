@@ -370,8 +370,18 @@ def artifact(
             name: sum(1 for r in rows if name in r.career_components)
             for name in CAREER_COMPONENT_WEIGHTS
         },
+        # The same count over the careers the board actually ranks. A component
+        # missing on 60 careers and a component missing on 60 ranked careers
+        # are different facts, and only this one is about the published board.
+        "component_coverage_qualified": {
+            name: sum(1 for r in qualified if name in r.career_components)
+            for name in CAREER_COMPONENT_WEIGHTS
+        },
         "n_renormalized": sum(
             1 for r in rows if len(r.career_components) < len(CAREER_COMPONENT_WEIGHTS)
+        ),
+        "n_renormalized_qualified": sum(
+            1 for r in qualified if len(r.career_components) < len(CAREER_COMPONENT_WEIGHTS)
         ),
         # The cohort low and high each component was scaled against.
         "component_scale": {

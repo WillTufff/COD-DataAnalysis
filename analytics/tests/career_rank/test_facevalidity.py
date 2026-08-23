@@ -76,6 +76,28 @@ def test_absent_legend_counts_a_missing_player_as_absent() -> None:
     assert result.detail["absent"] == [{"handle": "Legend", "rank": None}]
 
 
+def test_absent_legend_publishes_how_narrowly_it_passed() -> None:
+    """A pass on the last admitted place must not read like a comfortable one.
+
+    The verdict alone cannot tell them apart, so the lowest tier A rank is
+    published with it and the page prints it beside the pass.
+    """
+    board = _board([(pid, f"P{pid}", 100.0 - pid, 1) for pid in range(1, 26)])
+    anchor_set = _anchor_set(
+        [
+            {"handle": "P1", "player_id": 1, "tier": "A"},
+            {"handle": "P25", "player_id": 25, "tier": "A"},
+        ]
+    )
+    result = facevalidity.absent_legend(board, anchor_set)
+    assert result.verdict == facevalidity.PASS
+    assert result.detail["worst_rank"] == 25
+    assert result.detail["tier_a"] == [
+        {"handle": "P1", "rank": 1},
+        {"handle": "P25", "rank": 25},
+    ]
+
+
 def test_unearned_top_ten_is_inconclusive_while_rings_are_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

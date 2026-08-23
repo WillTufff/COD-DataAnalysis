@@ -34,6 +34,7 @@ from . import (
     validation,
 )
 from .career_rank import engine as career_rank
+from .career_rank import facevalidity
 from .db import connect
 from .metricdiff import run as metricdiff
 from .ratings import (
@@ -1435,6 +1436,25 @@ def main(argv: list[str] | None = None) -> int:
             f"  blend {weights}; {cr_blend['n_renormalized']} careers scored "
             "without a component the archive cannot see"
         )
+
+        # The board's own report card, against the anchor set frozen before any
+        # rebuild phase moved a weight. It runs here because every test reads
+        # the rows just inserted, and it is written to the same run so the page
+        # cannot print a board from one run and a verdict from another.
+        cr_face = facevalidity.run(conn)
+        conn.execute(
+            "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
+            (cr_run, facevalidity.ARTIFACT_NAME, json.dumps(cr_face)),
+        )
+        cr_report = sum(1 for r in cr_face["results"] if r["verdict"] == facevalidity.REPORT)
+        print(
+            f"  face validity {cr_face['passed']} pass, {cr_face['failed']} fail, "
+            f"{cr_face['inconclusive']} inconclusive, {cr_report} report; "
+            f"anchor set {cr_face['anchor_set']['cut']}"
+            + ("" if cr_face["anchor_set"]["matches_frozen"] else " DOES NOT MATCH FROZEN")
+        )
+        for r in cr_face["results"]:
+            print(f"    {r['test']}: {r['verdict']} — {r['summary']}")
 
         # The same seasons on an age axis, and the selection problem that makes
         # any single curve of them wrong. Three fits, published together,

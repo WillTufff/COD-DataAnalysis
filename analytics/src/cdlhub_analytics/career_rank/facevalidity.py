@@ -45,6 +45,12 @@ CORRELATION_DEPTH = 40
 # the archive and no peak at all is the limiting case, and it fails.
 MAX_ERA_SKEW = 3.0
 
+# Written under the career_rank run once its board rows land, so the site can
+# print the board's own report card from the same run it prints the board from.
+# It cannot be built inside `engine.build`: every test reads the published
+# rows, and they do not exist until the run has inserted them.
+ARTIFACT_NAME = "career_rank_face_validity"
+
 PASS = "pass"
 FAIL = "fail"
 INCONCLUSIVE = "inconclusive"
@@ -125,20 +131,27 @@ def load_board(conn: Conn) -> Board:
 
 def absent_legend(board: Board, anchor_set: dict[str, Any]) -> Result:
     """A consensus anchor the board does not rank near the top."""
+    ranked: list[dict[str, Any]] = []
     absent: list[dict[str, Any]] = []
     for player in anchor_set["players"]:
         if player["tier"] != "A":
             continue
         rank = board.rank_of(player["player_id"])
+        ranked.append({"handle": player["handle"], "rank": rank})
         if rank is None or rank > TOP_N:
             absent.append({"handle": player["handle"], "rank": rank})
     verdict = FAIL if absent else PASS
+    ranked.sort(key=lambda row: (row["rank"] is None, row["rank"] or 0))
+    # The lowest-ranked tier A anchor, which is how much room a pass has. A
+    # test cleared by one place and a test cleared by fifteen read the same in
+    # the verdict, and only this number separates them.
+    worst = ranked[-1]["rank"] if ranked else None
     return Result(
         "absent_legend",
         verdict,
         f"{len(absent)} of {anchor_set['tier_counts'].get('A', 0)} tier A anchors "
         f"sit outside the top {TOP_N}",
-        {"top_n": TOP_N, "absent": absent},
+        {"top_n": TOP_N, "absent": absent, "tier_a": ranked, "worst_rank": worst},
     )
 
 
