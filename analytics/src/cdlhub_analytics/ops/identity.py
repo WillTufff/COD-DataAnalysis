@@ -2,12 +2,20 @@
 
 Two rows in `players` are a candidate when their handles collapse to the same
 key once case and punctuation are removed, when they are one edit apart and
-share a team, when they carry the same real name and birthdate, or when the
-wiki lists one handle as a former gamertag of the other. The last two rules are
-what catch a rename to an unrelated gamertag, which no amount of string
-distance will find, and a former gamertag decides the pair on its own. For the
-rest, the evidence decides: two handles that appear in the same game are two
-people, and two that never overlap and hand a team over between them are one.
+share a team, when they carry the same real name and birthdate, or when a wiki
+puts both handles on one person. The last two rules are what catch a rename to
+an unrelated gamertag, which no amount of string distance will find, and a wiki
+naming both handles decides the pair on its own. For the rest, the evidence
+decides: two handles that appear in the same game are two people, and two that
+never overlap and hand a team over between them are one.
+
+Two wikis are read, and they answer opposite questions. Liquipedia's
+`alternateid` names the gamertags one page's player used before, so it can only
+say "the same person". The CoD wiki's redirect table maps every spelling to the
+one page it belongs to, so it says that as well as its opposite: two handles on
+two pages are two people, and that is what settles a one-edit pair the box
+scores never put in the same game. Where the two wikis disagree the pair is
+handed back for review rather than decided.
 
 Decisions are written to the pipeline's `aliases.json` and nowhere else. Rows
 written straight into Postgres do not survive the next import; an alias entry
@@ -30,6 +38,8 @@ MIN_FUZZY_LENGTH = 4
 TOP_TEAMS = 6
 # The wiki snapshot that names a page's former gamertags.
 LPDB_PLAYERS_PATH = SNAPSHOTS_DIR / "lpdb" / "players.json"
+# The CoD wiki's redirect table: every spelling, and the page it belongs to.
+CODWIKI_REDIRECTS_PATH = SNAPSHOTS_DIR / "codwiki" / "playerredirects.json"
 
 KEPT_SEPARATE_COMMENT = (
     "'identity_kept_separate' lists handle pairs confirmed to be two different "
@@ -149,6 +159,31 @@ def alternate_id_pairs(path: Path = LPDB_PLAYERS_PATH) -> set[tuple[str, str]]:
     return pairs
 
 
+def wiki_pages(path: Path = CODWIKI_REDIRECTS_PATH) -> dict[str, str]:
+    """Normalized handle -> the one CoD wiki page that spelling redirects to.
+
+    The table is a statement about people: every spelling a player has been
+    written as points at their page, and no spelling points at two. So two
+    handles landing on different pages is the wiki saying they are different
+    players, which is the half `alternateid` cannot express.
+    """
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(loaded, list):
+        return {}
+    pages: dict[str, str] = {}
+    for row in loaded:
+        if not isinstance(row, dict):
+            continue
+        key = normalize(str(row.get("AllName") or ""))
+        page = str(row.get("OverviewPage") or "").strip()
+        if key and page:
+            pages[key] = page
+    return pages
+
+
 def _bio_key(player: dict[str, Any]) -> tuple[str, date] | None:
     """The person a row claims to be, or None when it does not claim one.
 
@@ -162,10 +197,17 @@ def _bio_key(player: dict[str, Any]) -> tuple[str, date] | None:
 
 
 def _kept_separate(aliases: dict[str, Any]) -> set[tuple[str, str]]:
+    """Recorded pairs, ordered the way a candidate id is ordered.
+
+    The file is hand-edited, and a pair written in the other order matched
+    nothing: `Methodz` sorts after `MethodZsick` because a capital sorts
+    before a lowercase, so a decision sat in the file while the queue kept
+    offering it. Every entry is put through the same key the queue builds.
+    """
     pairs: set[tuple[str, str]] = set()
     for entry in aliases.get("identity_kept_separate") or []:
         if isinstance(entry, list) and len(entry) == 2:
-            pairs.add((str(entry[0]), str(entry[1])))
+            pairs.add(_pair_key(str(entry[0]), str(entry[1])))
     return pairs
 
 
@@ -268,26 +310,60 @@ def _side(
     }
 
 
+def _distinct_pages(evidence: dict[str, Any]) -> bool:
+    """True when the CoD wiki gives the two handles two pages of their own."""
+    pages = evidence.get("wiki_pages") or {}
+    left, right = pages.get("left"), pages.get("right")
+    return bool(left and right and left != right)
+
+
+def _distinct_people(evidence: dict[str, Any]) -> bool:
+    """True when the two rows already carry two different real names.
+
+    A name reaches a row from the one biography that row was allowed to take,
+    so two names is Liquipedia holding two pages for handles the other wiki
+    folds into one. `D1ablo` is the case: the CoD wiki redirects it onto
+    Samir Peru's page, Liquipedia keeps a page of its own for Tom Newman and
+    names him on two rosters, and only the pair of names shows the conflict.
+    """
+    names = evidence.get("real_names") or {}
+    left, right = names.get("left"), names.get("right")
+    return bool(left and right and left.casefold() != right.casefold())
+
+
 def _suggestion(evidence: dict[str, Any]) -> str:
     """What the evidence says, for the owner to accept or overrule.
 
-    A former gamertag on the wiki page is the wiki saying the two handles are
-    one person, so it decides the pair before anything else is read. Two stints
-    at once do not overrule it: an archive stint spans its whole event, and a
-    player lent to another roster for one week reads as a conflict. A map the
-    two handles played together does hold it back for the owner, because that
-    would mean one of the sources is wrong about who played.
+    A wiki naming both handles as one person decides the pair before anything
+    else is read. Two stints at once do not overrule it: an archive stint spans
+    its whole event, and a player lent to another roster for one week reads as
+    a conflict. Three things do hold it back for the owner: a map the two
+    handles played together, which would mean a source is wrong about who
+    played, the other wiki giving each handle its own page, and the two rows
+    already carrying two different real names. The last two are two wikis
+    saying opposite things about one person.
 
-    Otherwise: sharing a map is two people, and so is holding two rosters at
-    once. A team both handles played for but never played a map on together is
-    one person under two spellings, which is the whole shape this queue is
-    looking for. A shared real name and birthdate says the same thing without
-    the handles agreeing at all, so it decides a pair the string rules would
-    never have offered.
+    Otherwise: sharing a map is two people, so is holding two rosters at once,
+    and so is a page each on the CoD wiki. That last one is what settles the
+    one-edit pairs, which are the bulk of this queue and which the box scores
+    can never settle — two handles whose careers do not overlap share no game
+    to be told apart by. A team both handles played for but never played a map
+    on together is one person under two spellings, which is the whole shape
+    this queue is looking for. A shared real name and birthdate says the same
+    thing without the handles agreeing at all, so it decides a pair the string
+    rules would never have offered.
     """
-    if evidence["kind"] == "alternate_id":
-        return "review" if evidence["games_together"] > 0 else "merge"
+    if evidence["kind"] in {"alternate_id", "alias_table"}:
+        if (
+            evidence["games_together"] > 0
+            or _distinct_pages(evidence)
+            or _distinct_people(evidence)
+        ):
+            return "review"
+        return "merge"
     if evidence["games_together"] > 0:
+        return "keep_separate"
+    if _distinct_pages(evidence):
         return "keep_separate"
     if evidence["stint_conflicts"]:
         return "keep_separate"
@@ -314,7 +390,8 @@ def candidates(conn: Conn) -> list[dict[str, Any]]:
     for row in rows_as_dicts(conn.execute(_STINTS_SQL)):
         stints.setdefault(int(row["player_id"]), []).append(row)
 
-    pairs = _pair_up(players, resolved, separated, alternate_id_pairs())
+    pages = wiki_pages()
+    pairs = _pair_up(players, resolved, separated, alternate_id_pairs(), pages)
     if not pairs:
         return []
 
@@ -339,6 +416,14 @@ def candidates(conn: Conn) -> list[dict[str, Any]]:
             "games_together": int(met.get("games") or 0),
             "games_opposed": int(met.get("games_opposed") or 0),
             "shared_teams": shared,
+            "real_names": {
+                "left": left["real_name"],
+                "right": right["real_name"],
+            },
+            "wiki_pages": {
+                "left": pages.get(normalize(str(left["handle"]))),
+                "right": pages.get(normalize(str(right["handle"]))),
+            },
             "overlap_days": _overlap_days(left, right),
             "gap_days": _gap_days(left, right),
             "stint_conflicts": _stint_conflicts(
@@ -368,8 +453,9 @@ def _pair_up(
     resolved: set[str],
     separated: set[tuple[str, str]],
     alternates: set[tuple[str, str]] | None = None,
+    pages: dict[str, str] | None = None,
 ) -> list[tuple[int, int, str]]:
-    """Candidate pairs: a former gamertag, one biography, a spelling, or one edit."""
+    """Candidate pairs: one wiki page, one biography, a spelling, or one edit."""
     keys = {int(p["player_id"]): normalize(str(p["handle"])) for p in players}
     handles = {int(p["player_id"]): str(p["handle"]) for p in players}
     bios = {int(p["player_id"]): _bio_key(p) for p in players}
@@ -377,6 +463,7 @@ def _pair_up(
     # spelling alone can never be settled. Its biography still can settle one.
     played = {int(p["player_id"]) for p in players if int(p["maps"] or 0) > 0}
     former = alternates or set()
+    redirects = pages or {}
     ids = sorted(keys, key=lambda i: handles[i])
 
     pairs: list[tuple[int, int, str]] = []
@@ -390,6 +477,9 @@ def _pair_up(
             a, b = keys[left_id], keys[right_id]
             if a and b and _pair_key(a, b) in former:
                 pairs.append((left_id, right_id, "alternate_id"))
+                continue
+            if a and b and redirects.get(a) and redirects.get(a) == redirects.get(b):
+                pairs.append((left_id, right_id, "alias_table"))
                 continue
             bio = bios[left_id]
             if bio is not None and bio == bios[right_id]:

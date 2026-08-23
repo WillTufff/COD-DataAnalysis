@@ -934,6 +934,59 @@ def test_keep_separate_records_the_pair_in_a_stable_order(aliases: Path) -> None
         ops_identity.keep_separate("Abe", "Abe")
 
 
+def test_two_wiki_pages_are_two_people() -> None:
+    evidence = {
+        "kind": "one_edit",
+        "games_together": 0,
+        "shared_teams": ["Team"],
+        "stint_conflicts": [],
+        "real_names": {"left": None, "right": None},
+        "wiki_pages": {"left": "Brack", "right": "Brock"},
+    }
+
+    assert ops_identity._suggestion(evidence) == "keep_separate"
+    evidence["wiki_pages"] = {"left": "Brack", "right": None}
+    assert ops_identity._suggestion(evidence) == "merge"
+
+
+def test_two_wikis_disagreeing_is_handed_back_rather_than_merged() -> None:
+    evidence = {
+        "kind": "alternate_id",
+        "games_together": 0,
+        "shared_teams": [],
+        "stint_conflicts": [],
+        "real_names": {"left": "Tom Newman", "right": "Samir Peru"},
+        "wiki_pages": {"left": "Diablo", "right": "Diablo"},
+    }
+
+    assert ops_identity._suggestion(evidence) == "review"
+    evidence["real_names"] = {"left": "Ryan Lapierre", "right": "Ryan Lapierre"}
+    assert ops_identity._suggestion(evidence) == "merge"
+
+
+def test_the_redirect_table_reads_as_a_spelling_to_page_map(tmp_path: Path) -> None:
+    path = tmp_path / "playerredirects.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"AllName": "GizMo", "OverviewPage": "Reaper"},
+                {"AllName": "Reaper", "OverviewPage": "Reaper"},
+                {"AllName": "", "OverviewPage": "Reaper"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert ops_identity.wiki_pages(path) == {"gizmo": "Reaper", "reaper": "Reaper"}
+    assert ops_identity.wiki_pages(tmp_path / "missing.json") == {}
+
+
+def test_a_pair_written_in_either_order_stops_being_offered() -> None:
+    aliases = {"identity_kept_separate": [["Methodz", "MethodZsick"]]}
+
+    assert ops_identity._kept_separate(aliases) == {("MethodZsick", "Methodz")}
+
+
 def test_a_refused_decision_exits_without_printing_a_payload(
     capsys: pytest.CaptureFixture[str], aliases: Path
 ) -> None:
@@ -1010,6 +1063,8 @@ def test_identity_report_lists_the_queue_and_what_is_already_resolved(
             "games_together",
             "games_opposed",
             "shared_teams",
+            "real_names",
+            "wiki_pages",
             "overlap_days",
             "gap_days",
             "stint_conflicts",
