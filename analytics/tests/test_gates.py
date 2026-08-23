@@ -962,6 +962,16 @@ _PHASE_C_PINS = {
         "stack_16": 2,
         "stack_12": 22,
     },
+    "career_rank_blend": {
+        "peak_weight": 20.0,
+        "prime_weight": 25.0,
+        "longevity_weight": 20.0,
+        "resume_weight": 25.0,
+        "accolade_weight": 10.0,
+        "prime_coverage": 233,
+        "accolade_coverage": 430,
+        "n_renormalized": 259,
+    },
 }
 
 _PHASE_C_RUN: dict[str, Any] = {
@@ -973,6 +983,23 @@ _PHASE_C_RUN: dict[str, Any] = {
         "unresolved_rows": 11,
         "thin_years": [2013, 2014, 2015],
         "stack_distribution": {"4": 58, "8": 57, "12": 22, "16": 2},
+    },
+    "career": {
+        "career_component_weights": {
+            "PEAK": 20.0,
+            "PRIME": 25.0,
+            "LONGEVITY": 20.0,
+            "RESUME": 25.0,
+            "ACCOLADE": 10.0,
+        },
+        "component_coverage": {
+            "PEAK": 490,
+            "PRIME": 233,
+            "LONGEVITY": 490,
+            "RESUME": 490,
+            "ACCOLADE": 430,
+        },
+        "n_renormalized": 259,
     },
 }
 
@@ -1251,6 +1278,95 @@ def test_an_award_row_that_started_resolving_fails(monkeypatch: pytest.MonkeyPat
     found = _page_figures({"accolade": accolade})
     assert len(found) == 1
     assert "accolade unresolved_rows" in found[0]
+
+
+def test_a_blend_weight_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The five career weights were fixed before the blend ran once. A weight
+    that can move between runs without anything noticing is a weight that was
+    never declared, so each is pinned at zero tolerance."""
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+    moved = {
+        **_PHASE_C_RUN["career"],
+        "career_component_weights": {
+            **_PHASE_C_RUN["career"]["career_component_weights"],
+            "RESUME": 30.0,
+        },
+    }
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            **_PHASE_C_RUN,
+            "career": moved,
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+    )
+    assert len(found) == 1
+    assert "blend weight RESUME" in found[0]
+
+
+def test_a_component_that_stopped_being_renormalized_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coverage decides which careers are scored without a component. A run
+    that renormalizes a different number of them has changed the coverage rule
+    or the archive under it, and either one has to be read before it ships."""
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            **_PHASE_C_RUN,
+            "career": {**_PHASE_C_RUN["career"], "n_renormalized": 0},
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+    )
+    assert len(found) == 1
+    assert "careers renormalized" in found[0]
 
 
 def test_the_declared_value_weight_cannot_drift(monkeypatch: pytest.MonkeyPatch) -> None:

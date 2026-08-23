@@ -868,6 +868,30 @@ def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, An
                 0.0,
             )
         )
+    blend = (career_rank.get("career") or {}).get("career_component_weights") or {}
+    coverage = (career_rank.get("career") or {}).get("component_coverage") or {}
+    pinned_blend = evalspec.PUBLISHED_FIGURES.get("career_rank_blend") or {}
+    for name in ("PEAK", "PRIME", "LONGEVITY", "RESUME", "ACCOLADE"):
+        checks.append(
+            (
+                f"career-rank blend weight {name}",
+                blend.get(name),
+                pinned_blend.get(f"{name.lower()}_weight"),
+                0.0,
+            )
+        )
+    for name, key in (("PRIME", "prime_coverage"), ("ACCOLADE", "accolade_coverage")):
+        checks.append(
+            (f"career-rank {name} coverage", coverage.get(name), pinned_blend.get(key), 0.0)
+        )
+    checks.append(
+        (
+            "career-rank careers renormalized",
+            (career_rank.get("career") or {}).get("n_renormalized"),
+            pinned_blend.get("n_renormalized"),
+            0.0,
+        )
+    )
     backbone = career_rank.get("value_backbone") or {}
     pinned_backbone = evalspec.PUBLISHED_FIGURES.get("career_rank_value_coverage") or {}
     for key in ("n_seasons", "n_with_value", "breadth_weight", "value_weight"):

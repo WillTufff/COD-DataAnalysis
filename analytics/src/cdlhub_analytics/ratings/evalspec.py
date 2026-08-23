@@ -358,6 +358,20 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "stack_16": 2,
         "stack_12": 22,
     },
+    "career_rank_blend": {
+        "on": "2026-08-22",
+        # The five weights, and the two counts that say which careers the
+        # blend renormalized over. Pinned because a weight moving unannounced
+        # is exactly the failure the pre-registration exists to prevent.
+        "peak_weight": 20.0,
+        "prime_weight": 25.0,
+        "longevity_weight": 20.0,
+        "resume_weight": 25.0,
+        "accolade_weight": 10.0,
+        "prime_coverage": 233,
+        "accolade_coverage": 430,
+        "n_renormalized": 259,
+    },
     "career_rank_value_coverage": {
         "on": "2026-08-22",
         "n_seasons": 1458,
