@@ -158,6 +158,15 @@ def artifact(conn: psycopg.Connection[Any], model: str, name: str) -> dict[str, 
     return cast(dict[str, Any], payload if isinstance(payload, dict) else json.loads(payload))
 
 
+def optional_artifact(conn: psycopg.Connection[Any], model: str, name: str) -> dict[str, Any]:
+    """The same read, where a missing artifact is one gate's failure and not a
+    reason for the whole suite to report that it could not run."""
+    try:
+        return artifact(conn, model, name)
+    except CannotRun:
+        return {}
+
+
 def rating_artifact(conn: psycopg.Connection[Any], name: str) -> dict[str, Any]:
     """The published feature-set version's artifact, not whichever ran last.
 
@@ -995,8 +1004,14 @@ def page_figure_failures(
     # The anchor set the page prints its report card against. Two of these are
     # strings and the rest are counts, and none of them may move without a
     # re-cut, which takes a new label by design.
+    # `face_validity` is None where the caller has nothing to say about the
+    # report card, and an empty dict where the run should have written one and
+    # did not. The second is a failure of this gate and not a reason for every
+    # other gate to stop reading.
     anchors_pinned = evalspec.PUBLISHED_FIGURES.get("career_rank_anchor_set") or {}
     anchor_set = (face_validity or {}).get("anchor_set") or {}
+    if face_validity == {} and anchors_pinned:
+        bad.append("the run wrote no face-validity artifact, so the anchor set is unchecked")
     if anchor_set and anchors_pinned:
         for key, want in (
             ("cut", anchors_pinned.get("cut")),
@@ -1298,7 +1313,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             page_figure_failures(
                 validation_payloads(conn).get("validation_retrodiction", {}),
                 artifact(conn, career_rank.MODEL, career_rank.ARTIFACT_NAME),
-                artifact(conn, career_rank.MODEL, career_facevalidity.ARTIFACT_NAME),
+                optional_artifact(conn, career_rank.MODEL, career_facevalidity.ARTIFACT_NAME),
             ),
         ),
     ]
