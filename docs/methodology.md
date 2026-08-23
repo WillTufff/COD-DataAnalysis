@@ -2470,13 +2470,13 @@ leaderboard by at least 0.01 cohort standard deviations, the same magnitude this
 already used to separate "moves the table without predicting" from "does nothing either
 way". Naming that magnitude and applying it to both branches is the whole of the change,
 so it can only ever make a family harder to keep. It was written after the `prize_pool`
-result made the gap visible, which is stated here because a threshold written once a
-result is in usually is not a threshold.
+result made the gap visible. A threshold written once a result is in is usually not a
+threshold, and the two conditions above are what make this one defensible.
 
 Both verdicts are published every run, the declared rule's and the amended rule's, with
-the effect size beside each. On this release they are identical: `prize_pool` clears the
-share at 31 of 60 on a median move of 0.01667, above the floor, so no family's verdict
-turns on the amendment. Nothing downstream reads either table.
+the effect size beside each. On this release they are identical. `prize_pool` clears the
+share at 31 of 60 on a median move of 0.01667, which is above the floor, so no
+family's verdict turns on the amendment. Nothing downstream reads either table.
 
 `prize_pool` was predicted in advance to be event tier under another name, and it is. So are
 four of the other five. On the shorter record three of the five moved the table without
@@ -3539,7 +3539,7 @@ that change are all Minor with pools from $5,000 to $50,000: MLG Winter Invitati
 2014, Gfinity Summer Masters 2016, Totinos Invitational 2015, and the PlayStation
 Experience Invitational. The title set goes 141 to 137, its pre-2017 half 57 to 54, and
 title wins 138 to 135. The fourteen championships are untouched. Minor is left without a
-numeric tier on purpose: no post-2017 event in this database carries a tier below 2, so a
+numeric tier on purpose. No post-2017 event in this database carries a tier below 2, so a
 number invented for the word would silently decide whether five 2013-2016 tournaments are
 titles.
 
@@ -3550,7 +3550,7 @@ stage titles while refusing the third's is a regional cut wearing a tier's cloth
 structure is identical, so the tier is, and both Australia-New Zealand stage playoffs are
 stamped tier 1 in the loader. The PlayStation Experience Invitational needed no such
 judgement. The snapshot already called it Minor with a $20,000 pool, and it went unread
-because event metadata was matched on the season's year: it ran on 2016-12-03 inside a
+because event metadata was matched on the season's year. It ran on 2016-12-03 inside a
 season the archive files as 2017. Metadata is now matched on the event's own date.
 
 **A component is absent only where the archive cannot see it.** Never winning an award is
