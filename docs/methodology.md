@@ -3504,8 +3504,10 @@ entering it.
 
 Each component is scaled across the players the board ranks before the weights are
 applied, so the weights are shares of one comparable scale and not of five different
-units. The scale is fitted on the ranked cohort and applied to every career, so a career
-below the three-season floor can score outside the 0-100 range; none of those is ranked.
+units. The scale is fitted on the ranked cohort and applied to every career without
+clamping, so a career below the three-season floor can read a component outside the 0-100
+range and a total below zero. None of those careers is ranked. Clamping the number would
+report a floor the arithmetic does not have.
 Replacement is the same definition career value uses: the lowest season score among the
 players with at least eight maps that season, taken over the whole archive so that
 restricting a run cannot change what a season is worth. A season under the map floor can
@@ -3595,7 +3597,7 @@ The opponent-strength proxy needs its own honesty check. The project has no inde
 team rating, so a team's own season strength is approximated as the mean VALUE of its
 modal-team players. That proxy was checked against an outside signal before this
 shipped: season map win rate, taken from `games.winner_team_id`. It correlates with the
-proxy at Pearson r = 0.76 and Spearman r = 0.80 over 327 team-seasons with at least 10
+proxy at Pearson r = 0.76 and Spearman r = 0.79 over 327 team-seasons with at least 10
 maps, strong enough to trust as a real signal and not a coincidence of the join. Both
 numbers are computed on every run and stored in the artifact this page reads, so the check
 is repeated rather than remembered.
@@ -3612,6 +3614,43 @@ gets a tight SD; a season where they scatter gets a wide one. A career total's S
 compounds the season SDs as independent variances, the same simplification career value's
 own total_sd makes. That understates the true width, because the underlying metric fits
 share a cohort across years.
+
+**The board is checked against an outside referent nothing in it was fitted to.** Five
+published all-time rankings were transcribed in full and frozen as `anchors-2026-08-18`
+before any of this was rebuilt, along with the five tests below. Tier is a count of
+lists and never a reading of placement, so the player ranked last on three lists outranks
+the player ranked first on two: 7 players are named on three or more all-time lists, 2 on
+exactly two, and 14 on one list or on a current-form list alone. A failure sends the
+formula back and never the player. No weight may be chosen to move an anchor, only a
+structural change may follow a run of these, and the reason for each one is written into
+this document. The correlation is reported and never optimised, because fitting to it
+would turn the anchor set into a training label.
+
+| Test | Rule | Gates |
+|---|---|---|
+| Absent legend | A top-tier anchor outside the top 25, or absent from the board, is a failure | yes |
+| Unearned top ten | A top-ten career with no title win, no top-tier award and no published mention is a failure | yes |
+| Rank correlation | Spearman against the mean published rank over the top 40 | no, reported |
+| Era balance | Top-25 peaks per era against player-seasons per era, read in whichever direction is larger; above 3.0 fails, and an era with player-seasons and no peak fails | yes |
+| Coverage honesty | Every published career row carries its coverage | yes |
+
+The verdicts run with the board and are published from the same run, so the site prints
+whatever the current board answers. On the release this document describes, four of the
+four gating tests pass and the correlation reports. That is the first release in which
+`absent_legend` has passed since the tests were written, and the margin belongs beside
+the verdict: the lowest-ranked top-tier anchor sits at 25 of a top 25, which is a pass by
+one place. The correlation is rho = 0.5640 over the 13 anchors inside the top 40.
+Agreement with the published lists is partial, and that number is the size of it.
+
+What moved the anchors was structural and is on the record as such. The board ranked on a
+sum of season scores until this release, so the finish record and the award record were
+published beside the ranking without entering it, and the careers those lists are built
+on are the careers that record favours. Two implementation defects were repaired in the
+same release, each measured before the run that applied it: the three-season window ran
+on a season sequence that dropped the pre-2017 years, so a component carrying a quarter
+of the ranking reached 167 of 490 careers instead of 233, and the award coverage read the
+years the award scorer emits, which include the silenced years at zero, so the thin-year
+absence never happened.
 
 ### Aging: three curves, because one curve would be wrong
 
