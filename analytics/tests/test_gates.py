@@ -971,6 +971,34 @@ _PHASE_C_PINS = {
         "prime_coverage": 233,
         "accolade_coverage": 430,
         "n_renormalized": 259,
+        "prime_coverage_qualified": 203,
+        "accolade_coverage_qualified": 201,
+        "n_renormalized_qualified": 2,
+    },
+    "career_rank_replacement": {
+        "qualified_maps": 8,
+        "n_seasons_with_a_floor": 14,
+        "n_seasons_without_a_floor": 0,
+    },
+    "career_rank_coverage_years": {
+        "resume_from": 2013,
+        "resume_to": 2026,
+        "n_resume_years": 14,
+        "accolade_from": 2016,
+        "accolade_to": 2026,
+        "n_accolade_years": 11,
+    },
+    "career_rank_families": {
+        "basket_size": 43,
+        "sizes": {"volume": 7, "efficiency": 6, "objective": 15},
+    },
+    "career_rank_anchor_set": {
+        "cut": "anchors-2026-08-18",
+        "sha256": "45224312",
+        "tier_a": 7,
+        "tier_b": 2,
+        "tier_c": 14,
+        "top_n": 25,
     },
 }
 
@@ -999,8 +1027,34 @@ _PHASE_C_RUN: dict[str, Any] = {
             "RESUME": 490,
             "ACCOLADE": 430,
         },
+        "component_coverage_qualified": {
+            "PEAK": 203,
+            "PRIME": 203,
+            "LONGEVITY": 203,
+            "RESUME": 203,
+            "ACCOLADE": 201,
+        },
         "n_renormalized": 259,
+        "n_renormalized_qualified": 2,
     },
+    "replacement": _PHASE_C_PINS["career_rank_replacement"],
+    "component_coverage_years": {
+        "resume": list(range(2013, 2027)),
+        "accolade": list(range(2016, 2027)),
+    },
+    "basket_size": 43,
+    "families": {"sizes": {"volume": 7, "efficiency": 6, "objective": 15}},
+}
+
+# The board's report card, which the anchor block of the same gate reads.
+_FACE_RUN: dict[str, Any] = {
+    "anchor_set": {
+        "cut": "anchors-2026-08-18",
+        "sha256": "45224312",
+        "matches_frozen": True,
+        "tier_counts": {"A": 7, "B": 2, "C": 14},
+    },
+    "results": [{"test": "absent_legend", "verdict": "pass", "top_n": 25}],
 }
 
 
@@ -1114,9 +1168,55 @@ def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
                     {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
                 ],
             },
+            _FACE_RUN,
         )
         == []
     )
+
+
+def test_an_anchor_set_recut_under_the_same_label_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A re-cut takes a new label by design, so a moved digest under the old one
+    is the set being edited underneath the board it judges."""
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            **_PHASE_C_RUN,
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+        {
+            **_FACE_RUN,
+            "anchor_set": {**_FACE_RUN["anchor_set"], "sha256": "deadbeef"},
+        },
+    )
+
+    assert len(found) == 1
+    assert "anchor set sha256" in found[0]
 
 
 def test_an_era_whose_spread_moved_fails(monkeypatch: pytest.MonkeyPatch) -> None:

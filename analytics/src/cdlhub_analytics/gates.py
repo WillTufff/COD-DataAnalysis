@@ -35,6 +35,7 @@ import psycopg
 from . import aging, career, errorcontrol, metrics, role, seriesdyn, style, validation
 from .career_rank import engine as career_rank
 from .career_rank import evalpop as career_evalpop
+from .career_rank import facevalidity as career_facevalidity
 from .db import connect
 from .era import MIN_MAPS
 from .metricdiff import MODEL as METRIC_DIFF_MODEL
@@ -780,7 +781,11 @@ def population_failures(
     return bad
 
 
-def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, Any]) -> list[str]:
+def page_figure_failures(
+    retrodiction: dict[str, Any],
+    career_rank: dict[str, Any],
+    face_validity: dict[str, Any] | None = None,
+) -> list[str]:
     """Two figures the page states, held against the run that computes them.
 
     Both were printed on /methodology with no artifact behind them: the count of
@@ -892,11 +897,88 @@ def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, An
             0.0,
         )
     )
+    qualified_coverage = (career_rank.get("career") or {}).get("component_coverage_qualified") or {}
+    for name, key in (
+        ("PRIME", "prime_coverage_qualified"),
+        ("ACCOLADE", "accolade_coverage_qualified"),
+    ):
+        checks.append(
+            (
+                f"career-rank {name} coverage among ranked careers",
+                qualified_coverage.get(name),
+                pinned_blend.get(key),
+                0.0,
+            )
+        )
+    checks.append(
+        (
+            "career-rank ranked careers renormalized",
+            (career_rank.get("career") or {}).get("n_renormalized_qualified"),
+            pinned_blend.get("n_renormalized_qualified"),
+            0.0,
+        )
+    )
     backbone = career_rank.get("value_backbone") or {}
     pinned_backbone = evalspec.PUBLISHED_FIGURES.get("career_rank_value_coverage") or {}
     for key in ("n_seasons", "n_with_value", "breadth_weight", "value_weight"):
         checks.append(
             (f"career-rank VALUE {key}", backbone.get(key), pinned_backbone.get(key), 0.0)
+        )
+
+    # Phase F. The replacement floor, the two coverage-year sets and the family
+    # sizes. Each is a number a page states and nothing was holding.
+    replacement = career_rank.get("replacement") or {}
+    pinned_replacement = evalspec.PUBLISHED_FIGURES.get("career_rank_replacement") or {}
+    for key in ("qualified_maps", "n_seasons_with_a_floor", "n_seasons_without_a_floor"):
+        checks.append(
+            (
+                f"career-rank replacement {key}",
+                replacement.get(key),
+                pinned_replacement.get(key),
+                0.0,
+            )
+        )
+    years = career_rank.get("component_coverage_years") or {}
+    pinned_years = evalspec.PUBLISHED_FIGURES.get("career_rank_coverage_years") or {}
+    for component in ("resume", "accolade"):
+        published = sorted(years.get(component) or [])
+        checks.append(
+            (
+                f"career-rank {component} coverage years",
+                len(published) or None,
+                pinned_years.get(f"n_{component}_years"),
+                0.0,
+            )
+        )
+        checks.append(
+            (
+                f"career-rank {component} coverage first year",
+                published[0] if published else None,
+                pinned_years.get(f"{component}_from"),
+                0.0,
+            )
+        )
+        checks.append(
+            (
+                f"career-rank {component} coverage last year",
+                published[-1] if published else None,
+                pinned_years.get(f"{component}_to"),
+                0.0,
+            )
+        )
+    families = career_rank.get("families") or {}
+    pinned_families = evalspec.PUBLISHED_FIGURES.get("career_rank_families") or {}
+    checks.append(
+        (
+            "career-rank basket size",
+            career_rank.get("basket_size"),
+            pinned_families.get("basket_size"),
+            0.0,
+        )
+    )
+    for family, size in (pinned_families.get("sizes") or {}).items():
+        checks.append(
+            (f"career-rank family {family}", (families.get("sizes") or {}).get(family), size, 0.0)
         )
     for what, got, _want in [(c[0], c[1], c[2]) for c in checks if c[2] is None]:
         bad.append(f"{REPORTED}{what} is not pinned yet; the run computes {got}")
@@ -908,6 +990,37 @@ def page_figure_failures(retrodiction: dict[str, Any], career_rank: dict[str, An
         elif abs(float(got) - float(want)) > tol:
             bad.append(
                 f"published figure drifted from /methodology — {what}: run {got}, page {want}"
+            )
+
+    # The anchor set the page prints its report card against. Two of these are
+    # strings and the rest are counts, and none of them may move without a
+    # re-cut, which takes a new label by design.
+    anchors_pinned = evalspec.PUBLISHED_FIGURES.get("career_rank_anchor_set") or {}
+    anchor_set = (face_validity or {}).get("anchor_set") or {}
+    if anchor_set and anchors_pinned:
+        for key, want in (
+            ("cut", anchors_pinned.get("cut")),
+            ("sha256", anchors_pinned.get("sha256")),
+        ):
+            got = anchor_set.get(key)
+            if got != want:
+                bad.append(f"anchor set {key}: run {got}, page {want}")
+        if not anchor_set.get("matches_frozen", True):
+            bad.append("anchor set does not match the digest it was frozen at")
+        tiers = anchor_set.get("tier_counts") or {}
+        for tier in ("A", "B", "C"):
+            got = tiers.get(tier)
+            want = anchors_pinned.get(f"tier_{tier.lower()}")
+            if want is not None and got != want:
+                bad.append(f"anchor set tier {tier}: run {got}, page {want}")
+        absent = next(
+            (r for r in (face_validity or {}).get("results") or [] if r["test"] == "absent_legend"),
+            None,
+        )
+        if absent is not None and absent.get("top_n") != anchors_pinned.get("top_n"):
+            bad.append(
+                f"absent-legend depth: run {absent.get('top_n')}, "
+                f"page {anchors_pinned.get('top_n')}"
             )
     return bad
 
@@ -1185,6 +1298,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             page_figure_failures(
                 validation_payloads(conn).get("validation_retrodiction", {}),
                 artifact(conn, career_rank.MODEL, career_rank.ARTIFACT_NAME),
+                artifact(conn, career_rank.MODEL, career_facevalidity.ARTIFACT_NAME),
             ),
         ),
     ]

@@ -371,6 +371,68 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "prime_coverage": 233,
         "accolade_coverage": 430,
         "n_renormalized": 259,
+        # The same two counts over the careers the board ranks, added in Phase
+        # F because that is the sentence the page states: 201 of the 203 ranked
+        # careers carry all five components and two are scored without their
+        # award axis.
+        "prime_coverage_qualified": 203,
+        "accolade_coverage_qualified": 201,
+        "n_renormalized_qualified": 2,
+    },
+    # Phase F. Four things the pages state that nothing was holding against a
+    # run. Each is here because a page asserts it, which is the test this block
+    # applies: the component scale spans are published in the artifact and
+    # stated on no page, so they are deliberately not pinned.
+    #
+    # The replacement level and its floor count. /methodology states the map
+    # floor and that every season the board scores has a floor built for it,
+    # and a season quietly losing its floor would remove its whole longevity
+    # contribution without changing a weight.
+    "career_rank_replacement": {
+        "on": "2026-08-22",
+        "qualified_maps": 8,
+        "n_seasons_with_a_floor": 14,
+        "n_seasons_without_a_floor": 0,
+    },
+    # The two coverage-year sets. These decide which careers are scored
+    # without a component, so a year entering or leaving one silently changes
+    # what a tenth of the blend means for 60 careers.
+    "career_rank_coverage_years": {
+        "on": "2026-08-22",
+        "resume_from": 2013,
+        "resume_to": 2026,
+        "n_resume_years": 14,
+        "accolade_from": 2016,
+        "accolade_to": 2026,
+        "n_accolade_years": 11,
+    },
+    # The six families and their sizes. The page prints three of these counts
+    # in prose to argue that counting metrics would let the recording schedule
+    # set the weights, and the argument is only as good as the counts.
+    "career_rank_families": {
+        "on": "2026-08-22",
+        "basket_size": 43,
+        "sizes": {
+            "volume": 7,
+            "efficiency": 6,
+            "objective": 15,
+            "discipline": 3,
+            "opening": 7,
+            "streaks": 5,
+        },
+    },
+    # The frozen anchor set, now that the board publishes its own report card.
+    # This one should never move. A re-cut takes a new label by design, so a
+    # digest that changes under the same label is the failure it exists to
+    # catch.
+    "career_rank_anchor_set": {
+        "on": "2026-08-22",
+        "cut": "anchors-2026-08-18",
+        "sha256": "45224312d52968cb644c68f8baa3f77043d36bc98ca9b5fb8abf3070cde0b53e",
+        "tier_a": 7,
+        "tier_b": 2,
+        "tier_c": 14,
+        "top_n": 25,
     },
     "career_rank_value_coverage": {
         "on": "2026-08-22",
