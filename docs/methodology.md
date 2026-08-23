@@ -3278,9 +3278,9 @@ their season score.
 
 ### Career rank: a second all-time axis, over the metric basket instead of VALUE
 
-Career value sums a rating fitted against map outcome. Career rank sums a different
-quantity: three parts a **breadth score** to one part the season rating, blended per
-season. Breadth is the coverage-weighted mean percentile across every gold-tier stat a
+Career value sums a rating fitted against map outcome. Career rank scores each season on
+a different quantity, three parts a **breadth score** to one part the season rating, and
+then blends five career components built from those seasons. Breadth is the coverage-weighted mean percentile across every gold-tier stat a
 player's own page shows that season, weighted by each mode's share of that season's
 maps. The metric table also carries a pooled row per player-season,
 aggregated over the same maps as the mode rows beside it. Beside a mode row it is the
@@ -3384,7 +3384,7 @@ reduce nobody's season. The awards a season held are listed on the player page b
 its score.
 
 **A career needs at least three qualified seasons for an overall row.** Below that
-floor, season scores still compute and no total, peak or best-three is published.
+floor, season scores still compute and no career row is ranked.
 
 **The board starts in 2013, and the shrinkage is what lets it.** Every season the
 archive holds is scored and ranked. A career that started in 2013 is ranked on the
@@ -3471,8 +3471,50 @@ and the season-rating blend took it to 8.73, and taking the award credit out of 
 season score took it to 7.94. It is reported, not corrected — the correction would
 be a per-era adjustment fitted to the thing it is meant to measure.
 
-Peak, best three consecutive and total are the same three columns career value
-publishes, computed over the season score instead.
+**The board ranks on a blend of five components, at weights fixed before the run.** The
+season score answers what a season was worth. A career is more than a sum of them, and
+until this release the board added the season scores up and ranked on that, which meant
+the finish record and the award record were published beside the ranking without
+entering it.
+
+| Component | Weight | What it is |
+|---|---|---|
+| Peak | 20 | the single best season score |
+| Prime | 25 | the best three consecutive seasons |
+| Longevity | 20 | every season summed above that season's replacement level |
+| Resume | 25 | the career's finish credit |
+| Accolade | 10 | the career's award credit |
+
+Each component is scaled across the players the board ranks before the weights are
+applied, so the weights are shares of one comparable scale and not of five different
+units. The scale is fitted on the ranked cohort and applied to every career, so a career
+below the three-season floor can score outside the 0-100 range; none of those is ranked.
+Replacement is the same definition career value uses: the lowest season score among the
+players with at least eight maps that season, taken over the whole archive so that
+restricting a run cannot change what a season is worth. A season under the map floor can
+sit below a floor built from seasons that cleared it, and it contributes nothing instead
+of subtracting.
+
+**A component is absent only where the archive cannot see it.** Never winning an award is
+a zero and is scored as one. A career played entirely inside 2013, 2014 and 2015 has no
+award axis at all, because those years named no season-level honour, and for that career
+the weight is carried by the other four components. The same reading applies to the
+finish record, which reaches every year from 2013, so a career with no credit there
+finished nothing rather than being unmeasured. Of the 490 careers on the board, 430 have
+an award axis and 233 have a three-season window; among the 203 careers the board ranks,
+201 have all five components and two are scored without their award axis.
+
+The three-season window covers every published season here, which is one difference from
+career value. That axis drops 2013-2016 because its plus-minus has no comparable
+replacement scale for those years. This board's season unit is a percentile taken inside
+the season's own field, so 2013 sits on the same scale as 2023 by construction, and a
+component carrying a quarter of the ranking cannot be measurable in two eras and missing
+in the third. The window itself is unchanged: three seasons of the sequence, and sitting
+one out costs what it cost.
+
+The plain sum of season scores is still published beside the blend, with its standard
+deviation and its per-season average, so a long career and a shorter better one can still
+be separated on it.
 
 **CWL years count at full weight here, unlike the plus-minus axis.** The plus-minus
 stores one pooled coefficient per player per CWL era because that axis's season unit is

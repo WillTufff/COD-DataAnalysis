@@ -55,6 +55,28 @@ function isSort(v: string): v is PlayerIndexSort {
 // is just a ceiling well above the few thousand rows the archive can produce.
 const FETCH_ALL = 100_000;
 
+// The order the five blend components are read in, which is the order the
+// pre-registration fixes them in and not alphabetical.
+const CAREER_COMPONENTS = [
+  "PEAK",
+  "PRIME",
+  "LONGEVITY",
+  "RESUME",
+  "ACCOLADE",
+] as const;
+
+function componentBreakdown(components: Record<string, number>): string {
+  const parts = CAREER_COMPONENTS.filter((name) => name in components).map(
+    (name) => `${name.toLowerCase()} ${components[name].toFixed(0)}`,
+  );
+  const missing = CAREER_COMPONENTS.filter((name) => !(name in components));
+  const absent =
+    missing.length === 0
+      ? ""
+      : ` · no ${missing.map((name) => name.toLowerCase()).join(" or ")} the archive can see, so the rest carry the weight`;
+  return `${parts.join(" · ")}${absent}`;
+}
+
 export default async function PlayersPage({
   searchParams,
 }: {
@@ -496,8 +518,9 @@ export default async function PlayersPage({
           </h2>
           <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
             A different question again: not one season&rsquo;s VALUE, but
-            every gold-tier stat a player&rsquo;s page shows, summed across a
-            career of at least three qualified seasons.
+            every gold-tier stat a player&rsquo;s page shows, read across a
+            career of at least three qualified seasons and blended with what
+            that career finished and won.
           </p>
           <p className="mt-2 max-w-3xl text-sm text-ink-muted">
             This board covers 2013 onward. A season is scored against the
@@ -507,9 +530,13 @@ export default async function PlayersPage({
             narrower set of stats, which is the record and not the player.
             Scored counts the seasons the box-score archive reaches; where a
             career has more, the column says so, and the seasons it does not
-            reach score nothing rather than zero. Per season is the total over
-            those scored seasons: the board ranks on the total, so a long career
-            outranks a shorter better one, and this column is what that costs.
+            reach score nothing rather than zero. The rating is five things at
+            fixed weights: the best season, the best three consecutive, every
+            season above what a replacement player did, what the teams finished
+            and what the awards said. A career the archive cannot see one of
+            those for is scored on the rest. Season sum is the older number,
+            the scored seasons added up, kept beside the rating because a long
+            career and a short better one separate on it.
             See{" "}
             <Link className="underline hover:text-ink-secondary" href="/methodology">
               methodology
@@ -524,9 +551,11 @@ export default async function PlayersPage({
                   <th className="py-2 pr-4 font-normal">Player</th>
                   <th className="py-2 pr-4 text-right font-normal">Scored</th>
                   <th className="py-2 pr-4 text-right font-normal">
-                    Total ± sd
+                    Career score
                   </th>
-                  <th className="py-2 pr-4 text-right font-normal">Per season</th>
+                  <th className="py-2 pr-4 text-right font-normal">
+                    Season sum ± sd
+                  </th>
                   <th className="py-2 pr-4 font-normal">Peak</th>
                   <th className="py-2 font-normal">Best three</th>
                 </tr>
@@ -559,17 +588,17 @@ export default async function PlayersPage({
                         </span>
                       )}
                     </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                    <td
+                      className="py-1.5 pr-4 text-right font-mono tabular-nums"
+                      title={componentBreakdown(r.careerComponents)}
+                    >
                       {r.total.toFixed(1)}
-                      {r.totalSd !== null && (
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.seasonTotal === null ? "—" : r.seasonTotal.toFixed(1)}
+                      {r.seasonTotal !== null && r.totalSd !== null && (
                         <span className="text-ink-muted"> ±{r.totalSd.toFixed(1)}</span>
                       )}
-                    </td>
-                    <td
-                      className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary"
-                      title="The total divided by the seasons that carry a score. The board ranks on the total, so a long career outranks a shorter better one; this column is how much of that total is rate."
-                    >
-                      {r.meanSeason === null ? "—" : r.meanSeason.toFixed(1)}
                     </td>
                     <td className="py-1.5 pr-4 text-ink-secondary">
                       {r.peak.toFixed(1)}
@@ -592,9 +621,10 @@ export default async function PlayersPage({
             </table>
           </div>
           <p className="mt-3 max-w-3xl text-xs text-ink-muted">
-            The score blends every gold-tier stat on a player&rsquo;s page,
-            weighted by each mode&rsquo;s share of that season&rsquo;s maps.
-            Awards are published beside it and are not in it. Its ±sd
+            The season score blends every gold-tier stat on a player&rsquo;s
+            page, weighted by each mode&rsquo;s share of that season&rsquo;s
+            maps, and carries no award credit. Awards reach the rating through
+            their own component and nowhere else. Its ±sd
             reflects how much that basket
             disagreed with itself that season, not a measurement error on any
             one stat. A CWL year counts at full weight, same as a CDL season.

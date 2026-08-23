@@ -1281,6 +1281,78 @@ function CareerTotalsSection({ rows }: { rows: PlayerCareerRow[] }) {
   );
 }
 
+// The five blend components in the order the pre-registration fixes them,
+// with the weight each carries when a career's coverage reaches it.
+const CAREER_COMPONENTS = [
+  "PEAK",
+  "PRIME",
+  "LONGEVITY",
+  "RESUME",
+  "ACCOLADE",
+] as const;
+
+const CAREER_LABEL: Record<(typeof CAREER_COMPONENTS)[number], string> = {
+  PEAK: "peak",
+  PRIME: "prime",
+  LONGEVITY: "longevity",
+  RESUME: "resume",
+  ACCOLADE: "accolade",
+};
+
+const CAREER_WEIGHT: Record<(typeof CAREER_COMPONENTS)[number], number> = {
+  PEAK: 20,
+  PRIME: 25,
+  LONGEVITY: 20,
+  RESUME: 25,
+  ACCOLADE: 10,
+};
+
+/** The five components of the career blend, each scaled across the players
+ *  the board ranks, with the raw number behind it. A component absent here is
+ *  one the archive cannot see for this career, and its weight is carried by
+ *  the ones that are: never winning an award is a zero and appears. */
+function CareerComponents({ summary }: { summary: PlayerCareerRankSummary }) {
+  const raw: Record<string, number | null> = {
+    PEAK: summary.peak,
+    PRIME: summary.bestThree,
+    LONGEVITY: summary.longevity,
+    RESUME: summary.resumeTotal,
+    ACCOLADE: summary.accoladeTotal,
+  };
+  const live = CAREER_COMPONENTS.filter(
+    (name) => name in summary.careerComponents,
+  );
+  if (live.length === 0) return null;
+  const missing = CAREER_COMPONENTS.filter(
+    (name) => !(name in summary.careerComponents),
+  );
+  return (
+    <div className="mt-2">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+        {live.map((name) => (
+          <li key={name}>
+            <span className="text-ink-secondary">{CAREER_LABEL[name]}</span>{" "}
+            <span className="font-mono">
+              {summary.careerComponents[name].toFixed(0)}
+            </span>
+            <span className="ml-1">
+              ({raw[name] === null ? "—" : (raw[name] as number).toFixed(2)} ×{" "}
+              {CAREER_WEIGHT[name]})
+            </span>
+          </li>
+        ))}
+      </ul>
+      {missing.length > 0 && (
+        <p className="mt-1 text-xs text-ink-muted">
+          No {missing.map((name) => CAREER_LABEL[name]).join(" or ")} this
+          archive can see for these seasons, so the other components carry the
+          whole weight.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** A second, independent career axis: peak/best-three/total over the
  *  gold-tier metric basket instead of over VALUE or SKILL. Disagrees with
  *  `CareerTotalsSection` where the two measure different things — see
@@ -1344,18 +1416,13 @@ function CareerRankSection({
       <div className="mt-3 overflow-x-auto border border-hairline bg-surface p-4">
         <p className="font-mono text-sm">
           {summary.total.toFixed(1)}
-          {summary.totalSd !== null && (
-            <span className="text-ink-muted">
-              {" ± "}
-              {summary.totalSd.toFixed(1)}
-            </span>
-          )}
           <span className="ml-2 text-xs text-ink-muted">
             over {summary.seasonsCovered} season
             {summary.seasonsCovered === 1 ? "" : "s"}
             {!summary.qualified && " · below the ranking floor"}
           </span>
         </p>
+        <CareerComponents summary={summary} />
         {summary.seasonsCovered < summary.nSeasons && (
           <p className="mt-1 text-xs text-ink-muted">
             {summary.nSeasons - summary.seasonsCovered} further season
@@ -1366,6 +1433,14 @@ function CareerRankSection({
           </p>
         )}
         <p className="mt-1 text-xs text-ink-muted">
+          {summary.seasonTotal !== null && (
+            <>
+              {"Season sum "}
+              {summary.seasonTotal.toFixed(1)}
+              {summary.totalSd !== null && ` ± ${summary.totalSd.toFixed(1)}`}
+              {" · "}
+            </>
+          )}
           {summary.meanSeason !== null && (
             <>
               {summary.meanSeason.toFixed(1)}
