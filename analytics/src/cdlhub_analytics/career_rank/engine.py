@@ -12,7 +12,7 @@ from typing import Any, cast
 
 import psycopg
 
-from .. import style, writeback
+from .. import career, style, writeback
 from ..ratings.preflight import load_seasons
 from . import (
     PUBLISH_FROM_YEAR,
@@ -245,6 +245,26 @@ def build(
     blended_by_key = {(row.player_id, row.season_id): row for row in blended}
     families_by_key = {(row.player_id, row.season_id): row.families for row in raw_breadth}
 
+    # The floor LONGEVITY is measured above: the qualified-cohort minimum per
+    # season, `career.replacement_by_season` reused rather than re-derived.
+    # Built over the whole archive and never over the run's population, on the
+    # rule the shrinkage and the accolade denominator already keep — what a
+    # season is worth cannot depend on who else the run happens to publish.
+    maps_by_key = {(row.player_id, row.season_id): row.maps for row in season_breadth}
+    replacement = career.replacement_by_season(
+        [
+            career.SeasonValue(
+                player_id=row.player_id,
+                season_id=row.season_id,
+                maps=maps_by_key.get((row.player_id, row.season_id), 0),
+                value=row.score,
+                sd=row.sd,
+                resolution="season",
+            )
+            for row in blended
+        ]
+    )
+
     season_score_by_key: dict[tuple[int, int], float] = {}
     season_sd_by_key: dict[tuple[int, int], float] = {}
     breadth_by_key: dict[tuple[int, int], float] = {}
@@ -292,8 +312,14 @@ def build(
     # them a player the board already ranks.
     resume_by_player: dict[int, dict[int, float]] = {}
     resume_credit_by_player: dict[int, dict[int, float]] = {}
+    # The years the finish record reaches at all, over the whole archive. A
+    # career with a season in one of them and no credit finished nothing, which
+    # is a zero; a career with no season in one of them has no finish axis, and
+    # only that second case renormalizes away in the blend.
+    resume_years: set[int] = set()
     resume_withheld = 0
     for entry in resume.build(conn):
+        resume_years.add(seasons[entry.season_id].year)
         if restrict_to is not None and entry.player_id not in restrict_to:
             continue
         if seasons[entry.season_id].year < PUBLISH_FROM_YEAR:
@@ -312,6 +338,12 @@ def build(
     awards_by_player: dict[int, dict[int, tuple[str, ...]]] = {}
     award_rows = awards.load_award_rows(conn)
     unresolved_awards = awards.load_unresolved(conn)
+    # The years that named a season-level honour, which is the thin-year rule
+    # read as coverage: a career played entirely inside 2013-2015 has no award
+    # axis to be scored on and renormalizes away, while a career alongside a
+    # first team it did not win reads zero.
+    thin = awards.thin_years(award_rows)
+    accolade_years = {season.year for season in seasons.values() if season.year not in thin}
     accolade_withheld = 0
     for honour in awards.score(award_rows):
         if restrict_to is not None and honour.player_id not in restrict_to:
@@ -367,7 +399,8 @@ def build(
                 )
             )
 
-    career_rows = blend.build(scored, seasons)
+    career_rows = blend.build(scored, seasons, replacement, resume_years, accolade_years)
+    career_spans = blend.scales(career_rows)
     unrankable = len({s.player_id for s in scored}) - len(career_rows)
     career_titles = anchors.resume(conn, [row.player_id for row in career_rows])
 
@@ -469,7 +502,7 @@ def build(
             **awards.params(),
             "n_player_seasons": sum(len(row.accolade) for row in out),
             "seasons_withheld_below_floor": accolade_withheld,
-            "thin_years": sorted(awards.thin_years(award_rows)),
+            "thin_years": sorted(thin),
             # Award rows the record cannot attach to a player. They are never a
             # loss to anybody and never reduce a season.
             "unresolved_rows": len(unresolved_awards),
@@ -481,7 +514,28 @@ def build(
             "stack_distribution": _stack_distribution(award_rows),
             "density": awards.density(award_rows, unresolved_awards),
         },
-        "career": blend.artifact([r.career for r in out], n_unrankable=unrankable),
+        "career": blend.artifact(
+            [r.career for r in out], n_unrankable=unrankable, spans=career_spans
+        ),
+        # What the finish and award components could be seen in at all. The
+        # blend renormalizes over coverage and never over whether a career
+        # scored anything, so these two sets are what decides which careers are
+        # scored without a component.
+        "component_coverage_years": {
+            "resume": sorted(resume_years),
+            "accolade": sorted(accolade_years),
+        },
+        "replacement": {
+            "rule": blend.LONGEVITY_RULE,
+            "qualified_maps": career.QUALIFIED_MAPS,
+            "n_seasons_with_a_floor": len(replacement),
+            # Seasons the board scores that no floor could be built for: their
+            # whole cohort sat under the map floor. They contribute nothing to
+            # LONGEVITY and are counted here rather than passing silently.
+            "n_seasons_without_a_floor": len(
+                {season_id for _, season_id in season_score_by_key} - set(replacement)
+            ),
+        },
         # Every scored player, not just the top ten: the metric-diff harness
         # keys a list by `player_id` (see `LIST_KEYS` in
         # `metricdiff/snapshot.py`), so this is what makes every player's
@@ -493,7 +547,14 @@ def build(
                 "qualified": row.career.qualified,
                 "n_seasons": row.career.n_seasons,
                 "total": round(row.career.total, 2),
+                "career_components": {
+                    name: round(value, 2)
+                    for name, value in sorted(row.career.career_components.items())
+                },
+                "season_total": round(row.career.season_total, 2),
                 "total_sd": None if row.career.total_sd is None else round(row.career.total_sd, 2),
+                "longevity": round(row.career.longevity, 2),
+                "accolade_total": round(row.career.accolade_total, 4),
                 "peak": round(row.career.peak, 2),
                 "peak_season_id": row.career.peak_season_id,
                 "best_three": None

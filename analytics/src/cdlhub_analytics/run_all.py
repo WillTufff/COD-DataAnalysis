@@ -1376,11 +1376,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 cur.executemany(
                     "INSERT INTO player_career_rank (run_id, player_id, qualified, n_seasons, "
-                    "total, total_sd, mean_season, peak, peak_season_id, best_three, "
-                    "best_three_start_season_id, chips, rings, rings_covered_from, "
+                    "total, season_total, total_sd, mean_season, peak, peak_season_id, "
+                    "best_three, best_three_start_season_id, longevity, resume_total, "
+                    "accolade_total, career_components, chips, rings, rings_covered_from, "
                     "seasons_covered, coverage_from_year, components_present) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                    "%s, %s, %s, %s, %s, %s)",
+                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1388,12 +1389,17 @@ def main(argv: list[str] | None = None) -> int:
                             row.career.qualified,
                             row.career.n_seasons,
                             row.career.total,
+                            row.career.season_total,
                             row.career.total_sd,
                             row.career.mean_season,
                             row.career.peak,
                             row.career.peak_season_id,
                             row.career.best_three,
                             row.career.best_three_start_season_id,
+                            row.career.longevity,
+                            row.career.resume_total,
+                            row.career.accolade_total,
+                            json.dumps(dict(row.career.career_components)),
                             row.chips,
                             row.rings,
                             cr_payload["resume"]["rings_covered_from"],
@@ -1420,6 +1426,14 @@ def main(argv: list[str] | None = None) -> int:
             f"  accolade on {cr_accolade['n_player_seasons']} player-seasons, "
             f"{cr_accolade['unresolved_rows']} award rows unresolved, "
             f"thin years silenced: {silenced}"
+        )
+        cr_blend = cr_payload["career"]
+        weights = ", ".join(
+            f"{name} {weight:g}" for name, weight in cr_blend["career_component_weights"].items()
+        )
+        print(
+            f"  blend {weights}; {cr_blend['n_renormalized']} careers scored "
+            "without a component the archive cannot see"
         )
 
         # The same seasons on an age axis, and the selection problem that makes
