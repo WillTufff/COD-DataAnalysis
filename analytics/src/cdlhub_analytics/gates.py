@@ -107,6 +107,13 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
         ("streak depth", "deep_streak_rate"),
         ("risk", "eight_plus_streaks"),
     ),
+    # Re-read on 2026-08-22, after the identity queue was cleared. The
+    # published axes and the component count all held; axes 7 and 8 moved their
+    # marker, and both are unnamed, so nothing published is renamed. Axis 7 is
+    # a near-tie between two forms of one quantity — hill time as a share loads
+    # 0.3866 against hill time per map at 0.3690. Axis 8 is a real move, hill
+    # time at +0.3276 against streak4 at -0.2841. This is the robustness arm;
+    # `core CWL` came back identical.
     "extended CWL": (
         ("volume", "kills"),
         ("survival", "deaths"),
@@ -114,8 +121,8 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
         ("axis 4", "kd"),
         ("risk", "eight_plus_streaks"),
         ("streak depth", "streak6"),
-        ("axis 7", "hill_time"),
-        ("axis 8", "streak4"),
+        ("axis 7", "hill_time_share"),
+        ("axis 8", "hill_time"),
         ("axis 9", "deaths"),
         ("axis 10", "streak6"),
         ("axis 11", "suicides"),

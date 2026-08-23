@@ -274,6 +274,15 @@ REPRODUCE = (
 # kill events onto one player. Every panel here gained exactly one transition,
 # because a career the archive held as two rows is now one and its season
 # boundary is a transition the panel can read. What those panels read moved too.
+#
+# Re-read on 2026-08-22, after the identity queue was cleared: 23 merges, of
+# which 16 came from the CoD wiki's redirect table and no string rule would
+# have offered. The board went 490 careers scored to 482 and 203 qualified to
+# 205, which is the same effect as the 2026-08-19 pair at fifteen times the
+# size: careers the archives held as two rows are one, so the panels gain a
+# transition each and the players behind them are fewer and longer. Every
+# figure in this block that moved was re-pinned against run 1645. The SKILL
+# floor is again the exception, being a threshold and not a description.
 PUBLISHED_FIGURES: dict[str, Any] = {
     # Two figures the page stated that no artifact carried, added 2026-08-17.
     # Both are now computed every run — the first by `validation.retrodiction`,
@@ -283,7 +292,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # re-pinned on 2026-08-18: an identity merge joins split careers, so the
     # player-seasons the one-sided property is checked on are fewer and each
     # covers more of a career. Two merges took 5,079 cells to 5,061.
-    "retrodiction_cells_before": 5061,
+    "retrodiction_cells_before": 5049,
     "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
     # The table /methodology prints for the map-count shrinkage, pinned on the
     # day it was published. Its whole purpose is to show that admitting the
@@ -318,8 +327,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "on": "2026-08-22",
         "shrink_k": 21.8718,
         "eras": {
-            "2013-2016": {"seasons": 504, "sd_before": 18.1919, "sd_after": 10.3922},
-            "CWL": {"seasons": 497, "sd_before": 15.1118, "sd_after": 9.6278},
+            "2013-2016": {"seasons": 504, "sd_before": 18.1506, "sd_after": 10.404},
+            "CWL": {"seasons": 496, "sd_before": 15.2085, "sd_after": 9.6537},
             "CDL": {"seasons": 457, "sd_before": 14.6518, "sd_after": 10.5245},
         },
     },
@@ -344,8 +353,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     "career_rank_era_gap": {
         "on": "2026-08-22",
         "n_players": 90,
-        "mean": 7.9441,
-        "median": 9.2566,
+        "mean": 7.9555,
+        "median": 9.3009,
         "share_higher_in_cwl": 0.8667,
     },
     # Phase D's own numbers. The thin-year rule and the stack ceiling are both
@@ -368,15 +377,15 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "longevity_weight": 20.0,
         "resume_weight": 25.0,
         "accolade_weight": 10.0,
-        "prime_coverage": 233,
-        "accolade_coverage": 430,
-        "n_renormalized": 259,
+        "prime_coverage": 234,
+        "accolade_coverage": 424,
+        "n_renormalized": 250,
         # The same two counts over the careers the board ranks, added in Phase
         # F because that is the sentence the page states: 201 of the 203 ranked
         # careers carry all five components and two are scored without their
         # award axis.
-        "prime_coverage_qualified": 203,
-        "accolade_coverage_qualified": 201,
+        "prime_coverage_qualified": 205,
+        "accolade_coverage_qualified": 203,
         "n_renormalized_qualified": 2,
     },
     # Phase F. Four things the pages state that nothing was holding against a
@@ -436,13 +445,13 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     },
     "career_rank_value_coverage": {
         "on": "2026-08-22",
-        "n_seasons": 1458,
+        "n_seasons": 1457,
         "n_with_value": 1447,
         "breadth_weight": 0.75,
         "value_weight": 0.25,
     },
-    "persistence_pairs": 566,
-    "persistence_delta_r": -0.2188,
+    "persistence_pairs": 567,
+    "persistence_delta_r": -0.2139,
     "delta_r_tol": 5e-4,
     "forecast_maps": 9391,
     "brier_tol": 5e-5,
@@ -486,7 +495,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # moved with them; nothing about the method changed. The season-resolution
     # correlation fell from 0.2029 to 0.1956, so the merges made the read harder
     # rather than easier.
-    "plusminus_forward": {"n": 269, "r": 0.1956, "pooled_r": 0.2953, "era_r": 0.3714},
+    "plusminus_forward": {"n": 269, "r": 0.1917, "pooled_r": 0.2855, "era_r": 0.3557},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -501,7 +510,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # moved is the plus-minus underneath it. The gap narrowed from -0.2428 to
     # -0.2401 and the floor fell from 0.1733 to 0.1625, which leaves SKILL
     # losing by more than the floor either way.
-    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2401, "mde80": 0.1625},
+    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2339, "mde80": 0.1625},
     # The three-way panel the page quotes beside the four-way gate, and the
     # adversary's row in the gate table. Pinned 2026-08-18: each had a live
     # artifact and no comparison, so each drifted for several phases before a
@@ -510,11 +519,11 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # the block: one more transition, and the design effect and the adversary's
     # row moved with the fit underneath them.
     "retained_three_way": {
-        "n": 566,
-        "clusters": 190,
-        "composite_delta_r": -0.2189,
-        "design_effect": 1.312,
-        "openskill_gate_delta_r": -0.6937,
+        "n": 567,
+        "clusters": 191,
+        "composite_delta_r": -0.2139,
+        "design_effect": 1.315,
+        "openskill_gate_delta_r": -0.6956,
     },
     # The one secondary test the page quotes, scored against the quantity the
     # rating was fitted for rather than against the baseline's own ground.
@@ -522,10 +531,10 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # before: it had a live artifact and nothing comparing it, and the page had
     # drifted to 215 transitions and r = 0.4232 while the run returned 216 and
     # 0.4002.
-    "prior_target": {"n": 216, "skill": 0.4002, "composite": 0.2906, "kd_z": 0.2565},
+    "prior_target": {"n": 216, "skill": 0.406, "composite": 0.2948, "kd_z": 0.2565},
     "forecast_brier": {
         "rapm": 0.24636,
-        "rapm_prior": 0.24688,
+        "rapm_prior": 0.24693,
         "rating": 0.24763,
         "rating_zshrink": 0.2485,
         "glicko": 0.25006,
