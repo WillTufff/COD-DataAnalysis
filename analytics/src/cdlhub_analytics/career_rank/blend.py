@@ -27,10 +27,14 @@ it keeps `total_sd` and `mean_season` attached to it. `total` is the blend.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
 
 from .. import career
 from ..ratings.preflight import Season
@@ -192,23 +196,125 @@ def _publication_order(seasons: dict[int, Season]) -> dict[int, int]:
     }
 
 
+SPAN_LOW_Q = 0.01
+SPAN_HIGH_Q = 0.99
+
+# The pinned spans, frozen alongside `anchors.json` in the same package and by
+# the same contract: a named base run, a digest over the values, and a
+# re-freeze that keeps what it replaced in `history` rather than losing it.
+SPANS_PATH = Path(__file__).with_name("spans.json")
+
+FITTED = "fitted"
+PINNED = "pinned"
+
+
+def _q(sorted_vals: Sequence[float], p: float) -> float:
+    """The value at percentile `p` (0..1) of an already-sorted sequence,
+    linear interpolation between order statistics — `numpy.percentile`'s
+    default method, implemented directly so this module carries no numpy
+    dependency of its own."""
+    i = p * (len(sorted_vals) - 1)
+    lo = int(i)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    return sorted_vals[lo] + (i - lo) * (sorted_vals[hi] - sorted_vals[lo])
+
+
 def _spans(
     cohort: Sequence[tuple[bool, Mapping[str, float]]],
 ) -> dict[str, tuple[float, float]]:
-    """Per component: the low and high of the qualified cohort.
+    """Per component: a robust span fit over the qualified cohort, at the 1st
+    and 99th percentiles rather than the raw min and max.
 
-    Fitted on qualified careers and applied to every career, so a career below
-    the season floor can scale outside 0..100. Nothing ranks one, and clamping
-    it would misreport what it was: a career the board does not rank.
+    Min-max let a single career set the whole scale: RESUME's span was
+    Crimsix alone and ACCOLADE's was Simp alone (measured on run 1674), so
+    that one career's own number moving rescaled every other career's
+    contribution from the component with no weight having moved. The
+    percentile fit is still taken over the qualified cohort only and applied
+    to every career, so a career below the season floor — or, now, a
+    qualified career sitting outside its own component's [p1, p99] — can
+    still scale outside 0..100. That is expected, not an error: nothing
+    ranks a career from clamping it, and misreporting an out-of-range value
+    as a floor or ceiling it does not have would be the actual defect.
     """
     out: dict[str, tuple[float, float]] = {}
     for name in CAREER_COMPONENT_WEIGHTS:
-        values = [
+        values = sorted(
             components[name] for qualified, components in cohort if qualified and name in components
-        ]
+        )
         if values:
-            out[name] = (min(values), max(values))
+            out[name] = (_q(values, SPAN_LOW_Q), _q(values, SPAN_HIGH_Q))
     return out
+
+
+def _digest(spans: Mapping[str, tuple[float, float]]) -> str:
+    """A hash over the component spans alone, the same convention `anchors.py`
+    uses over membership: what is frozen is the values, not anything computed
+    beside them."""
+    body = "\n".join(f"{name}|{low!r}|{high!r}" for name, (low, high) in sorted(spans.items()))
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+def load_pinned_spans() -> dict[str, Any] | None:
+    """The pinned spans pointer, or `None` when `spans.json` does not exist —
+    a cold checkout without one falls back to fitting rather than failing."""
+    try:
+        loaded = json.loads(SPANS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return cast(dict[str, Any], loaded) if isinstance(loaded, dict) else None
+
+
+def _span_map(pointer: Mapping[str, Any]) -> dict[str, tuple[float, float]]:
+    return {name: (float(pair[0]), float(pair[1])) for name, pair in pointer["spans"].items()}
+
+
+def _labels_on_record(pointer: Mapping[str, Any] | None) -> set[str]:
+    if pointer is None:
+        return set()
+    history = pointer.get("history")
+    earlier = [entry.get("cut") for entry in history] if isinstance(history, list) else []
+    return {str(label) for label in [pointer.get("cut"), *earlier] if label}
+
+
+def refit_spans(rows: Sequence[CareerRank], cut: str, base_run: int) -> dict[str, Any]:
+    """Fit the p1/p99 spans against `rows` (a built board) and freeze them
+    under `cut`, stamping `base_run` so a later reader knows which run's
+    cohort set the scale. A label already on record is refused, the same
+    re-freeze contract `anchors.freeze` and `evalpop.freeze` use; the entry it
+    replaces moves into `history` rather than being lost.
+    """
+    previous = load_pinned_spans()
+    if cut in _labels_on_record(previous):
+        raise ValueError(f"span set '{cut}' is already on record; a re-freeze takes a new label")
+    fitted = _spans([(row.qualified, _raw_components(row)) for row in rows])
+    history: list[dict[str, Any]] = []
+    if previous is not None:
+        earlier = previous.get("history")
+        history = list(earlier) if isinstance(earlier, list) else []
+        history.append(
+            {
+                "cut": previous.get("cut"),
+                "base_run": previous.get("base_run"),
+                "spans": previous.get("spans"),
+                "sha256": previous.get("sha256"),
+                "frozen_at": previous.get("frozen_at"),
+            }
+        )
+    pointer: dict[str, Any] = {
+        "cut": cut,
+        "base_run": base_run,
+        "estimator": (
+            f"quantile fit at p{SPAN_LOW_Q:g}/p{SPAN_HIGH_Q:g}, linear interpolation between "
+            "order statistics, over the qualified cohort"
+        ),
+        "spans": {name: list(span) for name, span in sorted(fitted.items())},
+        "sha256": _digest(fitted),
+        "frozen_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "supersedes": previous.get("cut") if previous else None,
+        "history": history,
+    }
+    SPANS_PATH.write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8")
+    return pointer
 
 
 def _scale(value: float, span: tuple[float, float]) -> float:
@@ -217,7 +323,37 @@ def _scale(value: float, span: tuple[float, float]) -> float:
     # career reads 0 on it and the weight moves to the components that do.
     if high <= low:
         return 0.0
+    # Deliberately unclamped: a value outside [low, high] reads outside
+    # 0..100 and keeps its lead rather than being pulled to the edge. This is
+    # expected whether the span was fitted fresh (a career past the p99 cut)
+    # or pinned to an older run (any later career, since the archive keeps
+    # growing against a fixed scale) — not an error condition either way.
     return 100.0 * (value - low) / (high - low)
+
+
+def _resolve_spans(
+    cohort: Sequence[tuple[bool, Mapping[str, float]]],
+) -> tuple[dict[str, tuple[float, float]], dict[str, Any]]:
+    """The spans this cohort scales against, and where they came from.
+
+    Pinned spans (`spans.json`) are used for every component they name;
+    a component the pin does not name is still fitted fresh, so a cold
+    checkout with no pin at all is just the fitted case for every
+    component. The provenance records which mode was used and, when
+    pinned, the digest and base run a reader would need to reproduce it.
+    """
+    fitted = _spans(cohort)
+    pointer = load_pinned_spans()
+    if pointer is None:
+        return fitted, {"mode": FITTED, "pinned_components": []}
+    pinned = _span_map(pointer)
+    return {**fitted, **pinned}, {
+        "mode": PINNED,
+        "cut": pointer.get("cut"),
+        "base_run": pointer.get("base_run"),
+        "sha256": pointer.get("sha256"),
+        "pinned_components": sorted(pinned),
+    }
 
 
 def build(
@@ -332,7 +468,7 @@ def build(
             )
         )
 
-    spans = _spans([(raw.qualified, raw.components) for raw in raws])
+    spans, _ = _resolve_spans([(raw.qualified, raw.components) for raw in raws])
     out: list[CareerRank] = []
     for raw in raws:
         scaled = {
@@ -355,6 +491,7 @@ def artifact(
     rows: list[CareerRank],
     n_unrankable: int = 0,
     spans: Mapping[str, tuple[float, float]] | None = None,
+    span_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     qualified = [r for r in rows if r.qualified]
     return {
@@ -383,10 +520,22 @@ def artifact(
         "n_renormalized_qualified": sum(
             1 for r in qualified if len(r.career_components) < len(CAREER_COMPONENT_WEIGHTS)
         ),
-        # The cohort low and high each component was scaled against.
+        # The cohort low and high each component was scaled against. Nothing
+        # else lives in this dict: it is published as component name -> span
+        # and read that way downstream.
         "component_scale": {
             name: {"low": round(low, 4), "high": round(high, 4)}
             for name, (low, high) in sorted((spans or {}).items())
+        },
+        # Whether those spans were pinned to a named base run or fitted fresh
+        # on this run's own cohort. A pin carries the run and digest it was
+        # cut from; a fit carries neither.
+        "span_provenance": {
+            "mode": (span_provenance or {}).get("mode", FITTED),
+            "cut": (span_provenance or {}).get("cut"),
+            "base_run": (span_provenance or {}).get("base_run"),
+            "sha256": (span_provenance or {}).get("sha256"),
+            "pinned_components": (span_provenance or {}).get("pinned_components", []),
         },
         "n_players": len(rows),
         # A career the board holds seasons for and cannot rank any of.
@@ -454,7 +603,16 @@ def _raw_components(row: CareerRank) -> dict[str, float]:
 
 def scales(rows: list[CareerRank]) -> dict[str, tuple[float, float]]:
     """The cohort spans a built board was scaled against, read back off the
-    built rows for the artifact. Same function `build` fitted them with, over
-    the same population, so this reports the spans rather than re-deriving
-    them by a second rule."""
-    return _spans([(row.qualified, _raw_components(row)) for row in rows])
+    built rows for the artifact. Same resolution `build` used — pinned spans
+    preferred, fitted where nothing is pinned — over the same population, so
+    this reports the spans rather than re-deriving them by a second rule."""
+    spans, _ = _resolve_spans([(row.qualified, _raw_components(row)) for row in rows])
+    return spans
+
+
+def span_provenance(rows: list[CareerRank]) -> dict[str, Any]:
+    """Whether the spans a built board was scaled against were pinned to a
+    named base run or fitted fresh on this run's own cohort, for the run
+    artifact. Same resolution `scales` reports the values for."""
+    _, meta = _resolve_spans([(row.qualified, _raw_components(row)) for row in rows])
+    return meta

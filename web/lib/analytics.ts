@@ -3648,6 +3648,16 @@ export type CareerRankArtifact = {
     n_renormalized: number;
     n_renormalized_qualified?: number;
     component_scale: Record<string, { low: number; high: number }>;
+    // Whether component_scale was pinned to a named base run or fitted fresh
+    // on this run's own cohort. Optional: a run from before the span pin
+    // shipped published none.
+    span_provenance?: {
+      mode: string;
+      cut: string | null;
+      base_run: number | null;
+      sha256: string | null;
+      pinned_components: string[];
+    };
     n_players: number;
     n_qualified: number;
     n_below_floor: number;

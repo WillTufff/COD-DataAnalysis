@@ -401,6 +401,7 @@ def build(
 
     career_rows = blend.build(scored, seasons, replacement, resume_years, accolade_years)
     career_spans = blend.scales(career_rows)
+    career_span_provenance = blend.span_provenance(career_rows)
     unrankable = len({s.player_id for s in scored}) - len(career_rows)
     career_titles = anchors.resume(conn, [row.player_id for row in career_rows])
 
@@ -515,7 +516,10 @@ def build(
             "density": awards.density(award_rows, unresolved_awards),
         },
         "career": blend.artifact(
-            [r.career for r in out], n_unrankable=unrankable, spans=career_spans
+            [r.career for r in out],
+            n_unrankable=unrankable,
+            spans=career_spans,
+            span_provenance=career_span_provenance,
         ),
         # What the finish and award components could be seen in at all. The
         # blend renormalizes over coverage and never over whether a career

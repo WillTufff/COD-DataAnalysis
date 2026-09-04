@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from cdlhub_analytics.career_rank import blend as blend
 from cdlhub_analytics.ratings.preflight import Season
+
+
+@pytest.fixture(autouse=True)
+def _isolated_spans_path(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Every test in this module fits its spans fresh unless it opts into a
+    pin: the package's own `spans.json`, once a base run has actually been
+    frozen, would otherwise leak into every other test here and pin a cohort
+    none of them chose."""
+    path = tmp_path / "spans.json"
+    monkeypatch.setattr(blend, "SPANS_PATH", path)
+    return path
+
 
 CDL = {
     19: Season(19, 2020, "CDL"),
@@ -167,12 +181,13 @@ def test_the_blend_weights_are_the_pre_registered_five() -> None:
 def test_total_is_the_blend_and_not_the_season_sum() -> None:
     rows = full_career(1, 80.0) + full_career(2, 40.0)
     out = {r.player_id: r for r in blend.build(rows, SEASONS)}
-    # Min-max over the qualified cohort puts the better career at 100 on PEAK
-    # and PRIME and the other at 0, so the blend is those two weights over the
-    # five: (20 + 25) / 100. The season sums are 240 and 120 and say nothing
-    # about it.
-    assert out[1].total == pytest.approx(45.0)
-    assert out[2].total == pytest.approx(0.0)
+    # The p1/p99 span over a two-career cohort sits just inside [40, 80], so
+    # the better career reads a little above 100 on PEAK and PRIME rather
+    # than exactly 100, and the blend is those two weights over the five:
+    # (20 + 25) / 100 of that scaled value. The season sums are 240 and 120
+    # and say nothing about it.
+    assert out[1].total == pytest.approx(45.45918367346939)
+    assert out[2].total == pytest.approx(-0.4591836734693876)
     assert out[1].season_total == pytest.approx(240.0)
 
 
@@ -209,8 +224,11 @@ def test_never_winning_an_award_is_a_zero_and_not_an_absence() -> None:
         for season_id in (19, 20, 21)
     ]
     out = {r.player_id: r for r in blend.build(empty + decorated, SEASONS, accolade_years={2020})}
-    assert out[1].career_components[blend.ACCOLADE] == pytest.approx(0.0)
-    assert out[2].career_components[blend.ACCOLADE] == pytest.approx(100.0)
+    # The p1/p99 span over [0.0, 0.2] sits just inside that range, so the
+    # zero reads a shade below 0 and the win a shade above 100 rather than
+    # landing exactly on the endpoints.
+    assert out[1].career_components[blend.ACCOLADE] == pytest.approx(-1.0204081632653061)
+    assert out[2].career_components[blend.ACCOLADE] == pytest.approx(101.02040816326533)
     assert out[2].total > out[1].total
 
 
@@ -243,11 +261,14 @@ def test_the_scales_are_fitted_on_the_qualified_cohort_alone() -> None:
     built = blend.build(rows, SEASONS)
     out = {r.player_id: r for r in built}
     assert out[3].qualified is False
-    assert out[2].career_components[blend.PEAK] == pytest.approx(100.0)
+    # The p1/p99 span over [50, 70] sits just inside that range (50.2, 69.8),
+    # so the top of the qualified cohort reads a shade above 100 rather than
+    # landing exactly on it.
+    assert out[2].career_components[blend.PEAK] == pytest.approx(101.02040816326533)
     # The unranked career scales off the top of the cohort rather than being
     # clamped into it.
     assert out[3].career_components[blend.PEAK] > 100.0
-    assert blend.scales(built)[blend.PEAK] == (50.0, 70.0)
+    assert blend.scales(built)[blend.PEAK] == pytest.approx((50.2, 69.8))
 
 
 def test_a_career_with_no_three_season_window_has_no_prime() -> None:
@@ -267,7 +288,8 @@ def test_the_artifact_publishes_the_weights_and_the_coverage() -> None:
     assert art["career_component_weights"][blend.RESUME] == 25.0
     assert art["component_coverage"][blend.ACCOLADE] == 0
     assert art["n_renormalized"] == 2
-    assert art["component_scale"][blend.PEAK] == {"low": 50.0, "high": 70.0}
+    assert art["component_scale"][blend.PEAK] == {"low": 50.2, "high": 69.8}
+    assert art["span_provenance"]["mode"] == blend.FITTED
 
 
 EARLY = {
@@ -295,3 +317,85 @@ def test_a_window_spanning_the_league_change_is_one_sequence() -> None:
     out = {r.player_id: r for r in blend.build(rows, WITH_EARLY)}
     assert out[1].best_three == pytest.approx(150.0)
     assert out[1].best_three_start_season_id == 33
+
+
+# ------------------------------------------------------------- span fit
+
+
+def test_q_reproduces_the_reference_quantile_on_a_known_vector() -> None:
+    """The reference implementation from the pre-registration, against a
+    hand-computed vector: `numpy.percentile`'s linear interpolation method."""
+    values = [10.0, 20.0, 30.0, 40.0, 50.0]
+    assert blend._q(values, 0.0) == pytest.approx(10.0)
+    assert blend._q(values, 1.0) == pytest.approx(50.0)
+    assert blend._q(values, 0.5) == pytest.approx(30.0)
+    # i = 0.25 * 4 = 1.0 exactly -> values[1]
+    assert blend._q(values, 0.25) == pytest.approx(20.0)
+    # i = 0.1 * 4 = 0.4 -> interpolate between values[0] and values[1]
+    assert blend._q(values, 0.1) == pytest.approx(14.0)
+
+
+def test_a_value_above_the_p99_fit_scales_above_100_unclamped() -> None:
+    """A career whose PEAK sits above the qualified cohort's p99 fit is not
+    pulled back to 100 — the whole point of the robust fit replacing min-max
+    is that the endpoints stop being one career's own number, not that the
+    board stops reporting a career past them."""
+    # A wide, roughly uniform cohort plus one outlier well past its own p99.
+    rows = [full_career(p, float(10 * p)) for p in range(1, 10)]
+    flat = [s for career in rows for s in career]
+    outlier = full_career(99, 500.0)
+    out = {r.player_id: r for r in blend.build(flat + outlier, SEASONS)}
+    assert out[99].career_components[blend.PEAK] > 100.0
+
+
+# ------------------------------------------------------------- span pinning
+
+
+def test_pinned_spans_are_used_in_preference_to_fitting(_isolated_spans_path: Any) -> None:
+    base_rows = full_career(1, 80.0) + full_career(2, 40.0)
+    built = blend.build(base_rows, SEASONS)
+    pointer = blend.refit_spans(built, "cr-spans-test", base_run=1731)
+    assert pointer["base_run"] == 1731
+    assert _isolated_spans_path.exists()
+
+    fresh = {r.player_id: r for r in blend.build(base_rows, SEASONS)}
+    assert blend.span_provenance([r for r in built])["mode"] == blend.PINNED
+
+    # A cohort that would fit a very different span if refit from scratch
+    # still reads against the pinned one, and produces identical output to a
+    # separately-built run over the *same* pinned span — the point of pinning
+    # is that the scale no longer depends on which careers happen to be in
+    # the cohort this run.
+    different_cohort = full_career(1, 80.0) + full_career(2, 40.0) + full_career(3, 10.0)
+    out_a = {r.player_id: r for r in blend.build(base_rows, SEASONS)}
+    out_b = {r.player_id: r for r in blend.build(different_cohort, SEASONS)}
+    assert out_a[1].career_components[blend.PEAK] == pytest.approx(
+        out_b[1].career_components[blend.PEAK]
+    )
+    assert out_a[1].total == pytest.approx(fresh[1].total)
+
+
+def test_absent_spans_json_falls_back_to_fitting(_isolated_spans_path: Any) -> None:
+    assert not _isolated_spans_path.exists()
+    rows = full_career(1, 80.0) + full_career(2, 40.0)
+    built = blend.build(rows, SEASONS)
+    assert blend.span_provenance(built)["mode"] == blend.FITTED
+
+
+def test_a_refreeze_preserves_the_prior_entry_in_history(_isolated_spans_path: Any) -> None:
+    rows_a = full_career(1, 80.0) + full_career(2, 40.0)
+    built_a = blend.build(rows_a, SEASONS)
+    first = blend.refit_spans(built_a, "cr-spans-a", base_run=1000)
+
+    rows_b = full_career(1, 90.0) + full_career(2, 30.0)
+    built_b = blend.build(rows_b, SEASONS)
+    second = blend.refit_spans(built_b, "cr-spans-b", base_run=2000)
+
+    assert second["supersedes"] == "cr-spans-a"
+    assert len(second["history"]) == 1
+    assert second["history"][0]["cut"] == "cr-spans-a"
+    assert second["history"][0]["base_run"] == 1000
+    assert second["history"][0]["sha256"] == first["sha256"]
+
+    with pytest.raises(ValueError):
+        blend.refit_spans(built_b, "cr-spans-a", base_run=3000)

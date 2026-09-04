@@ -3504,10 +3504,18 @@ entering it.
 
 Each component is scaled across the players the board ranks before the weights are
 applied, so the weights are shares of one comparable scale and not of five different
-units. The scale is fitted on the ranked cohort and applied to every career without
-clamping, so a career below the three-season floor can read a component outside the 0-100
-range and a total below zero. None of those careers is ranked. Clamping the number would
-report a floor the arithmetic does not have.
+units. The scale is fit to the 1st and 99th percentile of the ranked cohort, not its raw
+minimum and maximum. A min-max span reads off whichever single career currently sits at
+each extreme, and on this archive RESUME's span was one player alone and ACCOLADE's
+another, so that player's own number moving would have rescaled everyone else's share of
+the component with no weight having changed. The fit is applied to every career without
+clamping, so a career below the three-season floor, or a career past its own component's
+p99, can read outside the 0-100 range and a total below zero or above 100. None of those
+readings is an error. Clamping the number would report a floor or ceiling the arithmetic
+does not have. The span is pinned to a named run instead of being refit on every one, the
+same freeze the evaluation population and the anchor set use elsewhere on this page. A
+later run's cohort is read against the pinned span, wherever it falls, until an explicit
+re-pin.
 Replacement is the same definition career value uses: the lowest season score among the
 players with at least eight maps that season, taken over the whole archive so that
 restricting a run cannot change what a season is worth. A season under the map floor can
@@ -3641,7 +3649,7 @@ correlation is printed beside them without gating anything. On the release this 
 four gating tests pass and the correlation reports. That is the first release in which
 `absent_legend` has passed since the tests were written, and the margin belongs beside
 the verdict: the lowest-ranked top-tier anchor sits at 25 of a top 25, which is a pass by
-one place. The correlation is rho = 0.5640 over the 13 anchors inside the top 40.
+one place. The correlation is rho = 0.5970 over the 13 anchors inside the top 40.
 Agreement with the published lists is partial, and that number is the size of it.
 
 What moved the anchors was structural and is on the record as such. The board ranked on a
