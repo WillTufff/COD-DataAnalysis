@@ -71,7 +71,8 @@ _HANDLE_SQL = "SELECT id, handle FROM players"
 # Either is only countable where a placement can be attributed to the players
 # who earned it, which needs an event roster. Every other first place — a
 # qualifier, a relegation bracket, a regular-season table — stays out of both
-# numbers while the events it belongs to stay in `events`.
+# numbers while the events it belongs to stay in `events`. A coach's roster
+# row is not a player's: `role IS NULL` keeps this to player rows.
 _RESUME_SQL = f"""
 SELECT r.player_id,
        count(*) FILTER (WHERE ep.placement_min = 1 AND ep.placement_max = 1
@@ -85,6 +86,7 @@ FROM event_rosters r
 JOIN event_placements ep ON ep.event_id = r.event_id AND ep.team_id = r.team_id
 JOIN events e            ON e.id = r.event_id
 JOIN seasons s           ON s.id = e.season_id
+WHERE r.role IS NULL
 GROUP BY r.player_id
 """
 

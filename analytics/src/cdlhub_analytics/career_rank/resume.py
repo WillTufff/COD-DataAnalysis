@@ -76,13 +76,14 @@ WHERE {TITLE_EVENT}
 
 # One row per player per finish: the roster is what attributes a placement to
 # the people who earned it, and a finish with no roster row reaches nobody.
+# `role IS NULL` is a player row; a coach row earns no placement credit.
 _EARNED_SQL = f"""
 SELECT r.player_id, e.id, e.season_id, ep.placement_min, ep.placement_max
 FROM event_rosters r
 JOIN event_placements ep ON ep.event_id = r.event_id AND ep.team_id = r.team_id
 JOIN events e            ON e.id = r.event_id
 JOIN seasons s           ON s.id = e.season_id
-WHERE {TITLE_EVENT}
+WHERE {TITLE_EVENT} AND r.role IS NULL
 """
 
 # Per year: the title wins that exist and the ones a roster can answer for.

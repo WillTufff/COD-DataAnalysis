@@ -8,6 +8,9 @@ happens to produce.
 from __future__ import annotations
 
 import math
+import os
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -151,3 +154,119 @@ def test_coverage_from_stops_at_a_gap_in_the_years() -> None:
 def test_coverage_from_is_none_when_the_latest_year_is_short() -> None:
     conn = as_conn(FakeConn([(2025, 7, 7), (2026, 8, 6)]))
     assert resume.coverage_from(conn) is None
+
+
+# MARK: earned placements, against the real schema
+
+
+@pytest.fixture
+def rollback_conn() -> Iterator[Any]:
+    """A live connection whose transaction is always rolled back.
+
+    `_EARNED_SQL` joins three tables through a role column; a fixture of
+    canned rows cannot tell whether that SQL text is right. This runs
+    against the real schema and nothing is kept.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("DATABASE_URL", "postgres://cdlhub:cdlhub@localhost:54329/cdlhub")
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=2)
+    except Exception:  # noqa: BLE001 - any connection failure means no DB here
+        pytest.skip("no database reachable")
+    try:
+        yield conn
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def _make_title_event(conn: Any, name: str) -> tuple[int, int]:
+    """A season and an event that satisfy `TITLE_EVENT`, for a synthetic finish."""
+    title_id = conn.execute("SELECT id FROM titles LIMIT 1").fetchone()
+    if title_id is None:
+        pytest.skip("no titles loaded")
+    season = conn.execute(
+        "INSERT INTO seasons (year, title_id, league) VALUES (2013, %s, 'ZzTest') RETURNING id",
+        (title_id[0],),
+    ).fetchone()
+    event = conn.execute(
+        "INSERT INTO events (season_id, name, tier, tier_type, prize_pool)"
+        " VALUES (%s, %s, '1', 'Premier', 100000) RETURNING id",
+        (season[0], name),
+    ).fetchone()
+    return int(event[0]), int(season[0])
+
+
+def _make_player(conn: Any, handle: str) -> int:
+    row = conn.execute(
+        "INSERT INTO players (handle) VALUES (%s) RETURNING id", (handle,)
+    ).fetchone()
+    return int(row[0])
+
+
+def _make_team(conn: Any, name: str) -> int:
+    row = conn.execute("INSERT INTO teams (name) VALUES (%s) RETURNING id", (name,)).fetchone()
+    return int(row[0])
+
+
+def _place(conn: Any, event_id: int, team_id: int, pmin: int, pmax: int) -> None:
+    conn.execute(
+        "INSERT INTO event_placements (event_id, team_id, placement_min, placement_max,"
+        " data_source) VALUES (%s, %s, %s, %s, 'lpdb')",
+        (event_id, team_id, pmin, pmax),
+    )
+
+
+def _roster(conn: Any, event_id: int, team_id: int, player_id: int, role: str | None) -> None:
+    conn.execute(
+        "INSERT INTO event_rosters (event_id, team_id, player_id, role, data_source)"
+        " VALUES (%s, %s, %s, %s, 'lpdb')",
+        (event_id, team_id, player_id, role),
+    )
+
+
+def test_a_coach_row_earns_no_placement_credit(rollback_conn: Any) -> None:
+    conn = rollback_conn
+    event_id, season_id = _make_title_event(conn, "ZzTest Coach Only")
+    team_id = _make_team(conn, "ZzTest Team A")
+    coach_id = _make_player(conn, "ZzTestCoach")
+    _place(conn, event_id, team_id, 1, 1)
+    _roster(conn, event_id, team_id, coach_id, "Coach")
+
+    finishes = resume.load_finishes(conn)
+
+    assert not [f for f in finishes if f[0] == coach_id]
+
+
+def test_a_player_row_still_earns_credit(rollback_conn: Any) -> None:
+    conn = rollback_conn
+    event_id, season_id = _make_title_event(conn, "ZzTest Player Only")
+    team_id = _make_team(conn, "ZzTest Team B")
+    player_id = _make_player(conn, "ZzTestPlayer")
+    _place(conn, event_id, team_id, 1, 1)
+    _roster(conn, event_id, team_id, player_id, None)
+
+    finishes = resume.load_finishes(conn)
+
+    matches = [f for f in finishes if f[0] == player_id]
+    assert matches == [(player_id, event_id, season_id, 1, 1)]
+
+
+def test_a_player_who_also_coaches_a_second_team_is_credited_once(rollback_conn: Any) -> None:
+    """`event_rosters` keys on (event, team, player), not (event, player): a
+    person can hold a player row on one team and a coach row on another at
+    the same event. Only the player row should reach a finish."""
+    conn = rollback_conn
+    event_id, season_id = _make_title_event(conn, "ZzTest Dual Role")
+    player_team = _make_team(conn, "ZzTest Team C")
+    coach_team = _make_team(conn, "ZzTest Team D")
+    person_id = _make_player(conn, "ZzTestDual")
+    _place(conn, event_id, player_team, 1, 1)
+    _place(conn, event_id, coach_team, 3, 3)
+    _roster(conn, event_id, player_team, person_id, None)
+    _roster(conn, event_id, coach_team, person_id, "Coach")
+
+    finishes = resume.load_finishes(conn)
+
+    matches = [f for f in finishes if f[0] == person_id]
+    assert matches == [(person_id, event_id, season_id, 1, 1)]
