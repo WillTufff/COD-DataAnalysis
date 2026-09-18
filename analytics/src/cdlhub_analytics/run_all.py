@@ -1380,9 +1380,10 @@ def main(argv: list[str] | None = None) -> int:
                     "total, season_total, total_sd, mean_season, peak, peak_season_id, "
                     "best_three, best_three_start_season_id, longevity, resume_total, "
                     "accolade_total, career_components, chips, rings, rings_covered_from, "
-                    "seasons_covered, coverage_from_year, components_present) "
+                    "seasons_covered, coverage_from_year, components_present, "
+                    "net_of_teammates_mean) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
                             cr_run,
@@ -1407,6 +1408,7 @@ def main(argv: list[str] | None = None) -> int:
                             row.career.seasons_covered,
                             row.career.coverage_from_year,
                             list(row.career.components_present),
+                            row.net_of_teammates_mean,
                         )
                         for row in cr_rows
                     ],

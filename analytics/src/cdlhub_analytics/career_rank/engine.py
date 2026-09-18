@@ -219,6 +219,22 @@ class PlayerRow:
     chips: int  # title wins over the whole career, not only published seasons
     rings: int
 
+    @property
+    def net_of_teammates_mean(self) -> float | None:
+        """The plain mean of the career's season `net_of_teammates` values, or
+        `None` where the career carries none. Display only: this never enters
+        `career.total` or any of its components.
+
+        Averaged over `components`, the seasons the run publishes, so the mean
+        is the one a reader recomputes from `player_season_rank`. Roster
+        strength reaches seasons the run does not publish, and averaging those
+        in as well puts a number on the page that the published rows do not
+        add up to."""
+        values = [
+            net for season_id, net in self.net_of_teammates.items() if season_id in self.components
+        ]
+        return sum(values) / len(values) if values else None
+
 
 def build(
     conn: Conn, restrict_to: set[int] | None = None

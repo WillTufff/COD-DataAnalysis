@@ -3754,6 +3754,10 @@ export type CareerRankLeaderboardRow = {
   peakSeasonYear: number | null;
   bestThree: number | null;
   bestThreeStartYear: number | null;
+  /** The unweighted mean of a career's season net-of-teammates values, over
+   *  the seasons the run publishes. A display figure only: it never enters
+   *  `total`. Null where no published season carries one. */
+  netOfTeammatesMean: number | null;
 };
 
 export async function getCareerRankLeaderboard(
@@ -3765,7 +3769,8 @@ export async function getCareerRankLeaderboard(
            c.coverage_from_year, c.total, c.career_components, c.season_total,
            c.total_sd, c.mean_season, c.longevity, c.resume_total,
            c.accolade_total, c.peak,
-           ps.year AS peak_year, c.best_three, bs.year AS best_three_year
+           ps.year AS peak_year, c.best_three, bs.year AS best_three_year,
+           c.net_of_teammates_mean
     FROM player_career_rank c
     JOIN players p ON p.id = c.player_id
     LEFT JOIN seasons ps ON ps.id = c.peak_season_id
@@ -3793,6 +3798,7 @@ export async function getCareerRankLeaderboard(
       peak_year: number | null;
       best_three: number | null;
       best_three_year: number | null;
+      net_of_teammates_mean: number | null;
     }[]
   ).map((r) => ({
     playerId: r.player_id,
@@ -3815,6 +3821,8 @@ export async function getCareerRankLeaderboard(
     bestThree: r.best_three === null ? null : Number(r.best_three),
     bestThreeStartYear:
       r.best_three_year === null ? null : Number(r.best_three_year),
+    netOfTeammatesMean:
+      r.net_of_teammates_mean === null ? null : Number(r.net_of_teammates_mean),
   }));
 }
 

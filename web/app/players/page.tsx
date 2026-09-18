@@ -530,11 +530,13 @@ export default async function PlayersPage({
             narrower set of stats, which is the record and not the player.
             Scored counts the seasons the box-score archive reaches; where a
             career has more, the column says so, and the seasons it does not
-            reach score nothing rather than zero. The rating is five things at
-            fixed weights: the best season, the best three consecutive, every
-            season above what a replacement player did, what the teams finished
-            and what the awards said. A career the archive cannot see one of
-            those for is scored on the rest. Season sum is the older number,
+            reach score nothing rather than zero. The rating blends three
+            things at fixed weights: how the box score reads at a career&rsquo;s
+            best season, its best three-season stretch and summed across every
+            season above replacement (65 of the total, split 20/25/20 below);
+            what the teams finished (25); and what the awards said (10). A
+            career the archive cannot see one of those for is scored on the
+            rest. Season sum is the older number,
             the scored seasons added up, kept beside the rating because a long
             career and a short better one separate on it.
             See{" "}
@@ -557,7 +559,13 @@ export default async function PlayersPage({
                     Season sum ± sd
                   </th>
                   <th className="py-2 pr-4 font-normal">Peak</th>
-                  <th className="py-2 font-normal">Best three</th>
+                  <th className="py-2 pr-4 font-normal">Best three</th>
+                  <th
+                    className="py-2 font-normal"
+                    title="How much a player out-performed the teammates they played alongside, averaged over their career. Not part of the ranking: it carries no weight and does not enter career score."
+                  >
+                    vs. teammates
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -604,7 +612,7 @@ export default async function PlayersPage({
                       {r.peak.toFixed(1)}
                       {r.peakSeasonYear !== null && ` (${r.peakSeasonYear})`}
                     </td>
-                    <td className="py-1.5 text-ink-secondary">
+                    <td className="py-1.5 pr-4 text-ink-secondary">
                       {r.bestThree === null ? (
                         "—"
                       ) : (
@@ -615,11 +623,22 @@ export default async function PlayersPage({
                         </>
                       )}
                     </td>
+                    <td className="py-1.5 text-ink-secondary">
+                      {r.netOfTeammatesMean === null
+                        ? "—"
+                        : r.netOfTeammatesMean.toFixed(2)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+            &ldquo;vs. teammates&rdquo; is how much a player out-performed the
+            teammates they played alongside, averaged over their career. It is
+            a separate display figure and is never part of the ranking: it
+            carries no weight and does not enter the career score above.
+          </p>
           <p className="mt-3 max-w-3xl text-xs text-ink-muted">
             The season score blends every gold-tier stat on a player&rsquo;s
             page, weighted by each mode&rsquo;s share of that season&rsquo;s
