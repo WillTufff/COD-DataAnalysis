@@ -538,6 +538,30 @@ def error_control_failures(conn: psycopg.Connection[Any], payload: dict[str, Any
     return out
 
 
+# The only non-null value `event_rosters.role` is known to carry. The column
+# is written verbatim from the CoD wiki's `Roles` text, so an unrecognised
+# value stops the run rather than reaching `role IS NULL`, which reads as "is
+# a player" everywhere the column is consumed. `Substitute` is not in the set:
+# it would need its own change to the player filters, so it gates as unknown.
+KNOWN_ROSTER_ROLES = {"Coach"}
+
+
+def roster_role_vocabulary_failures(roles: list[tuple[str, int]]) -> list[str]:
+    return [
+        f"event_rosters.role carries '{role}' ({count:,} rows), outside "
+        f"gates.KNOWN_ROSTER_ROLES {sorted(KNOWN_ROSTER_ROLES)!r}"
+        for role, count in sorted(roles)
+        if role not in KNOWN_ROSTER_ROLES
+    ]
+
+
+def roster_roles(conn: psycopg.Connection[Any]) -> list[tuple[str, int]]:
+    rows = conn.execute(
+        "SELECT role, count(*) FROM event_rosters WHERE role IS NOT NULL GROUP BY role"
+    ).fetchall()
+    return [(str(r[0]), int(r[1])) for r in rows]
+
+
 def role_failures(payload: dict[str, Any]) -> list[str]:
     """The weapon table is checked, the verdict follows its own rule, and no
     adjusted number ships alone.
@@ -1330,6 +1354,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
         ("aging", aging_failures(artifact(conn, aging.MODEL, "aging"))),
         ("career value", career_failures(artifact(conn, career.MODEL, "career_value"))),
         ("role", role_failures(artifact(conn, role.MODEL, "role"))),
+        ("roster role vocabulary", roster_role_vocabulary_failures(roster_roles(conn))),
         (
             "finding error control",
             error_control_failures(conn, artifact(conn, errorcontrol.MODEL, "error_control")),

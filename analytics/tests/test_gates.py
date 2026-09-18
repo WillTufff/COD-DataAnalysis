@@ -30,6 +30,7 @@ from cdlhub_analytics.gates import (
     mode_vocabulary_failures,
     rated_cohort_failures,
     role_failures,
+    roster_role_vocabulary_failures,
     rotation_failures,
     season_rapm_failures,
     site_read_failures,
@@ -890,6 +891,34 @@ def test_role_gate_refuses_a_claim_that_one_era_carries_both_halves() -> None:
     split = {"recovery_era": "2020-2026", "cost_era": "2020-2026"}
     failures = role_failures(_role_payload(era_split=split))
     assert any("same era" in line for line in failures)
+
+
+# ------------------------------------------------- roster role vocabulary
+
+
+def test_roster_role_vocabulary_gate_passes_on_the_known_set() -> None:
+    assert roster_role_vocabulary_failures([("Coach", 41)]) == []
+
+
+def test_roster_role_vocabulary_gate_passes_with_no_non_null_roles() -> None:
+    assert roster_role_vocabulary_failures([]) == []
+
+
+def test_roster_role_vocabulary_gate_catches_an_unknown_value() -> None:
+    """A wiki role outside the known set either erases a player's credit
+    (a value that reads "Player") or hands a non-player full player credit
+    (an "Analyst" or "Manager" row) — the exact bug the coach fix just closed."""
+    failures = roster_role_vocabulary_failures([("Coach", 41), ("Analyst", 3)])
+    assert len(failures) == 1
+    assert "Analyst" in failures[0] and "3" in failures[0]
+
+
+def test_roster_role_vocabulary_gate_catches_a_substitute_role() -> None:
+    """Substitute is deliberately not in the known set: it is gated rather
+    than assumed to be a player, so it fails loudly instead of silently
+    losing or gaining resume credit."""
+    failures = roster_role_vocabulary_failures([("Substitute", 2)])
+    assert any("Substitute" in line for line in failures)
 
 
 # ---------------------------------------------- the SKILL floor, re-measured
