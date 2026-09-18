@@ -60,9 +60,9 @@ LONGEVITY = "LONGEVITY"
 SEASON_COMPONENT_WEIGHTS: Mapping[str, float] = {PERFORMANCE: 1.0}
 
 # The career blend, from the pre-registration and not revisited after a result
-# was seen. Every component is min-max scaled across the qualified cohort
-# before this is applied, so the weights are shares of one comparable 0..100
-# scale and not of five different units.
+# was seen. Every component is scaled across the qualified cohort against the
+# pinned p1/p99 span before this is applied, so the weights are shares of one
+# comparable 0..100 scale and not of five different units.
 CAREER_COMPONENT_WEIGHTS: Mapping[str, float] = {
     PEAK: 20.0,
     PRIME: 25.0,
@@ -72,7 +72,8 @@ CAREER_COMPONENT_WEIGHTS: Mapping[str, float] = {
 }
 
 CAREER_BLEND_RULE = (
-    "each component min-max scaled 0..100 across the qualified cohort, then "
+    "each component scaled 0..100 across the qualified cohort against the "
+    "pinned p1/p99 span, then "
     "the weighted mean over the components the career's coverage reaches: "
     + ", ".join(f"{name} {weight:g}" for name, weight in CAREER_COMPONENT_WEIGHTS.items())
 )

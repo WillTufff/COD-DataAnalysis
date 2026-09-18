@@ -3502,6 +3502,12 @@ entering it.
 | Resume | 25 | the career's finish credit |
 | Accolade | 10 | the career's award credit |
 
+Three of those five rows read the same input. Peak, Prime and Longevity are all built
+from the season score defined above. Only Resume and Accolade are built from something
+else. As independent axes, the blend is **Performance 65, Resume 25, Accolade 10**. The
+five-row table states how the 65 splits across a career's best season, its best stretch
+and its full span. That split is not five separable inputs to the score.
+
 Each component is scaled across the players the board ranks before the weights are
 applied, so the weights are shares of one comparable scale and not of five different
 units. The scale is fit to the 1st and 99th percentile of the ranked cohort, not its raw
@@ -3609,6 +3615,30 @@ proxy at Pearson r = 0.76 and Spearman r = 0.79 over 327 team-seasons with at le
 maps, strong enough to trust as a real signal and not a coincidence of the join. Both
 numbers are computed on every run and stored in the artifact this page reads, so the check
 is repeated rather than remembered.
+
+**What net-of-teammates cannot settle.** Career `total` correlates with teammate
+strength, the mean VALUE of a player's modal-team roster averaged over the player's
+seasons, at Spearman +0.555, and with net-of-teammates itself at +0.344. Teammate
+strength alone explains about 36% of the variance in `total`. About 13 percentage points
+of that is incremental over the player's own season production, read jointly with it.
+Good players are recruited onto good rosters, and that selection accounts for some of
+this. Holding the player and the season fixed, roughly 64% of the association survives.
+Season-to-season transitions where a player changed teams and transitions where the
+player stayed put give the same slope, which a pure recruiting story does not predict.
+
+What the data cannot settle is whether better teammates inflate a player's measured box
+score or make the player genuinely more productive. Telling those apart needs within-map
+variation in who a player shares the field with, a with-or-without comparison at the
+round or line level. Every Call of Duty map fields the same four players for its full
+duration, so the archive contains no such variation, and no design run on this data can
+identify it. That is a limit of what a map-level box score can measure, not a fault this
+board corrects.
+
+The board does not correct for it. Net-of-teammates and teammate strength are published
+beside the score the same way opponent strength is, and neither enters `total`. The
+effect concentrates away from the top of the board: seven of the published top ten move
+five ranks or fewer under a full statistical correction for teammate strength, and the
+movement concentrates between ranks 20 and 180.
 
 **Every total carries a standard deviation**, the same convention career value follows.
 It comes from how much the gold-tier basket disagreed with itself that season: not a

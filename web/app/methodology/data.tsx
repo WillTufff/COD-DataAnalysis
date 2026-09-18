@@ -3498,6 +3498,14 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
           careerComponentOrder(a[0]) - careerComponentOrder(b[0]) ||
           a[0].localeCompare(b[0]),
       );
+      // PEAK, PRIME and LONGEVITY all read the season score; RESUME and
+      // ACCOLADE are the only two components built from something else. This
+      // sums whichever of the three the run actually names, so the honest
+      // three-axis statement below still holds if a component ever drops out.
+      const PERFORMANCE_COMPONENTS = ["PEAK", "PRIME", "LONGEVITY"];
+      const performanceWeight = careerBlendWeights
+        .filter(([name]) => PERFORMANCE_COMPONENTS.includes(name))
+        .reduce((sum, [, weight]) => sum + weight, 0);
       const careerCoverageYears = careerRank?.component_coverage_years;
       const careerFaceTests = careerRankFace?.results ?? [];
       const careerAbsent = careerFaceTests.find(
@@ -3746,6 +3754,31 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
                 </tbody>
               </table>
             </div>
+            <p>
+              Three of those five rows read one input. Peak, Prime and
+              Longevity are all built from the season score above, and only
+              Resume and Accolade read something else. As independent axes,
+              the blend is Performance{" "}
+              <span className="tabular-nums">
+                {performanceWeight.toFixed(0)}
+              </span>
+              , Resume{" "}
+              <span className="tabular-nums">
+                {(careerRank.career.career_component_weights.RESUME ?? 0).toFixed(
+                  0,
+                )}
+              </span>
+              , Accolade{" "}
+              <span className="tabular-nums">
+                {(
+                  careerRank.career.career_component_weights.ACCOLADE ?? 0
+                ).toFixed(0)}
+              </span>
+              . The table above states how that {performanceWeight.toFixed(0)}{" "}
+              splits across a career&rsquo;s best season, its best stretch and
+              its full span. That split is not five separable inputs to the
+              score.
+            </p>
             <p>
               The season score itself stays PERFORMANCE alone. Giving the finish
               record a season weight as well would count it twice, once inside
