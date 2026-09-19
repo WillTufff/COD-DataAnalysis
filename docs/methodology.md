@@ -3261,9 +3261,9 @@ the team term, which brings back the ambiguity the team column was added to remo
 The plan that specified this phase predicted the choice would change the order of the
 table. Both columns were published so the difference could be read.
 
-**It changes almost nothing.** Over the 149 CDL careers the two orderings correlate at
+**It changes almost nothing.** Over the 148 CDL careers the two orderings correlate at
 **rho = 0.998**. The top ten is the same ten players in the same order. The largest rank
-move anywhere in the table is nine places, and it happens at rank 144 of 149. The share
+move anywhere in the table is nine places, and it happens at rank 129 of 148. The share
 of the team term one player carries is a quarter, which is the only division the record
 supports, and a quarter of a team-season effect is small next to the spread of the player
 deviations it is added to.
@@ -3275,10 +3275,11 @@ the agreement is a finding and a reader should be able to check it.
 
 | Table | Careers | Totals clearing two standard deviations |
 |---|---|---|
-| Composite, all ten seasons | 321 | 241 (75.1%) |
-| CDL plus-minus, deviation | 149 | 64 (43.0%) |
-| CDL plus-minus, with team share | 149 | 63 (42.3%) |
-| CWL plus-minus, deviation | 198 | 92 (46.5%) |
+| Composite, all ten seasons | 322 | 240 (74.5%) |
+| CDL plus-minus, deviation | 148 | 64 (43.2%) |
+| CDL plus-minus, with team share | 148 | 63 (42.6%) |
+| CWL plus-minus, deviation | 198 | 91 (46.0%) |
+| CWL plus-minus, with team share | 167 | 91 (54.5%) |
 
 The plus-minus half of that table follows from a season coefficient whose spread is
 indistinguishable from zero given its own standard error. Adding seven of them
@@ -3691,6 +3692,72 @@ on a season sequence that dropped the pre-2017 years, so a component carrying a 
 of the ranking reached 167 of 490 careers instead of 233, and the award coverage read the
 years the award scorer emits, which include the silenced years at zero, so the thin-year
 absence never happened.
+
+### The two career boards, and where they disagree
+
+The board above ranks a career on what the player did on the scoreboard. The career-value
+plus-minus ranks a career on what the map result did while the player was on the server.
+Both are published, side by side, because they disagree.
+
+They are published side by side for a specific reason. A box-score career total tracks who
+a player's teammates were more strongly than it tracks how far the player out-played them:
+across the 205 qualified careers its rank correlation with career teammate strength is
++0.555, against +0.344 with the margin over those teammates. Some of that is recruiting,
+which is not a defect. Holding the player and the season fixed, about two thirds of the
+association survives, and a map-level box score cannot separate "better teammates inflate
+your stat line" from "better teammates make you better". Nothing in the archive resolves
+that, and no reweighting of the board above would.
+
+A plus-minus board does not answer the question. It declines to ask it. The estimator
+reads only who was on the server and what the map did, so a stat line inflated by shared
+game state has no route into it. Measured on the 108 careers both boards carry, the
+plus-minus total correlates with career teammate strength at **+0.273** against the
+composite's **+0.591**. A paired bootstrap over careers puts the difference at
+**-0.318**, 95% interval -0.522 to -0.106. The interval clears zero, so the second axis
+is less situational than the first by an amount the record can actually establish. The run
+recomputes all four of these figures every time, so the page is held against them instead
+of asserting them.
+
+Read the size of that, not the sign. This is a board that carries less of the situation,
+and not one that is free of it. The same section's simulation puts the ceiling on how well
+a CDL-era deviation can be recovered at r ~ 0.29.
+
+**The board covers the CDL era alone, and the reason is identification.** The CWL median
+team-season fielded one lineup all year. A simulated league at that variety recovers
+nothing about which of the four players inside it was worth more, so the era is pooled to
+one coefficient per player, and three copies of one estimate cannot be added into a
+career. There is no all-time total on this axis and none is published. The CWL era does
+clear the same teammate test, at -0.164 with an interval of -0.310 to -0.014. That result
+is reported without a board attached to it. Clearing a correlation threshold does not turn
+an era-pooled coefficient into an estimate that can be ranked.
+
+**It reaches 174 of the 205 qualified careers.** The 31 it misses all began between 2013
+and 2015. The archive records who won those events but not who was on the server, so there
+is no lineup to build a design row from. Their mean rank on the board above is 154.5,
+against 93.8 for the careers it does reach, so the absence is not a random sample and the
+plus-minus board is not a correction to the other one.
+
+**Most of the disagreement cannot be resolved.** Over the 108 shared careers the two
+orderings correlate at rho = 0.348 and the mean rank gap is 28.9 places. But a career whose
+total carries a standard deviation of 0.2, on a board whose totals span about two points,
+could sit 60 places either way without anything having been measured. Against each
+career's own interval, **16 of 108** gaps survive. The site lists those 16 and reports the
+count for the rest, because a table of 108 apparent disagreements would be showing mostly
+noise.
+
+The 16 are not arbitrary. Karma ranks 17 on the box-score board and 89 on this one; Denz,
+Shockz, Parasite, Saints, John, Jurd, Aqua, ZooMaa, JKap and Maux all move the same way,
+and every one of them is a career the confound measurement independently marks as heavily
+teammate-explained. Five move the other way: Vivid, PaulEhx, Mettalz, 04 and CleanX.
+Those five are short or thin-roster CDL careers whose map results run ahead of their stat
+lines.
+
+**Neither board is blended into the other.** No component of the career-rank blend reads
+the plus-minus, no weight was changed, and the published board's numbers are unmoved. Two
+readings of the same careers are published and the reader is told where they part. The
+alternative was to regress teammate strength out of the board above. That would fix into
+the published number an assumption the record cannot establish, which is why this is a
+second board and not an adjustment to the first.
 
 ### Aging: three curves, because one curve would be wrong
 

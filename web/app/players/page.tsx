@@ -6,16 +6,20 @@ import { PlayersIndexTable } from "./PlayersIndexTable";
 import { IntervalBar, halfWidth, overlaps } from "@/components/charts/RatingInterval";
 import {
   type PlayerIndexSort,
+  boardDisagreements,
   formatLeagueSpans,
   getCareerRankLeaderboard,
   getEvaluationPrimary,
   getLeagueSpans,
+  getCareerRankArtifact,
+  getPlusMinusCareerBoard,
   getRatingComparison,
   getRatingLeaderboard,
   getSkillLeaderboard,
   getSkillPrior,
   getSkillSeasons,
   latestCareerRankRun,
+  latestCareerRun,
   latestEvaluationRun,
   latestRatingRun,
   latestRun,
@@ -127,6 +131,46 @@ export default async function PlayersPage({
   const careerRankBoard = careerRankRun
     ? await getCareerRankLeaderboard(careerRankRun.id, 25)
     : [];
+
+  // The second career board, on the map-outcome axis. Both runs are needed:
+  // the totals come from career_value and the composite rank each row is shown
+  // against comes from the career_rank run above.
+  const careerRun = await latestCareerRun();
+  const plusMinusBoard =
+    careerRun && careerRankRun
+      ? await getPlusMinusCareerBoard(careerRun.id, careerRankRun.id)
+      : [];
+  // The comparison that justifies publishing a second board, read from the run
+  // that computes it. A run older than the block returns nothing and the page
+  // drops the sentence instead of asserting a number.
+  const careerRankArtifact = careerRankRun
+    ? await getCareerRankArtifact(careerRankRun.id)
+    : null;
+  const association =
+    careerRankArtifact?.teammate_association?.by_board?.[
+      "plus_minus.deviation.cdl"
+    ] ?? null;
+  const disagreements = boardDisagreements(plusMinusBoard);
+  const resolvedDisagreements = disagreements.filter((d) => d.resolved);
+  const plusMinusSeparated = plusMinusBoard.filter((r) => r.separated).length;
+  // One domain across the shown rows, and it includes zero even though no row
+  // on the top of the board is near it: on this axis zero is replacement level,
+  // so a bar that does not show where zero is hides the only comparison the
+  // interval is for.
+  const PLUS_MINUS_PAD = 0.05;
+  const plusMinusShown = plusMinusBoard.slice(0, 25);
+  const plusMinusDomain = {
+    lo:
+      Math.min(
+        0,
+        ...plusMinusShown.map((r) => r.total - 1.96 * (r.totalSd ?? 0)),
+      ) - PLUS_MINUS_PAD,
+    hi:
+      Math.max(
+        0,
+        ...plusMinusShown.map((r) => r.total + 1.96 * (r.totalSd ?? 0)),
+      ) + PLUS_MINUS_PAD,
+  };
   const brierGain = comparison
     ? 1 -
       comparison.overall[comparison.published].brier /
@@ -652,6 +696,270 @@ export default async function PlayersPage({
               methodology
             </Link>
             .
+          </p>
+        </section>
+      )}
+
+      {plusMinusBoard.length > 0 && (
+        <section
+          data-surface="plus-minus-career-board"
+          className="mt-16 border-t border-hairline pt-8"
+        >
+          <h2 className="lower-third">
+            All-time, in map results
+            <span className="lt-note">
+              career plus-minus, CDL era · {plusMinusBoard.length} careers
+            </span>
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
+            The same question as the board above, asked of a different record.
+            That one reads what a player did on the scoreboard. This one ignores
+            the scoreboard entirely and reads the map result: one row per map,
+            the players on one side against the players on the other, which
+            estimates what a player&rsquo;s presence was worth in score margin
+            while holding the other seven constant. The two orders are not the
+            same, and where they part is the table below this one.
+          </p>
+          {association &&
+            association.spearman_plus_minus !== null &&
+            association.spearman_composite !== null && (
+              <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
+                That distinction is the point of publishing it. A box-score
+                career total tracks who a player&rsquo;s teammates were about as
+                hard as it tracks the player. Over the {association.n} careers
+                both boards carry, the board above correlates with career
+                teammate strength at{" "}
+                {association.spearman_composite.toFixed(3)} and this one at{" "}
+                {association.spearman_plus_minus.toFixed(3)}
+                {association.lo != null && association.hi != null && (
+                  <>
+                    {", a difference of "}
+                    {association.difference?.toFixed(3) ?? "\u2014"}
+                    {" with a 95% interval of "}
+                    {association.lo.toFixed(3)} to {association.hi.toFixed(3)}
+                  </>
+                )}
+                {". "}A stat line inflated by who else was on the server has no route
+                into a number read from the map result. This board carries less
+                of the situation. It is not free of it.
+              </p>
+            )}
+          <p className="mt-3 max-w-3xl border-l-2 border-accent-dim pl-4 text-sm text-ink-secondary">
+            <strong className="font-semibold text-ink">
+              Read the intervals before the order.
+            </strong>{" "}
+            {plusMinusSeparated} of these {plusMinusBoard.length} totals are
+            more than two standard deviations from zero. The other{" "}
+            {plusMinusBoard.length - plusMinusSeparated} cannot be told apart
+            from a replacement-level career, and almost no pair of rows can be
+            told apart from each other. This is an ordering of estimates, not a
+            ranking, and the ± column is the reason.
+          </p>
+          <p className="mt-3 max-w-3xl text-sm text-ink-muted">
+            It covers the CDL era alone. CWL rosters barely changed inside a
+            season, so there is nothing there for the method to read a season
+            from, and those years hold one pooled coefficient per player for the
+            whole era. Three copies of one estimate cannot be added into a
+            career, so there is no all-time number on this axis and none is
+            shown. It also reaches 174 of the 205 careers the board above
+            qualifies; the 31 it misses all began between 2013 and 2015, where
+            the archive records who won but not who was on the server.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-3 font-normal">#</th>
+                  <th className="py-2 pr-4 font-normal">Player</th>
+                  <th className="py-2 pr-4 text-right font-normal">Seasons</th>
+                  <th className="py-2 pr-4 text-right font-normal">Maps</th>
+                  <th className="py-2 pr-4 text-right font-normal">
+                    Career ± sd
+                  </th>
+                  <th className="py-2 pr-4 font-normal">95% interval</th>
+                  <th
+                    className="py-2 pr-4 text-right font-normal"
+                    title="The same career crediting a quarter of the team-season term as well as the player's deviation from it. A choice with no right answer, so both are shown."
+                  >
+                    With team share
+                  </th>
+                  <th className="py-2 text-right font-normal">Box-score rank</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plusMinusBoard.slice(0, 25).map((r) => (
+                  <tr key={r.playerId} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
+                      {r.rank}
+                    </td>
+                    <td className="py-1.5 pr-4 font-medium">
+                      <Link
+                        href={`/players/${playerSlug(r.handle)}`}
+                        className="hover:text-accent hover:underline"
+                      >
+                        {r.handle}
+                      </Link>
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.seasons}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.maps.toLocaleString()}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                      <span className={r.separated ? "" : "text-ink-secondary"}>
+                        {r.total >= 0 ? "+" : ""}
+                        {r.total.toFixed(3)}
+                      </span>
+                      {r.totalSd !== null && (
+                        <span className="text-ink-muted">
+                          {" "}
+                          ±{r.totalSd.toFixed(3)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-4">
+                      <IntervalBar
+                        value={r.total}
+                        sd={r.totalSd}
+                        lo={plusMinusDomain.lo}
+                        hi={plusMinusDomain.hi}
+                        mark={0}
+                        label={
+                          r.totalSd === null
+                            ? `${r.handle}: career plus-minus ${r.total.toFixed(3)}, no stored interval`
+                            : `${r.handle}: career plus-minus ${r.total.toFixed(3)}, 95% ${(
+                                r.total - 1.96 * r.totalSd
+                              ).toFixed(3)} to ${(r.total + 1.96 * r.totalSd).toFixed(3)}`
+                        }
+                      />
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.totalWithTeam === null ? (
+                        "—"
+                      ) : (
+                        <>
+                          {r.totalWithTeam >= 0 ? "+" : ""}
+                          {r.totalWithTeam.toFixed(3)}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.compositeRank === null ? (
+                        <span
+                          className="text-ink-muted"
+                          title="The box-score board does not qualify this career, which needs three qualified seasons."
+                        >
+                          —
+                        </span>
+                      ) : (
+                        r.compositeRank
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+            A season coefficient is a deviation from the player&rsquo;s own
+            team-season, so a career total either credits that deviation alone
+            or adds a share of what the roster was worth beyond the four players
+            in it. Neither is right: the first under-credits four players who
+            genuinely were a great team, the second hands back the ambiguity the
+            team term was added to remove. The main column is the deviation,
+            because it is the quantity the model identifies; the team-share
+            column is the same career under the other rule. Box-score rank is
+            the career&rsquo;s place on the board above, out of 205. The full
+            spec is on{" "}
+            <Link href="/methodology#rapm" className="underline">
+              methodology
+            </Link>
+            .
+          </p>
+
+          <h3 className="mt-10 font-display text-lg font-semibold uppercase tracking-wide">
+            Where the two boards disagree
+          </h3>
+          <p className="mt-3 max-w-3xl text-sm text-ink-secondary">
+            Both boards rank the {disagreements.length} careers they share, so
+            the two ranks below are out of {disagreements.length} and not out of
+            their own board&rsquo;s population. A career shows a different
+            box-score rank here than in the table above, where that column is
+            its place among all 205 qualified careers. Ranking 148 careers
+            against a place out of 205 would read as a move that is really a
+            change of denominator. A career moves when the map result and the
+            box score tell different stories about it. A move only means
+            something if it is larger than the distance this board could shift
+            the career on its own, which is the <em>own band</em> column: how
+            many places the career could sit either way inside its own
+            interval.
+          </p>
+          <p className="mt-3 max-w-3xl border-l-2 border-accent-dim pl-4 text-sm text-ink-secondary">
+            <strong className="font-semibold text-ink">
+              {resolvedDisagreements.length} of {disagreements.length}
+            </strong>{" "}
+            careers disagree by more than their own band. For the other{" "}
+            {disagreements.length - resolvedDisagreements.length} the two boards
+            look like they differ and cannot be shown to. Only the{" "}
+            {resolvedDisagreements.length} are listed.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full max-w-3xl text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-4 font-normal">Player</th>
+                  <th className="py-2 pr-4 text-right font-normal">
+                    Box score
+                  </th>
+                  <th className="py-2 pr-4 text-right font-normal">
+                    Map result
+                  </th>
+                  <th className="py-2 pr-4 text-right font-normal">Move</th>
+                  <th className="py-2 pr-4 text-right font-normal">Own band</th>
+                  <th className="py-2 font-normal">Which way</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resolvedDisagreements.map((d) => (
+                  <tr key={d.playerId} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-4 font-medium">
+                      <Link
+                        href={`/players/${playerSlug(d.handle)}`}
+                        className="hover:text-accent hover:underline"
+                      >
+                        {d.handle}
+                      </Link>
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {d.compositeRank}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {d.plusMinusRank}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                      {d.gap >= 0 ? "+" : ""}
+                      {d.gap}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-muted">
+                      ±{d.ownBand}
+                    </td>
+                    <td className="py-1.5 text-ink-secondary">
+                      {d.gap > 0
+                        ? "the map result rates the career higher"
+                        : "the box score rates the career higher"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+            Move is the box-score rank minus the map-result rank, so a positive
+            number is a career the map result puts higher. Neither board is the
+            correction to the other, and nothing on this page is blended into
+            the board above it: they are two readings of the same careers,
+            published side by side because they disagree.
           </p>
         </section>
       )}

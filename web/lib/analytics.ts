@@ -3609,6 +3609,27 @@ export type CareerRankArtifact = {
     spearman: number;
     min_maps: number;
   };
+  // How hard each career board tracks who a player's teammates were, against
+  // the plus-minus board published beside this one. Absent on a run older than
+  // the block, so every consumer has to handle its absence rather than assume
+  // the comparison exists.
+  teammate_association?: {
+    available: boolean;
+    aggregation?: string;
+    bootstrap_b?: number;
+    by_board?: Record<
+      string,
+      {
+        n: number;
+        spearman_plus_minus: number | null;
+        spearman_composite: number | null;
+        difference?: number;
+        lo?: number | null;
+        hi?: number | null;
+        excludes_zero?: boolean;
+      }
+    >;
+  };
   accolade: {
     thin_years: number[];
     unresolved_rows: number;
@@ -3824,6 +3845,207 @@ export async function getCareerRankLeaderboard(
     netOfTeammatesMean:
       r.net_of_teammates_mean === null ? null : Number(r.net_of_teammates_mean),
   }));
+}
+
+// ---------- The plus-minus career board ----------
+//
+// The second career board. `player_career_rank` above ranks careers on the box
+// score; this ranks them on what the map result did when the player was on the
+// server, which is a different question and gives a different order.
+//
+// Three limits are structural rather than incidental, and every consumer of
+// this section has to carry them:
+//
+//   - It covers the CDL era only. The CWL years store one pooled coefficient
+//     per player per era, filed against each season it covers, so adding those
+//     rows would count one estimate three times. There is no arithmetic that
+//     produces an all-time total on this axis and none is offered.
+//   - Fewer than half of its totals are two standard deviations from zero. The
+//     board is an ordering of estimates, and the page says so above the table
+//     rather than below it.
+//   - It reaches 174 of the 205 careers the composite board qualifies, and the
+//     31 it misses all begin 2013-2015, where the archive holds no box score to
+//     build a lineup from.
+//
+// The credit rule is a choice with no right answer, so both halves ship: a
+// season coefficient is a deviation from the player's own team-season, and a
+// career total either credits that deviation alone or adds a quarter of the
+// team term. `deviation` leads because it is what the model identifies.
+
+/** Standard deviations from zero at which a total counts as separated. Two,
+ *  matching `career.separation`, so the site and the artifact publish one
+ *  number for one quantity. */
+export const PLUS_MINUS_CLEAR_SD = 2;
+
+export type PlusMinusCareerRow = {
+  playerId: number;
+  handle: string;
+  /** Rank on this board, 1-based, highest total first. */
+  rank: number;
+  seasons: number;
+  maps: number;
+  total: number;
+  totalSd: number | null;
+  /** The same career under the other credit rule, where it has one. */
+  totalWithTeam: number | null;
+  /** True where the total is more than `PLUS_MINUS_CLEAR_SD` sd from zero. */
+  separated: boolean;
+  /** Rank on the composite career board, null where that board does not
+   *  qualify the career. The two populations are not the same set. */
+  compositeRank: number | null;
+  qualified: boolean;
+};
+
+/**
+ * Every career on the CDL plus-minus board, ranked, with its composite rank
+ * beside it.
+ *
+ * The composite rank is computed over the qualified cohort alone, because that
+ * is the population the published board ranks — a career this board carries
+ * and the composite does not qualify gets a null rather than a rank it was
+ * never given.
+ */
+export async function getPlusMinusCareerBoard(
+  careerRunId: number,
+  careerRankRunId: number,
+): Promise<PlusMinusCareerRow[]> {
+  const rows = await db.execute(sql`
+    WITH composite AS (
+      SELECT player_id,
+             rank() OVER (ORDER BY total DESC) AS composite_rank
+      FROM player_career_rank
+      WHERE run_id = ${careerRankRunId} AND qualified
+    ),
+    with_team AS (
+      SELECT player_id, total
+      FROM player_career
+      WHERE run_id = ${careerRunId} AND axis = 'plus_minus'
+        AND credit = 'deviation_plus_team' AND era_scope = 'cdl'
+    )
+    SELECT c.player_id, p.handle, c.seasons, c.maps, c.total, c.total_sd,
+           w.total AS total_with_team,
+           rank() OVER (ORDER BY c.total DESC) AS pm_rank,
+           k.composite_rank
+    FROM player_career c
+    JOIN players p ON p.id = c.player_id
+    LEFT JOIN with_team w ON w.player_id = c.player_id
+    LEFT JOIN composite k ON k.player_id = c.player_id
+    WHERE c.run_id = ${careerRunId} AND c.axis = 'plus_minus'
+      AND c.credit = 'deviation' AND c.era_scope = 'cdl'
+    ORDER BY c.total DESC
+  `);
+  return (
+    rows as unknown as {
+      player_id: number;
+      handle: string;
+      seasons: number;
+      maps: number;
+      total: number;
+      total_sd: number | null;
+      total_with_team: number | null;
+      pm_rank: number;
+      composite_rank: number | null;
+    }[]
+  ).map((r) => {
+    const totalSd = r.total_sd === null ? null : Number(r.total_sd);
+    return {
+      playerId: r.player_id,
+      handle: r.handle,
+      rank: Number(r.pm_rank),
+      seasons: Number(r.seasons),
+      maps: Number(r.maps),
+      total: Number(r.total),
+      totalSd,
+      totalWithTeam:
+        r.total_with_team === null ? null : Number(r.total_with_team),
+      separated:
+        totalSd !== null &&
+        totalSd > 0 &&
+        Math.abs(Number(r.total)) > PLUS_MINUS_CLEAR_SD * totalSd,
+      compositeRank:
+        r.composite_rank === null ? null : Number(r.composite_rank),
+      qualified: r.composite_rank !== null,
+    };
+  });
+}
+
+export type BoardDisagreement = {
+  playerId: number;
+  handle: string;
+  compositeRank: number;
+  plusMinusRank: number;
+  /** Composite rank minus plus-minus rank. Positive means the map result rates
+   *  the career above the box score does. */
+  gap: number;
+  /** How many places the career could move on this board if its total sat
+   *  anywhere inside its own interval. */
+  ownBand: number;
+  /** True where the gap is wider than the career's own band, which is the only
+   *  case in which the two boards can be said to actually disagree. */
+  resolved: boolean;
+};
+
+/**
+ * Where the two boards disagree, and whether each disagreement survives the
+ * plus-minus career's own interval.
+ *
+ * The band is the honest denominator. A career whose total carries a standard
+ * deviation of 0.2 on a board whose totals span about two points could sit
+ * eighty places either way without anything having been measured, so a gap
+ * narrower than that is not a disagreement between two boards — it is one board
+ * being unable to place the career at all. Most of them are: the expectation is
+ * declared, and the page reports the count rather than showing the list alone.
+ *
+ * Both ranks are taken over the careers the two boards share, so neither is
+ * the rank shown on its own page. That is deliberate — comparing a rank out of
+ * 148 against a rank out of 205 would read as a move that is really a change of
+ * denominator.
+ */
+export function boardDisagreements(
+  board: readonly PlusMinusCareerRow[],
+): BoardDisagreement[] {
+  const shared = board.filter((r) => r.compositeRank !== null);
+  // Re-rank both boards over the shared population, so the comparison is not
+  // reading two different denominators against each other.
+  const byPlusMinus = [...shared].sort((a, b) => b.total - a.total);
+  const pmRank = new Map(byPlusMinus.map((r, i) => [r.playerId, i + 1]));
+  const byComposite = [...shared].sort(
+    (a, b) => (a.compositeRank ?? 0) - (b.compositeRank ?? 0),
+  );
+  const cRank = new Map(byComposite.map((r, i) => [r.playerId, i + 1]));
+
+  // Totals in descending order, for turning a total into a rank on this board.
+  const totals = byPlusMinus.map((r) => r.total);
+  const rankOf = (total: number): number => {
+    let lo = 0;
+    let hi = totals.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (totals[mid] > total) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo + 1;
+  };
+
+  const out: BoardDisagreement[] = [];
+  for (const r of shared) {
+    if (r.totalSd === null) continue;
+    const half = PLUS_MINUS_CLEAR_SD * r.totalSd;
+    const ownBand = Math.abs(rankOf(r.total - half) - rankOf(r.total + half));
+    const composite = cRank.get(r.playerId)!;
+    const plusMinus = pmRank.get(r.playerId)!;
+    const gap = composite - plusMinus;
+    out.push({
+      playerId: r.playerId,
+      handle: r.handle,
+      compositeRank: composite,
+      plusMinusRank: plusMinus,
+      gap,
+      ownBand,
+      resolved: Math.abs(gap) > ownBand,
+    });
+  }
+  return out.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
 }
 
 export type PlayerCareerRankSummary = {

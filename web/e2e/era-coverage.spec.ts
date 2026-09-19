@@ -52,6 +52,28 @@ test.describe("rating surfaces hold rows", () => {
     await expect(value).toContainText("What a season was worth");
   });
 
+  test("/players carries the plus-minus board and its caveats", async ({
+    page,
+  }) => {
+    await page.goto("/players");
+    const board = page.locator('[data-surface="plus-minus-career-board"]');
+    await expect(board).toBeVisible();
+    const tables = board.locator("table");
+    // Two tables: the board itself, then the careers the two boards disagree
+    // about. A page that renders one of them has lost the deliverable.
+    await expect(tables).toHaveCount(2);
+    expect(await tables.nth(0).locator("tbody tr").count()).toBeGreaterThan(0);
+    expect(await tables.nth(1).locator("tbody tr").count()).toBeGreaterThan(0);
+    // Fewer than half these totals separate from zero, so the board is only
+    // publishable while it says so above the table it qualifies.
+    await expect(board).toContainText("Read the intervals before the order");
+    await expect(board).toContainText("standard deviations from zero");
+    // The era limit and the coverage gap are the two things a reader cannot be
+    // left to infer from an unlabelled all-time-looking ranking.
+    await expect(board).toContainText("It covers the CDL era alone");
+    await expect(board).toContainText("174 of the 205");
+  });
+
   test("every era has a populated player page", async ({ page }) => {
     const samples = await eraSamples();
     expect(samples.length, "leagues with a rated season").toBeGreaterThan(1);

@@ -604,6 +604,12 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
   const careerRank = careerRankRun
     ? await getCareerRankArtifact(careerRankRun.id)
     : null;
+  // The teammate comparison that justifies a second career board, from the run
+  // that computes it. Absent on a run older than the block, in which case the
+  // section drops the sentence instead of asserting a number.
+  const cdlAssociation =
+    careerRank?.teammate_association?.by_board?.["plus_minus.deviation.cdl"] ??
+    null;
   // The same run's report card. A board printed beside a verdict from an
   // earlier run would be the drift this page exists to prevent.
   const careerRankFace = careerRankRun
@@ -3484,6 +3490,40 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               covers, so adding those three would count one estimate three
               times. A CWL contribution is its own row, read beside a CDL total.
             </p>
+            {cdlAssociation &&
+              cdlAssociation.spearman_plus_minus !== null &&
+              cdlAssociation.spearman_composite !== null && (
+                <p>
+                  <strong className="text-ink">
+                    The plus-minus career board is published beside the
+                    box-score one.
+                  </strong>{" "}
+                  A box-score career total tracks who a player&rsquo;s teammates
+                  were about as hard as it tracks the player, and a map-level
+                  record cannot separate a better player from a stat line
+                  inflated by shared game state. The plus-minus board declines to
+                  ask: it reads who was on the server and what the map did.
+                  Over the {cdlAssociation.n} careers both boards carry, the
+                  box-score board correlates with career teammate strength at{" "}
+                  {cdlAssociation.spearman_composite.toFixed(3)} and the
+                  plus-minus board at{" "}
+                  {cdlAssociation.spearman_plus_minus.toFixed(3)}
+                  {cdlAssociation.lo != null && cdlAssociation.hi != null && (
+                    <>
+                      {", a paired difference of "}
+                      {cdlAssociation.difference?.toFixed(3) ?? "\u2014"}
+                      {" with a 95% interval of "}
+                      {cdlAssociation.lo.toFixed(3)} to{" "}
+                      {cdlAssociation.hi.toFixed(3)}
+                    </>
+                  )}
+                  {". "}That is a board carrying less of the situation, and not one
+                  free of it. Fewer than half its totals separate from zero, it
+                  covers the CDL era alone, and it reaches 174 of the 205 careers
+                  the all-time board qualifies. The board itself, and the careers
+                  the two orderings disagree about, are on the players page.
+                </p>
+              )}
           </div>
         </section>
       );
