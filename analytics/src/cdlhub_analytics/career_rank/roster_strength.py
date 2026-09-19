@@ -20,7 +20,7 @@ from typing import cast
 
 import psycopg
 
-from ..career import modal_teams
+from ..career import modal_teams, teammate_means
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
@@ -72,18 +72,23 @@ def net_of_teammates(
     for (player_id, season_id), team_id in teams.items():
         by_team_season[(team_id, season_id)].append(player_id)
 
+    # The mean itself comes from `career.teammate_means`, because the career
+    # artifact correlates both career axes against the same quantity and a
+    # second copy of this loop here would be a second definition of who a
+    # player played with.
+    means = teammate_means(conn, season_value)
+
     out: list[NetOfTeammates] = []
     for (player_id, season_id), team_id in sorted(teams.items()):
         own = season_value.get((player_id, season_id))
-        if own is None:
+        teammate_mean = means.get((player_id, season_id))
+        if own is None or teammate_mean is None:
             continue
-        mates = [p for p in by_team_season[(team_id, season_id)] if p != player_id]
-        mate_values = [
-            season_value[(p, season_id)] for p in mates if (p, season_id) in season_value
-        ]
-        if not mate_values:
-            continue
-        teammate_mean = sum(mate_values) / len(mate_values)
+        n_teammates = sum(
+            1
+            for p in by_team_season[(team_id, season_id)]
+            if p != player_id and (p, season_id) in season_value
+        )
         out.append(
             NetOfTeammates(
                 player_id=player_id,
@@ -91,7 +96,7 @@ def net_of_teammates(
                 own_value=own,
                 teammate_mean=teammate_mean,
                 net=own - teammate_mean,
-                n_teammates=len(mate_values),
+                n_teammates=n_teammates,
             )
         )
     return out

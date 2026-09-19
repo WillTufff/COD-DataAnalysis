@@ -450,6 +450,59 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "breadth_weight": 0.75,
         "value_weight": 0.25,
     },
+    # The separation table /methodology prints under "What the totals
+    # establish", and the counts the players page prints above the plus-minus
+    # board. Pinned 2026-09-18, when the plus-minus board was published and the
+    # table was found to be four runs stale: it read 321 composite careers
+    # against the run's 322 and 149 CDL careers against 148, because nothing
+    # held it to anything. That is the same failure this block was built for,
+    # one table further down the page.
+    #
+    # `share_clear` is not pinned. It is `n_clear_of_zero / n_with_interval`,
+    # so pinning it would be a third copy of two numbers already here and would
+    # fail on a rounding change that moved nothing.
+    # The teammate-association comparison the two board sections state, on both
+    # /methodology and the players page. Pinned 2026-09-18 with the board it
+    # justifies: the -0.318 is the whole argument for publishing a second board
+    # at all, so it is the last figure that should be allowed to move quietly.
+    # The population is the qualified overlap, because the composite board
+    # publishes a total only for a qualified career.
+    #
+    # The interval bounds are not pinned. They are bootstrap quantiles and move
+    # in the fourth decimal with any change to the population; what is held is
+    # the point difference and whether the interval still clears zero, which is
+    # the claim the page makes.
+    "career_value_teammate_association": {
+        "on": "2026-09-18",
+        "boards": {
+            "plus_minus.deviation.cdl": {
+                "n": 108,
+                "spearman_plus_minus": 0.2732,
+                "spearman_composite": 0.5912,
+                "difference": -0.318,
+                "excludes_zero": True,
+            },
+            "plus_minus.deviation.cwl": {
+                "n": 143,
+                "spearman_plus_minus": 0.4576,
+                "spearman_composite": 0.6216,
+                "difference": -0.164,
+                "excludes_zero": True,
+            },
+        },
+        "tol": 5e-4,
+    },
+    "career_value_separation": {
+        "on": "2026-09-18",
+        "clear_sd": 2.0,
+        "keys": {
+            "composite.none.all": {"n": 322, "n_clear_of_zero": 240},
+            "plus_minus.deviation.cdl": {"n": 148, "n_clear_of_zero": 64},
+            "plus_minus.deviation_plus_team.cdl": {"n": 148, "n_clear_of_zero": 63},
+            "plus_minus.deviation.cwl": {"n": 198, "n_clear_of_zero": 91},
+            "plus_minus.deviation_plus_team.cwl": {"n": 167, "n_clear_of_zero": 91},
+        },
+    },
     "persistence_pairs": 567,
     "persistence_delta_r": -0.2139,
     "delta_r_tol": 5e-4,

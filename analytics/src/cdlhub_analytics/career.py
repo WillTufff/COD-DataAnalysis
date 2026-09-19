@@ -97,6 +97,15 @@ TEAM_SHARE = 0.25
 # `statespace.ADMISSION_MAPS` and the era adjustment's floor.
 QUALIFIED_MAPS = statespace.ADMISSION_MAPS
 
+# The paired bootstrap behind the teammate-association interval that
+# `career_rank.engine` publishes beside its board. The constants live here
+# rather than in that module because `provenance.SEEDS` has to name every fixed
+# seed in the package, and it cannot import the engine: the engine reaches
+# `writeback`, which reaches `provenance`, and the cycle closes. This module is
+# the other half of the comparison and nothing it imports reaches provenance.
+ASSOCIATION_B = 2000
+ASSOCIATION_SEED = 20260918
+
 # A run of three seasons has to be three *consecutive* seasons of the league,
 # not three rows that happen to be adjacent in a player's own history: a player
 # who sat out 2022 did not have a run through it.
@@ -243,6 +252,40 @@ def modal_teams(conn: psycopg.Connection[tuple[object, ...]]) -> dict[tuple[int,
         if key not in best:
             best[key] = cast(int, row[2])
     return best
+
+
+def teammate_means(
+    conn: psycopg.Connection[tuple[object, ...]],
+    season_value: dict[tuple[int, int], float],
+) -> dict[tuple[int, int], float]:
+    """Per player-season, the mean season value of their modal-team teammates.
+
+    A teammate is anyone else whose modal team-season is the same team-season.
+    Absent where none of the teammates carries a value, which is an all-rookie
+    roster or a roster whose others sat below the qualified-maps floor.
+
+    It lives here because `modal_teams` does, and because two callers need the
+    same number: `career_rank.roster_strength` subtracts it from the player's
+    own value to publish net-of-teammates, and the artifact below correlates the
+    two career axes against it. Two definitions of "who this player played
+    with" would eventually disagree, and the disagreement would be invisible in
+    both.
+    """
+    teams = modal_teams(conn)
+    by_team_season: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for (player_id, season_id), team_id in teams.items():
+        by_team_season[(team_id, season_id)].append(player_id)
+
+    out: dict[tuple[int, int], float] = {}
+    for (player_id, season_id), team_id in sorted(teams.items()):
+        values = [
+            season_value[(p, season_id)]
+            for p in by_team_season[(team_id, season_id)]
+            if p != player_id and (p, season_id) in season_value
+        ]
+        if values:
+            out[(player_id, season_id)] = sum(values) / len(values)
+    return out
 
 
 def split_players(conn: psycopg.Connection[tuple[object, ...]]) -> set[tuple[int, int]]:
@@ -525,6 +568,7 @@ def build(
             teams,
         )
         rows += era_rows(plus_minus, seasons, credit, team_effect, teams)
+
     return rows, artifact(rows, composite, plus_minus, split, seasons)
 
 

@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from . import aging, role, roundwp, segmentwp, seriesdyn, style, validation
+from . import aging, career, role, roundwp, segmentwp, seriesdyn, style, validation
 from .metricdiff import evalpop
 from .ratings import (
     evalspec,
@@ -59,6 +59,9 @@ SEEDS: dict[str, int] = {
     "aging": aging.BOOTSTRAP_SEED,
     "validation": validation.BOOTSTRAP_SEED,
     "role": role.BOOTSTRAP_SEED,
+    # The paired bootstrap on the teammate association the career-rank engine
+    # publishes beside its board. Owned here; see the constant's own comment.
+    "career": career.ASSOCIATION_SEED,
 }
 
 

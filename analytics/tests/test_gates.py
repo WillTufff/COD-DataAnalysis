@@ -1090,6 +1090,12 @@ _FACE_RUN: dict[str, Any] = {
 def _unpin_phase_c(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in _PHASE_C_PINS.items():
         monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, key, value)
+    # The two pins added with the plus-minus board. Every test below feeds
+    # `page_figure_failures` a career-rank payload that carries neither block,
+    # and both would otherwise report absent on top of whatever the test is
+    # actually asserting. Each has its own tests further down.
+    for key in ("career_value_teammate_association", "career_value_separation"):
+        monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, key, None)
 
 
 def test_an_unpinned_page_figure_is_reported_and_does_not_fail(
@@ -1201,6 +1207,144 @@ def test_page_figures_that_match_pass(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == []
     )
+
+
+def _separation_failures(keys: dict[str, Any], career_value: dict[str, Any] | None) -> list[str]:
+    """The separation gate's own lines, with every other page figure's ignored.
+
+    `page_figure_failures` checks a dozen unrelated pins in one pass, so a test
+    that fed it two empty payloads would be asserting on all of them. Filtering
+    to the lines this gate emits reads one gate at a time without unpinning the
+    rest.
+    """
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setitem(
+            evalspec.PUBLISHED_FIGURES,
+            "career_value_separation",
+            {"on": "2026-09-18", "clear_sd": 2.0, "keys": keys},
+        )
+        found = gates.page_figure_failures({}, {}, None, career_value)
+    finally:
+        monkeypatch.undo()
+    return [line for line in found if "career-value" in line or "separation" in line]
+
+
+def _association_failures(boards: dict[str, Any], run: dict[str, Any] | None) -> list[str]:
+    """The teammate-association gate's own lines, with the rest of the pass ignored."""
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setitem(
+            evalspec.PUBLISHED_FIGURES,
+            "career_value_teammate_association",
+            {"on": "2026-09-18", "boards": boards, "tol": 5e-4},
+        )
+        monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "career_value_separation", None)
+        found = gates.page_figure_failures(
+            {}, {"teammate_association": run} if run is not None else {}
+        )
+    finally:
+        monkeypatch.undo()
+    return [line for line in found if "teammate association" in line]
+
+
+_ASSOCIATION_PIN = {
+    "plus_minus.deviation.cdl": {
+        "n": 108,
+        "spearman_plus_minus": 0.2732,
+        "spearman_composite": 0.5912,
+        "difference": -0.318,
+        "excludes_zero": True,
+    }
+}
+
+
+def _association_run(**over: Any) -> dict[str, Any]:
+    board = {
+        "n": 108,
+        "spearman_plus_minus": 0.2732,
+        "spearman_composite": 0.5912,
+        "difference": -0.318,
+        "excludes_zero": True,
+        **over,
+    }
+    return {"available": True, "by_board": {"plus_minus.deviation.cdl": board}}
+
+
+def test_the_teammate_association_matching_the_page_passes() -> None:
+    assert _association_failures(_ASSOCIATION_PIN, _association_run()) == []
+
+
+def test_a_teammate_association_that_moved_fails() -> None:
+    """The -0.318 is the whole argument for publishing a second board, so it is
+    the last figure that should be allowed to move quietly."""
+    found = _association_failures(
+        _ASSOCIATION_PIN, _association_run(spearman_plus_minus=0.4102, difference=-0.181)
+    )
+    assert len(found) == 2
+    assert any("spearman_plus_minus: run 0.4102, page 0.2732" in line for line in found)
+
+
+def test_an_interval_that_stops_clearing_zero_fails() -> None:
+    """A difference inside tolerance whose interval now covers zero is the board
+    losing its justification without its headline number moving."""
+    found = _association_failures(_ASSOCIATION_PIN, _association_run(excludes_zero=False))
+    assert len(found) == 1
+    assert "run covers zero, page clears zero" in found[0]
+
+
+def test_a_run_that_stops_computing_the_association_fails() -> None:
+    found = _association_failures(_ASSOCIATION_PIN, None)
+    assert len(found) == 1
+    assert "absent from the run" in found[0]
+
+
+_CDL_DEVIATION = {"plus_minus.deviation.cdl": {"n": 148, "n_clear_of_zero": 64}}
+
+
+def test_a_career_that_leaves_the_plus_minus_board_fails_the_separation_pin() -> None:
+    """The population count under /methodology's separation table is a published
+    sentence, and it drifted for four runs because nothing held it."""
+
+    def run(n: int) -> dict[str, Any]:
+        return {"separation": {"plus_minus.deviation.cdl": {"n": n, "n_clear_of_zero": 64}}}
+
+    assert _separation_failures(_CDL_DEVIATION, run(148)) == []
+    found = _separation_failures(_CDL_DEVIATION, run(149))
+    assert len(found) == 1
+    assert "separation plus_minus.deviation.cdl n: run 149, page 148" in found[0]
+
+
+def test_a_separation_count_that_moved_fails() -> None:
+    """How many totals clear two standard deviations is the number the board's
+    own caveat is built on, so it is held as tightly as the population."""
+    found = _separation_failures(
+        _CDL_DEVIATION,
+        {"separation": {"plus_minus.deviation.cdl": {"n": 148, "n_clear_of_zero": 71}}},
+    )
+    assert len(found) == 1
+    assert "n_clear_of_zero: run 71, page 64" in found[0]
+
+
+def test_a_separation_key_the_run_stops_writing_fails() -> None:
+    """An empty team_season_effect drops the with-team rows entirely. The table
+    would then print four lines where the page states five, with no number having
+    moved."""
+    found = _separation_failures(
+        {
+            **_CDL_DEVIATION,
+            "plus_minus.deviation_plus_team.cdl": {"n": 148, "n_clear_of_zero": 63},
+        },
+        {"separation": _CDL_DEVIATION},
+    )
+    assert len(found) == 1
+    assert "plus_minus.deviation_plus_team.cdl: absent from the run" in found[0]
+
+
+def test_a_run_with_no_career_value_artifact_fails_the_separation_pin() -> None:
+    found = _separation_failures(_CDL_DEVIATION, {})
+    assert len(found) == 1
+    assert "wrote no career-value artifact" in found[0]
 
 
 def test_an_anchor_set_recut_under_the_same_label_fails(

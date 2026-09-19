@@ -825,6 +825,7 @@ def page_figure_failures(
     retrodiction: dict[str, Any],
     career_rank: dict[str, Any],
     face_validity: dict[str, Any] | None = None,
+    career_value: dict[str, Any] | None = None,
 ) -> list[str]:
     """Two figures the page states, held against the run that computes them.
 
@@ -1022,6 +1023,33 @@ def page_figure_failures(
         )
     for what, got, _want in [(c[0], c[1], c[2]) for c in checks if c[2] is None]:
         bad.append(f"{REPORTED}{what} is not pinned yet; the run computes {got}")
+    # The teammate association. It is the reason a second board is published at
+    # all, so the page's number and the run's have to be the same number.
+    assoc_pinned = evalspec.PUBLISHED_FIGURES.get("career_value_teammate_association") or {}
+    assoc = (career_rank.get("teammate_association") or {}).get("by_board") or {}
+    if assoc_pinned:
+        tol = float(assoc_pinned.get("tol", 5e-4))
+        for key, want in (assoc_pinned.get("boards") or {}).items():
+            got = assoc.get(key)
+            if got is None:
+                bad.append(f"teammate association {key}: absent from the run, page {want}")
+                continue
+            if got.get("excludes_zero") != want.get("excludes_zero"):
+                bad.append(
+                    f"teammate association {key} interval: run "
+                    f"{'clears' if got.get('excludes_zero') else 'covers'} zero, page "
+                    f"{'clears' if want.get('excludes_zero') else 'covers'} zero"
+                )
+            for field in ("n", "spearman_plus_minus", "spearman_composite", "difference"):
+                checks.append(
+                    (
+                        f"teammate association {key} {field}",
+                        got.get(field),
+                        want.get(field),
+                        0.0 if field == "n" else tol,
+                    )
+                )
+
     for what, got, want, tol in checks:
         if want is None:
             continue
@@ -1068,6 +1096,31 @@ def page_figure_failures(
                 f"absent-legend depth: run {absent.get('top_n')}, "
                 f"page {anchors_pinned.get('top_n')}"
             )
+
+    # The separation table. /methodology prints one row per key and the players
+    # page prints the CDL deviation row above the board it qualifies, so a
+    # career entering or leaving either population moves a published sentence
+    # with no weight having changed.
+    separation_pinned = evalspec.PUBLISHED_FIGURES.get("career_value_separation") or {}
+    separation = (career_value or {}).get("separation") or {}
+    if separation_pinned:
+        if career_value == {}:
+            bad.append(
+                "the run wrote no career-value artifact, so the separation table is unchecked"
+            )
+        elif separation:
+            for key, want in (separation_pinned.get("keys") or {}).items():
+                got = separation.get(key)
+                if got is None:
+                    bad.append(f"career-value separation {key}: absent from the run, page {want}")
+                    continue
+                for field in ("n", "n_clear_of_zero"):
+                    if got.get(field) != want.get(field):
+                        bad.append(
+                            f"published figure drifted from /methodology — career-value "
+                            f"separation {key} {field}: run {got.get(field)}, "
+                            f"page {want.get(field)}"
+                        )
     return bad
 
 
@@ -1389,6 +1442,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
                 validation_payloads(conn).get("validation_retrodiction", {}),
                 artifact(conn, career_rank.MODEL, career_rank.ARTIFACT_NAME),
                 optional_artifact(conn, career_rank.MODEL, career_facevalidity.ARTIFACT_NAME),
+                artifact(conn, career.MODEL, "career_value"),
             ),
         ),
     ]

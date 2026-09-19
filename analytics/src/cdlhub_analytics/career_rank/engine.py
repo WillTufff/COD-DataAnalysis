@@ -10,9 +10,10 @@ import math
 from dataclasses import dataclass
 from typing import Any, cast
 
+import numpy as np
 import psycopg
 
-from .. import career, style, writeback
+from .. import career, resample, style, writeback
 from ..ratings.preflight import load_seasons
 from . import (
     PUBLISH_FROM_YEAR,
@@ -236,6 +237,144 @@ class PlayerRow:
         return sum(values) / len(values) if values else None
 
 
+def _teammate_association(
+    conn: Conn,
+    board: dict[int, float],
+    net_rows: list[roster_strength.NetOfTeammates],
+) -> dict[str, Any]:
+    """How hard each career axis tracks who a player's teammates were.
+
+    This board correlates with career teammate strength about 1.6 times as hard
+    as it correlates with how far the player out-played those teammates. Some of
+    that is recruiting and not a defect. What a map-level box score cannot
+    settle is whether the rest is a better player or a stat line inflated by
+    shared game state, because both predict the same thing.
+
+    The plus-minus career board does not resolve that. It declines to ask: its
+    estimator reads who was on the server and what the map did, so an inflated
+    stat line has no route into it. This block measures whether declining to ask
+    buys anything, on the careers both boards carry, and it runs every time
+    because a number a page asserts and no run computes cannot be audited.
+
+    The interval is on the *difference* of two rank correlations, from one
+    resample of careers scoring both boards, so it brackets the comparison
+    instead of leaving two intervals to be eyeballed against each other. Seeded
+    from the population's own contents through `resample.stream`, so it does not
+    move when `player_id` renumbers underneath it.
+    """
+    strength_by_player: dict[int, list[float]] = {}
+    for row in net_rows:
+        strength_by_player.setdefault(row.player_id, []).append(row.teammate_mean)
+    strength = {p: sum(v) / len(v) for p, v in strength_by_player.items() if v}
+    if not board or not strength:
+        return {"available": False, "reason": "no ranked careers or no teammate strength"}
+
+    # The plus-minus totals, read from the career-value run this one follows.
+    # Read rather than refitted: the board published on the site is these rows,
+    # and a second aggregation here would be a second board.
+    rows = conn.execute(
+        "SELECT credit, era_scope, player_id, total FROM player_career"
+        " WHERE run_id = (SELECT max(run_id) FROM player_career) AND axis = %s",
+        (career.PLUS_MINUS,),
+    ).fetchall()
+    boards: dict[tuple[str, str], dict[int, float]] = {}
+    for credit, era_scope, player_id, total in rows:
+        key = (str(credit), str(era_scope))
+        boards.setdefault(key, {})[cast(int, player_id)] = cast(float, total)
+
+    out: dict[str, Any] = {
+        "available": True,
+        "bootstrap_b": career.ASSOCIATION_B,
+        "bootstrap_seed": career.ASSOCIATION_SEED,
+        "aggregation": "mean over the player's seasons of the season teammate mean",
+        "by_board": {},
+    }
+    for (credit, era_scope), totals in sorted(boards.items()):
+        shared = sorted(set(totals) & set(board) & set(strength))
+        if len(shared) < 10:
+            continue
+        out["by_board"][f"{career.PLUS_MINUS}.{credit}.{era_scope}"] = _association_interval(
+            [totals[p] for p in shared],
+            [board[p] for p in shared],
+            [strength[p] for p in shared],
+        )
+    return out
+
+
+def _association_interval(
+    plus_minus: list[float], composite: list[float], strength: list[float]
+) -> dict[str, Any]:
+    """Interval on spearman(plus_minus, strength) - spearman(composite, strength)."""
+    # Contents order before any draw, so the population does not permute when a
+    # surrogate key renumbers. Teammate strength sorts first because it is the
+    # column both correlations are taken against.
+    perm = resample.order([strength, plus_minus, composite])
+    strength = [strength[i] for i in perm]
+    plus_minus = [plus_minus[i] for i in perm]
+    composite = [composite[i] for i in perm]
+
+    point_pm = _spearman(plus_minus, strength)
+    point_co = _spearman(composite, strength)
+    if point_pm is None or point_co is None:
+        return {"n": len(plus_minus), "spearman_plus_minus": None, "spearman_composite": None}
+
+    rng = resample.stream(
+        career.ASSOCIATION_SEED, np.asarray(strength), np.asarray(plus_minus), np.asarray(composite)
+    )
+    n = len(plus_minus)
+    draws: list[float] = []
+    for _ in range(career.ASSOCIATION_B):
+        idx = rng.integers(0, n, size=n)
+        bs = [strength[i] for i in idx]
+        a = _spearman([plus_minus[i] for i in idx], bs)
+        b = _spearman([composite[i] for i in idx], bs)
+        if a is not None and b is not None:
+            draws.append(a - b)
+    draws.sort()
+    lo = draws[int(math.floor(0.025 * len(draws)))] if draws else None
+    hi = draws[min(len(draws) - 1, int(math.ceil(0.975 * len(draws))))] if draws else None
+    return {
+        "n": n,
+        "spearman_plus_minus": round(point_pm, 4),
+        "spearman_composite": round(point_co, 4),
+        "difference": round(point_pm - point_co, 4),
+        "lo": None if lo is None else round(lo, 4),
+        "hi": None if hi is None else round(hi, 4),
+        # True where the interval sits wholly one side of zero, which is the only
+        # case in which the two boards can be said to differ at all.
+        "excludes_zero": bool(lo is not None and hi is not None and (lo > 0) == (hi > 0)),
+    }
+
+
+def _spearman(a: list[float], b: list[float]) -> float | None:
+    if len(a) < 3:
+        return None
+    ra, rb = _rank_vector(a), _rank_vector(b)
+    n = len(ra)
+    mean_a, mean_b = sum(ra) / n, sum(rb) / n
+    cov = sum((x - mean_a) * (y - mean_b) for x, y in zip(ra, rb, strict=True))
+    var_a = sum((x - mean_a) ** 2 for x in ra)
+    var_b = sum((y - mean_b) ** 2 for y in rb)
+    if var_a <= 0.0 or var_b <= 0.0:
+        return None
+    return cov / math.sqrt(var_a * var_b)
+
+
+def _rank_vector(values: list[float]) -> list[float]:
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        shared = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = shared
+        i = j + 1
+    return ranks
+
+
 def build(
     conn: Conn, restrict_to: set[int] | None = None
 ) -> tuple[list[PlayerRow], dict[str, Any]]:
@@ -454,6 +593,14 @@ def build(
         "version": VERSION,
         "evaluation_population": evalpop.stamp(),
         "team_strength_proxy_check": roster_strength.proxy_check(conn, team_season_value),
+        # Against the plus-minus career board published beside this one. The
+        # population is the qualified cohort, because that is the only set this
+        # board publishes a rank for.
+        "teammate_association": _teammate_association(
+            conn,
+            {row.player_id: row.career.total for row in out if row.career.qualified},
+            net_rows,
+        ),
         "restricted": restrict_to is not None,
         "n_players_scored": len(out),
         "publish_from_year": PUBLISH_FROM_YEAR,

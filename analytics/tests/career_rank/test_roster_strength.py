@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import pytest
 
+from cdlhub_analytics import career
 from cdlhub_analytics.career_rank import roster_strength as roster_strength
 
 from .conftest import FakeConn, as_conn
 
 
 def _patch_modal_teams(monkeypatch: pytest.MonkeyPatch, teams: dict[tuple[int, int], int]) -> None:
+    """Both bindings, because the roster is read in two modules.
+
+    `career.teammate_means` owns the teammate average and resolves `modal_teams`
+    in its own module, so patching only the name `roster_strength` imported
+    leaves the average reading the real database.
+    """
     monkeypatch.setattr(roster_strength, "modal_teams", lambda conn: teams)
+    monkeypatch.setattr(career, "modal_teams", lambda conn: teams)
 
 
 # ------------------------------------------------------------ net_of_teammates
