@@ -11,6 +11,11 @@ pipeline follows.
 A row is dropped, with its reason counted, when it carries no kill count, no
 resolved player, no team, no opponent, no win flag, or a mode the database does
 not model. Nothing is guessed.
+
+A game whose surviving lines cover only one team keeps its result and loses its
+lines: half a box score is not a map's box score. The wiki does this where it
+left one team's kills blank, and where it copied one team's rows over the
+other's.
 """
 
 from __future__ import annotations
@@ -184,6 +189,9 @@ def transform(player_ids: dict[str, int], window: str = "playerstats") -> Transf
             dropped["series without two sides"] += len(games)
             continue
         team1, team2 = sides
+        stripped = _strip_one_sided(games)
+        if stripped:
+            dropped["game with one side's lines"] += stripped
         series.append(
             Series(
                 series_id=series_id,
@@ -197,6 +205,16 @@ def transform(player_ids: dict[str, int], window: str = "playerstats") -> Transf
             )
         )
     return TransformResult(series=series, dropped=dict(dropped), quarantine=quarantine)
+
+
+def _strip_one_sided(games: list[Game]) -> int:
+    """Clear the lines of every game that has lines for one team only."""
+    stripped = 0
+    for game in games:
+        if len({line.team_name for line in game.lines}) == 1:
+            stripped += len(game.lines)
+            game.lines.clear()
+    return stripped
 
 
 def _sides(games: list[Game]) -> list[str]:

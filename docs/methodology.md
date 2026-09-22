@@ -3712,8 +3712,8 @@ A plus-minus board does not answer the question. It declines to ask it. The esti
 reads only who was on the server and what the map did, so a stat line inflated by shared
 game state has no route into it. Measured on the 108 careers both boards carry, the
 plus-minus total correlates with career teammate strength at **+0.270** against the
-composite's **+0.595**. A paired bootstrap over careers puts the difference at
-**-0.324**, 95% interval -0.533 to -0.117. The interval clears zero, so the second axis
+composite's **+0.597**. A paired bootstrap over careers puts the difference at
+**-0.326**, 95% interval -0.528 to -0.127. The interval clears zero, so the second axis
 is less situational than the first by an amount the record can actually establish. The run
 recomputes all four of these figures every time, so the page is held against them instead
 of asserting them.
@@ -3727,7 +3727,7 @@ team-season fielded one lineup all year. A simulated league at that variety reco
 nothing about which of the four players inside it was worth more, so the era is pooled to
 one coefficient per player, and three copies of one estimate cannot be added into a
 career. There is no all-time total on this axis and none is published. The CWL era does
-clear the same teammate test, at -0.160 with an interval of -0.304 to -0.021. That result
+clear the same teammate test, at -0.160 with an interval of -0.311 to -0.016. That result
 is reported without a board attached to it. Clearing a correlation threshold does not turn
 an era-pooled coefficient into an estimate that can be ranked.
 

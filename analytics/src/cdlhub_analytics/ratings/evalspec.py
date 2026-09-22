@@ -287,7 +287,8 @@ REPRODUCE = (
 # Re-pinned 2026-09-22, against the run_all that ended in metric_diff run 1943.
 # The first CoD wiki load since 2026-08-16 added 399 map lines, mostly
 # 2013-2016, which player rows created by later LPDB and identity work had made
-# resolvable. Nothing about a method
+# resolvable. The same day, five wiki games with box-score lines for one team
+# only lost those lines, which moved the four association figures once more. Nothing about a method
 # changed; every figure below that reads those seasons moved with them.
 PUBLISHED_FIGURES: dict[str, Any] = {
     # Two figures the page stated that no artifact carried, added 2026-08-17.
@@ -484,15 +485,15 @@ PUBLISHED_FIGURES: dict[str, Any] = {
             "plus_minus.deviation.cdl": {
                 "n": 108,
                 "spearman_plus_minus": 0.2704,
-                "spearman_composite": 0.5946,
-                "difference": -0.3242,
+                "spearman_composite": 0.5968,
+                "difference": -0.3262,
                 "excludes_zero": True,
             },
             "plus_minus.deviation.cwl": {
                 "n": 144,
                 "spearman_plus_minus": 0.4638,
-                "spearman_composite": 0.6234,
-                "difference": -0.1596,
+                "spearman_composite": 0.6242,
+                "difference": -0.1604,
                 "excludes_zero": True,
             },
         },
