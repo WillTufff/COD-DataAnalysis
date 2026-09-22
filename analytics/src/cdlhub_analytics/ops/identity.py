@@ -534,6 +534,8 @@ def merge(source: str, canonical: str) -> dict[str, Any]:
 
 def keep_separate(left: str, right: str) -> dict[str, Any]:
     """Record a pair as two people so it stops being offered."""
+    if not left.strip() or not right.strip():
+        raise DecisionError("keeping a pair separate needs two handles")
     if left == right:
         raise DecisionError("a handle cannot be kept separate from itself")
     aliases = load_aliases()

@@ -3863,8 +3863,8 @@ export async function getCareerRankLeaderboard(
 //   - Fewer than half of its totals are two standard deviations from zero. The
 //     board is an ordering of estimates, and the page says so above the table
 //     rather than below it.
-//   - It reaches 174 of the 205 careers the composite board qualifies, and the
-//     31 it misses all begin 2013-2015, where the archive holds no box score to
+//   - It reaches 175 of the 207 careers the composite board qualifies, and the
+//     32 it misses all begin 2013-2015, where the archive holds no box score to
 //     build a lineup from.
 //
 // The credit rule is a choice with no right answer, so both halves ship: a
@@ -3998,7 +3998,7 @@ export type BoardDisagreement = {
  *
  * Both ranks are taken over the careers the two boards share, so neither is
  * the rank shown on its own page. That is deliberate — comparing a rank out of
- * 148 against a rank out of 205 would read as a move that is really a change of
+ * 148 against a rank out of 207 would read as a move that is really a change of
  * denominator.
  */
 export function boardDisagreements(

@@ -932,6 +932,8 @@ def test_keep_separate_records_the_pair_in_a_stable_order(aliases: Path) -> None
 
     with pytest.raises(ops_identity.DecisionError):
         ops_identity.keep_separate("Abe", "Abe")
+    with pytest.raises(ops_identity.DecisionError):
+        ops_identity.keep_separate("", "Abe Zed")
 
 
 def test_two_wiki_pages_are_two_people() -> None:

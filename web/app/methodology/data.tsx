@@ -3519,7 +3519,7 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
                   )}
                   {". "}That is a board carrying less of the situation, and not one
                   free of it. Fewer than half its totals separate from zero, it
-                  covers the CDL era alone, and it reaches 174 of the 205 careers
+                  covers the CDL era alone, and it reaches 175 of the 207 careers
                   the all-time board qualifies. The board itself, and the careers
                   the two orderings disagree about, are on the players page.
                 </p>

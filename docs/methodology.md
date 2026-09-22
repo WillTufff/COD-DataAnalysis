@@ -2804,8 +2804,8 @@ restated by a fourth predictor narrowing the panel.
 comes from.** The primary test scores every rating against next season's K/D z, which is the
 baseline's own ground: a rating built to predict plus-minus is being asked to beat K/D z at
 being K/D z. Scored instead against the quantity it was fitted for, next season's filtered
-plus-minus, over 216 transitions, SKILL reaches *r* = 0.4002 against the composite's 0.2906 and
-K/D z's 0.2565. That is a diagnostic and carries no interval and no verdict; it does not soften
+plus-minus, over 216 transitions, SKILL reaches *r* = 0.377 against the composite's 0.2816 and
+K/D z's 0.2534. That is a diagnostic and carries no interval and no verdict; it does not soften
 the gate, which SKILL failed. What it says is that the object was fitted to a target the record
 cannot measure precisely enough to be worth predicting, and then judged against a target it was
 never built for. Both of those are real, and only the first is fixable by a better model.
@@ -3276,10 +3276,10 @@ the agreement is a finding and a reader should be able to check it.
 | Table | Careers | Totals clearing two standard deviations |
 |---|---|---|
 | Composite, all ten seasons | 322 | 240 (74.5%) |
-| CDL plus-minus, deviation | 148 | 64 (43.2%) |
+| CDL plus-minus, deviation | 148 | 62 (41.9%) |
 | CDL plus-minus, with team share | 148 | 63 (42.6%) |
-| CWL plus-minus, deviation | 198 | 91 (46.0%) |
-| CWL plus-minus, with team share | 167 | 91 (54.5%) |
+| CWL plus-minus, deviation | 198 | 99 (50.0%) |
+| CWL plus-minus, with team share | 167 | 99 (59.3%) |
 
 The plus-minus half of that table follows from a season coefficient whose spread is
 indistinguishable from zero given its own standard error. Adding seven of them
@@ -3343,8 +3343,8 @@ thinned:
 
 | Era | Seasons | Median families | Volume | Efficiency | Objective | Discipline | Opening | Streaks |
 |---|---|---|---|---|---|---|---|---|
-| 2013-2016 | 504 | 3 | 100% | 100% | 64.7% | 0% | 0% | 0% |
-| CWL | 497 | 5 | 99.2% | 99.2% | 75.7% | 31.2% | 69.2% | 99.2% |
+| 2013-2016 | 518 | 3 | 100% | 100% | 63.7% | 0% | 0% | 0% |
+| CWL | 496 | 5 | 99.2% | 99.2% | 75.8% | 31.5% | 69.4% | 99.2% |
 | CDL | 457 | 4 | 100% | 100% | 94.7% | 0% | 95.4% | 0% |
 
 A 2013-2016 season reaches three families at most and a CDL season four. Only the CWL
@@ -3454,14 +3454,14 @@ What it does to the width of a season score:
 
 | Era | Seasons | Median stats | Median maps | SD before | SD after |
 |---|---|---|---|---|---|
-| 2013-2016 | 504 | 14 | 40 | 18.19 | 10.39 |
-| CWL | 497 | 26 | 35 | 15.11 | 9.63 |
+| 2013-2016 | 518 | 14 | 38.5 | 18.56 | 10.55 |
+| CWL | 496 | 26 | 35.5 | 15.21 | 9.65 |
 | CDL | 457 | 25 | 124 | 14.65 | 10.52 |
 
-The spread across eras falls from 3.54 to 0.90. Before the shrinkage the earliest era is
-the widest by 3.54 points on a third of the maps, which is the reading the shrinkage
-exists to correct; after it the three eras sit within 0.90 of each other, and the CDL is
-the widest by 0.13 over 2013-2016. Which era ends up nominally widest moves with the
+The spread across eras falls from 3.91 to 0.90. Before the shrinkage the earliest era is
+the widest by 3.91 points on a third of the maps, which is the reading the shrinkage
+exists to correct; after it the three eras sit within 0.90 of each other, and 2013-2016 is
+the widest by 0.03 over the CDL. Which era ends up nominally widest moves with the
 basket and is not the claim — the claim is that the gap between them closes.
 
 **The era gate does not rest on that correction.** This was measured. Admitting the era and applying the shrinkage were run as four separate
@@ -3573,9 +3573,9 @@ a zero and is scored as one. A career played entirely inside 2013, 2014 and 2015
 award axis at all, because those years named no season-level honour, and for that career
 the weight is carried by the other four components. The same reading applies to the
 finish record, which reaches every year from 2013, so a career with no credit there
-finished nothing rather than being unmeasured. Of the 490 careers on the board, 430 have
-an award axis and 233 have a three-season window; among the 203 careers the board ranks,
-201 have all five components and two are scored without their award axis.
+finished nothing rather than being unmeasured. Of the 493 careers on the board, 426 have
+an award axis and 235 have a three-season window; among the 207 careers the board ranks,
+205 have all five components and two are scored without their award axis.
 
 The three-season window covers every published season here, which is one difference from
 career value. That axis drops 2013-2016 because its plus-minus has no comparable
@@ -3619,11 +3619,11 @@ is repeated rather than remembered.
 
 **What net-of-teammates cannot settle.** Career `total` correlates with teammate
 strength, the mean VALUE of a player's modal-team roster averaged over the player's
-seasons, at Spearman +0.555, and with net-of-teammates itself at +0.344. Teammate
-strength alone explains about 36% of the variance in `total`. About 13 percentage points
+seasons, at Spearman +0.563, and with net-of-teammates itself at +0.330. Teammate
+strength alone explains about 37% of the variance in `total`. About 14 percentage points
 of that is incremental over the player's own season production, read jointly with it.
 Good players are recruited onto good rosters, and that selection accounts for some of
-this. Holding the player and the season fixed, roughly 64% of the association survives.
+this. Holding the player and the season fixed, roughly 63% of the association survives.
 Season-to-season transitions where a player changed teams and transitions where the
 player stayed put give the same slope, which a pure recruiting story does not predict.
 
@@ -3701,8 +3701,8 @@ Both are published, side by side, because they disagree.
 
 They are published side by side for a specific reason. A box-score career total tracks who
 a player's teammates were more strongly than it tracks how far the player out-played them:
-across the 205 qualified careers its rank correlation with career teammate strength is
-+0.555, against +0.344 with the margin over those teammates. Some of that is recruiting,
+across the 207 qualified careers its rank correlation with career teammate strength is
++0.563, against +0.330 with the margin over those teammates. Some of that is recruiting,
 which is not a defect. Holding the player and the season fixed, about two thirds of the
 association survives, and a map-level box score cannot separate "better teammates inflate
 your stat line" from "better teammates make you better". Nothing in the archive resolves
@@ -3711,9 +3711,9 @@ that, and no reweighting of the board above would.
 A plus-minus board does not answer the question. It declines to ask it. The estimator
 reads only who was on the server and what the map did, so a stat line inflated by shared
 game state has no route into it. Measured on the 108 careers both boards carry, the
-plus-minus total correlates with career teammate strength at **+0.273** against the
-composite's **+0.591**. A paired bootstrap over careers puts the difference at
-**-0.318**, 95% interval -0.522 to -0.106. The interval clears zero, so the second axis
+plus-minus total correlates with career teammate strength at **+0.270** against the
+composite's **+0.595**. A paired bootstrap over careers puts the difference at
+**-0.324**, 95% interval -0.533 to -0.117. The interval clears zero, so the second axis
 is less situational than the first by an amount the record can actually establish. The run
 recomputes all four of these figures every time, so the page is held against them instead
 of asserting them.
@@ -3727,14 +3727,14 @@ team-season fielded one lineup all year. A simulated league at that variety reco
 nothing about which of the four players inside it was worth more, so the era is pooled to
 one coefficient per player, and three copies of one estimate cannot be added into a
 career. There is no all-time total on this axis and none is published. The CWL era does
-clear the same teammate test, at -0.164 with an interval of -0.310 to -0.014. That result
+clear the same teammate test, at -0.160 with an interval of -0.304 to -0.021. That result
 is reported without a board attached to it. Clearing a correlation threshold does not turn
 an era-pooled coefficient into an estimate that can be ranked.
 
-**It reaches 174 of the 205 qualified careers.** The 31 it misses all began between 2013
+**It reaches 175 of the 207 qualified careers.** The 32 it misses all began between 2013
 and 2015. The archive records who won those events but not who was on the server, so there
-is no lineup to build a design row from. Their mean rank on the board above is 154.5,
-against 93.8 for the careers it does reach, so the absence is not a random sample and the
+is no lineup to build a design row from. Their mean rank on the board above is 156.4,
+against 94.4 for the careers it does reach, so the absence is not a random sample and the
 plus-minus board is not a correction to the other one.
 
 **Most of the disagreement cannot be resolved.** Over the 108 shared careers the two

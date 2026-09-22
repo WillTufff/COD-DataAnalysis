@@ -283,6 +283,12 @@ REPRODUCE = (
 # transition each and the players behind them are fewer and longer. Every
 # figure in this block that moved was re-pinned against run 1645. The SKILL
 # floor is again the exception, being a threshold and not a description.
+#
+# Re-pinned 2026-09-22, against the run_all that ended in metric_diff run 1943.
+# The first CoD wiki load since 2026-08-16 added 399 map lines, mostly
+# 2013-2016, which player rows created by later LPDB and identity work had made
+# resolvable. Nothing about a method
+# changed; every figure below that reads those seasons moved with them.
 PUBLISHED_FIGURES: dict[str, Any] = {
     # Two figures the page stated that no artifact carried, added 2026-08-17.
     # Both are now computed every run — the first by `validation.retrodiction`,
@@ -292,7 +298,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # re-pinned on 2026-08-18: an identity merge joins split careers, so the
     # player-seasons the one-sided property is checked on are fewer and each
     # covers more of a career. Two merges took 5,079 cells to 5,061.
-    "retrodiction_cells_before": 5049,
+    "retrodiction_cells_before": 5271,
     "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
     # The table /methodology prints for the map-count shrinkage, pinned on the
     # day it was published. Its whole purpose is to show that admitting the
@@ -327,7 +333,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "on": "2026-08-22",
         "shrink_k": 21.8718,
         "eras": {
-            "2013-2016": {"seasons": 504, "sd_before": 18.1506, "sd_after": 10.404},
+            "2013-2016": {"seasons": 518, "sd_before": 18.5616, "sd_after": 10.5501},
             "CWL": {"seasons": 496, "sd_before": 15.2085, "sd_after": 9.6537},
             "CDL": {"seasons": 457, "sd_before": 14.6518, "sd_after": 10.5245},
         },
@@ -377,15 +383,15 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "longevity_weight": 20.0,
         "resume_weight": 25.0,
         "accolade_weight": 10.0,
-        "prime_coverage": 234,
-        "accolade_coverage": 424,
-        "n_renormalized": 250,
+        "prime_coverage": 235,
+        "accolade_coverage": 426,
+        "n_renormalized": 260,
         # The same two counts over the careers the board ranks, added in Phase
-        # F because that is the sentence the page states: 201 of the 203 ranked
-        # careers carry all five components and two are scored without their
-        # award axis.
-        "prime_coverage_qualified": 205,
-        "accolade_coverage_qualified": 203,
+        # F because that is the sentence the page states: of the 207 ranked
+        # careers, 205 carry all five components and two are scored without
+        # their award axis.
+        "prime_coverage_qualified": 207,
+        "accolade_coverage_qualified": 205,
         "n_renormalized_qualified": 2,
     },
     # Phase F. Four things the pages state that nothing was holding against a
@@ -445,8 +451,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     },
     "career_rank_value_coverage": {
         "on": "2026-08-22",
-        "n_seasons": 1457,
-        "n_with_value": 1447,
+        "n_seasons": 1471,
+        "n_with_value": 1461,
         "breadth_weight": 0.75,
         "value_weight": 0.25,
     },
@@ -477,16 +483,16 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "boards": {
             "plus_minus.deviation.cdl": {
                 "n": 108,
-                "spearman_plus_minus": 0.2732,
-                "spearman_composite": 0.5912,
-                "difference": -0.318,
+                "spearman_plus_minus": 0.2704,
+                "spearman_composite": 0.5946,
+                "difference": -0.3242,
                 "excludes_zero": True,
             },
             "plus_minus.deviation.cwl": {
-                "n": 143,
-                "spearman_plus_minus": 0.4576,
-                "spearman_composite": 0.6216,
-                "difference": -0.164,
+                "n": 144,
+                "spearman_plus_minus": 0.4638,
+                "spearman_composite": 0.6234,
+                "difference": -0.1596,
                 "excludes_zero": True,
             },
         },
@@ -497,10 +503,10 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "clear_sd": 2.0,
         "keys": {
             "composite.none.all": {"n": 322, "n_clear_of_zero": 240},
-            "plus_minus.deviation.cdl": {"n": 148, "n_clear_of_zero": 64},
+            "plus_minus.deviation.cdl": {"n": 148, "n_clear_of_zero": 62},
             "plus_minus.deviation_plus_team.cdl": {"n": 148, "n_clear_of_zero": 63},
-            "plus_minus.deviation.cwl": {"n": 198, "n_clear_of_zero": 91},
-            "plus_minus.deviation_plus_team.cwl": {"n": 167, "n_clear_of_zero": 91},
+            "plus_minus.deviation.cwl": {"n": 198, "n_clear_of_zero": 99},
+            "plus_minus.deviation_plus_team.cwl": {"n": 167, "n_clear_of_zero": 99},
         },
     },
     "persistence_pairs": 567,
@@ -548,7 +554,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # moved with them; nothing about the method changed. The season-resolution
     # correlation fell from 0.2029 to 0.1956, so the merges made the read harder
     # rather than easier.
-    "plusminus_forward": {"n": 269, "r": 0.1917, "pooled_r": 0.2855, "era_r": 0.3557},
+    "plusminus_forward": {"n": 269, "r": 0.1999, "pooled_r": 0.2866, "era_r": 0.3537},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -563,7 +569,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # moved is the plus-minus underneath it. The gap narrowed from -0.2428 to
     # -0.2401 and the floor fell from 0.1733 to 0.1625, which leaves SKILL
     # losing by more than the floor either way.
-    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2339, "mde80": 0.1625},
+    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2379, "mde80": 0.1625},
     # The three-way panel the page quotes beside the four-way gate, and the
     # adversary's row in the gate table. Pinned 2026-08-18: each had a live
     # artifact and no comparison, so each drifted for several phases before a
@@ -575,8 +581,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "n": 567,
         "clusters": 191,
         "composite_delta_r": -0.2139,
-        "design_effect": 1.315,
-        "openskill_gate_delta_r": -0.6956,
+        "design_effect": 1.313,
+        "openskill_gate_delta_r": -0.6871,
     },
     # The one secondary test the page quotes, scored against the quantity the
     # rating was fitted for rather than against the baseline's own ground.
@@ -584,7 +590,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # before: it had a live artifact and nothing comparing it, and the page had
     # drifted to 215 transitions and r = 0.4232 while the run returned 216 and
     # 0.4002.
-    "prior_target": {"n": 216, "skill": 0.406, "composite": 0.2948, "kd_z": 0.2565},
+    "prior_target": {"n": 216, "skill": 0.377, "composite": 0.2816, "kd_z": 0.2534},
     "forecast_brier": {
         "rapm": 0.24636,
         "rapm_prior": 0.24693,

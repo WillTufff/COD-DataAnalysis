@@ -761,8 +761,8 @@ export default async function PlayersPage({
             from, and those years hold one pooled coefficient per player for the
             whole era. Three copies of one estimate cannot be added into a
             career, so there is no all-time number on this axis and none is
-            shown. It also reaches 174 of the 205 careers the board above
-            qualifies; the 31 it misses all began between 2013 and 2015, where
+            shown. It also reaches 175 of the 207 careers the board above
+            qualifies; the 32 it misses all began between 2013 and 2015, where
             the archive records who won but not who was on the server.
           </p>
           <div className="mt-4 overflow-x-auto">
@@ -870,7 +870,7 @@ export default async function PlayersPage({
             team term was added to remove. The main column is the deviation,
             because it is the quantity the model identifies; the team-share
             column is the same career under the other rule. Box-score rank is
-            the career&rsquo;s place on the board above, out of 205. The full
+            the career&rsquo;s place on the board above, out of 207. The full
             spec is on{" "}
             <Link href="/methodology#rapm" className="underline">
               methodology
@@ -886,8 +886,8 @@ export default async function PlayersPage({
             the two ranks below are out of {disagreements.length} and not out of
             their own board&rsquo;s population. A career shows a different
             box-score rank here than in the table above, where that column is
-            its place among all 205 qualified careers. Ranking 148 careers
-            against a place out of 205 would read as a move that is really a
+            its place among all 207 qualified careers. Ranking 148 careers
+            against a place out of 207 would read as a move that is really a
             change of denominator. A career moves when the map result and the
             box score tell different stories about it. A move only means
             something if it is larger than the distance this board could shift
