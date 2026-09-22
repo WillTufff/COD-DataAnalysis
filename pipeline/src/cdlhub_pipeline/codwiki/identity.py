@@ -9,7 +9,9 @@ never merged.
 A page that matches nothing is a player the database has never held. It earns a
 new row when it appears at two or more events, and is quarantined otherwise.
 `aliases.json` carries `codwiki_players`, which overrides any of this: a handle
-resolves a page by hand, and null quarantines it by hand.
+resolves a page by hand, and null quarantines it by hand. Every other name is
+read through the `players` spelling map first, so a handle already merged into
+another resolves to that player instead of earning a row of its own.
 
 One page at a time is not enough. Three handles in this window belong to two or
 three different people each, and the wiki says so by naming the pages `Realize
@@ -33,8 +35,10 @@ from typing import Any, cast
 
 import psycopg
 
+from ..identity import Aliases
 from .client import SNAPSHOT_ROOT
 
+SOURCE = "codwiki"
 MIN_EVENTS_FOR_NEW_PLAYER = 2
 # `Realize (Josh Taylor)`: the wiki disambiguates a shared handle in parentheses.
 DISAMBIGUATED = re.compile(r"\((.+)\)\s*$")
@@ -49,6 +53,7 @@ def resolve(
     rows: list[dict[str, Any]],
     overrides: dict[str, str | None] | None = None,
     create: bool = True,
+    aliases: Aliases | None = None,
 ) -> tuple[dict[str, int], dict[str, Any]]:
     """Map PlayerLink to player id; returns the map and a report.
 
@@ -56,6 +61,7 @@ def resolve(
     earning a player row, so a caller that only reads can resolve the same way.
     """
     overrides = overrides or {}
+    aliases = aliases or Aliases.load()
     db_by_handle: dict[str, int] = {}
     db_by_real: dict[str, set[int]] = defaultdict(set)
     for dbrow in conn.execute("SELECT id, handle, real_name FROM players").fetchall():
@@ -105,11 +111,12 @@ def resolve(
             player_ids[link] = db_by_handle[chosen.lower()]
             continue
 
-        candidates = {
-            db_by_handle[name.lower()]
+        canonical = {
+            aliases.player(name, SOURCE).lower()
             for name in {link, *alias_of.get(link, set()), *display[link]}
-            if name and name.lower() in db_by_handle
+            if name
         }
+        candidates = {db_by_handle[name] for name in canonical if name in db_by_handle}
         real = (wiki.get(link, {}).get("NameFull") or "").lower()
         if len(candidates) != 1 and real:
             by_real = db_by_real.get(real, set())
@@ -124,7 +131,7 @@ def resolve(
                 {"page": link, "maps": maps[link], "candidates": sorted(candidates)}
             )
         elif len(events[link]) >= MIN_EVENTS_FOR_NEW_PLAYER and create:
-            new_handle = wiki.get(link, {}).get("ID") or link
+            new_handle = aliases.player(wiki.get(link, {}).get("ID") or link, SOURCE)
             inserted = conn.execute(
                 "INSERT INTO players (handle) VALUES (%s) RETURNING id", (new_handle,)
             ).fetchone()
