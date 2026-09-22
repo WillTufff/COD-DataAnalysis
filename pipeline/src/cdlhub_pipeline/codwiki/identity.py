@@ -19,6 +19,9 @@ page. The last pass therefore looks at the whole map: where several pages claim
 one player row and the wiki gives them different real names, only the page whose
 real name is ours survives, and the rest are quarantined. Where none matches,
 none survives.
+
+A resolved page's `Players` real name fills `players.real_name` where the row
+holds none. A name already held is never overwritten.
 """
 
 from __future__ import annotations
@@ -89,6 +92,7 @@ def resolve(
         "quarantined": [],
         "overridden": 0,
         "unshared": 0,
+        "named": 0,
     }
 
     for link in sorted(maps):
@@ -132,7 +136,28 @@ def resolve(
             report["quarantined"].append({"page": link, "maps": maps[link], "why": why})
 
     _unshare(player_ids, wiki, conn, maps, report)
+    if create:
+        for pid, name in sorted(page_names(player_ids, wiki).items()):
+            updated = conn.execute(
+                "UPDATE players SET real_name = %s WHERE id = %s AND real_name IS NULL",
+                (name, pid),
+            )
+            report["named"] += updated.rowcount
     return player_ids, report
+
+
+def page_names(player_ids: dict[str, int], wiki: dict[str, Any]) -> dict[int, str]:
+    """Player id to the real name its pages' `Players` rows give.
+
+    Only the `Players` table counts, never a parenthetical. A row whose pages
+    give two different names gets none.
+    """
+    names: dict[int, set[str]] = defaultdict(set)
+    for link, pid in player_ids.items():
+        name = (wiki.get(link, {}).get("NameFull") or "").strip()
+        if name:
+            names[pid].add(name)
+    return {pid: found.pop() for pid, found in names.items() if len(found) == 1}
 
 
 def _unshare(
