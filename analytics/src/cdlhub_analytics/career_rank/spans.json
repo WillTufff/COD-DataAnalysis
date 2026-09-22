@@ -1,11 +1,11 @@
 {
-  "cut": "cr-spans-2026-09-04",
-  "base_run": 1703,
+  "cut": "cr-spans-2026-09-22",
+  "base_run": 1995,
   "estimator": "quantile fit at p0.01/p0.99, linear interpolation between order statistics, over the qualified cohort",
   "spans": {
     "ACCOLADE": [
       0.0,
-      0.649461201079622
+      3.0
     ],
     "LONGEVITY": [
       25.746779076134494,
@@ -24,8 +24,45 @@
       2.930689387780316
     ]
   },
-  "sha256": "ebfec27939c279cbe1e6ce3dfa47cf449804545075b08b0b47ae2c709e36f846",
-  "frozen_at": "2026-09-04T15:25:21Z",
-  "supersedes": null,
-  "history": []
+  "base_runs": {
+    "ACCOLADE": 1995,
+    "LONGEVITY": 1703,
+    "PEAK": 1703,
+    "PRIME": 1703,
+    "RESUME": 1703
+  },
+  "sha256": "63d3ba03d847d7e19c4a179c620aafdaa10a23bcd76a31377f89aa90372c712f",
+  "frozen_at": "2026-09-22T22:09:10Z",
+  "supersedes": "cr-spans-2026-09-04",
+  "history": [
+    {
+      "cut": "cr-spans-2026-09-04",
+      "base_run": 1703,
+      "spans": {
+        "ACCOLADE": [
+          0.0,
+          0.649461201079622
+        ],
+        "LONGEVITY": [
+          25.746779076134494,
+          331.0336124698751
+        ],
+        "PEAK": [
+          43.93739092417603,
+          82.12436215262943
+        ],
+        "PRIME": [
+          76.48426184196973,
+          222.57225392860934
+        ],
+        "RESUME": [
+          5.184233332080175e-05,
+          2.930689387780316
+        ]
+      },
+      "base_runs": null,
+      "sha256": "ebfec27939c279cbe1e6ce3dfa47cf449804545075b08b0b47ae2c709e36f846",
+      "frozen_at": "2026-09-04T15:25:21Z"
+    }
+  ]
 }

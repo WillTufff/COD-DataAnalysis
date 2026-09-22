@@ -1569,8 +1569,8 @@ function CareerRankSection({
           season rating is put on the breadth scale inside its own season
           before it is blended, and a season with no rating is scored on the
           basket alone. Awards are not in it: they sit beside it as their own
-          component, each season&rsquo;s share of every award point its year handed
-          out, and carry no weight in the score.
+          component, each season&rsquo;s award points as a share of the most one
+          season can earn, and carry no weight in the score.
         </p>
         <p className="mt-2 text-xs leading-relaxed text-ink-muted">
           The family count says what the archive reached, not how well the

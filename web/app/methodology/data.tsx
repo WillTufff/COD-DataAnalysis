@@ -3890,9 +3890,9 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               sequence, and sitting one out costs what it cost.
             </p>
             <p>
-              The award component is a season&rsquo;s share of every award point
-              its year handed out, built over the whole archive so restricting a
-              run cannot change what a season is worth. It reaches{" "}
+              The award component is a season&rsquo;s award points as a share of
+              16, the most the tier rule lets one season earn, so an honour is
+              worth the same whichever year named it. It reaches{" "}
               {careerRank.accolade.n_player_seasons} player-seasons. Award
               status stacks additively across tiers, and the largest stack in
               the archive is{" "}

@@ -484,16 +484,16 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "boards": {
             "plus_minus.deviation.cdl": {
                 "n": 108,
-                "spearman_plus_minus": 0.2704,
-                "spearman_composite": 0.5968,
-                "difference": -0.3262,
+                "spearman_plus_minus": 0.2705,
+                "spearman_composite": 0.6009,
+                "difference": -0.3304,
                 "excludes_zero": True,
             },
             "plus_minus.deviation.cwl": {
                 "n": 144,
                 "spearman_plus_minus": 0.4638,
-                "spearman_composite": 0.6242,
-                "difference": -0.1604,
+                "spearman_composite": 0.6262,
+                "difference": -0.1624,
                 "excludes_zero": True,
             },
         },

@@ -11,15 +11,14 @@ first one. It is built from three declarations, all fixed in
   first qualifying season only. Points are capped per tier before the season
   sum, so five event MVPs cannot out-credit one first team, and the tiers stack
   because three recognitions in one season is more than one.
-- **The normalisation.** A season's credit is divided by every credited point
-  that year, so a year is a fixed budget shared among the people it recognised
-  and 2016's eighteen first-team slots and 2024's four produce comparable
-  numbers. The denominator is built over the whole archive and never over a
-  run's population: restricting a run must not change what a season is worth.
+- **The normalisation.** A season's credit is divided by the most the tier rule
+  can award one player in one season, 16: a top-tier, a second-tier and a
+  rookie honour together. The denominator is a property of the rule and not of
+  the record, so a year that named more categories does not make each of its
+  honours worth less.
 - **The thin-year floor.** A year contributes nothing unless it named a
   season-level honour, meaning any scored kind but `event_mvp`. A year whose
-  whole record is one event MVP has nothing to normalise against, and dividing
-  by it would hand that one player the entire year.
+  whole record is event MVPs recognised tournaments and never a season.
 
 A `player_id`-null award row is unresolved, never a loss: no season is reduced
 for an award the record cannot attach to a player. An `unmapped` kind is
@@ -55,7 +54,11 @@ TIER_RULE = (
     f"{ROOKIE_POINTS:g} on the first qualifying season; capped per tier before the season "
     "sum and additive across tiers"
 )
-NORMALISATION_RULE = "divided by every credited point that year, over the whole archive"
+# The most one season can earn under the tier rule, and the denominator every
+# season's credit is divided by.
+SEASON_MAX = TOP_TIER_POINTS + SECOND_TIER_POINTS + ROOKIE_POINTS
+
+NORMALISATION_RULE = f"divided by {SEASON_MAX:g}, the most the tier rule awards one season"
 THIN_YEAR_RULE = (
     "a year with no season-level honour contributes nothing; a season-level honour is any "
     f"scored kind but {', '.join(sorted(EVENT_HONOURS))}"
@@ -153,9 +156,9 @@ def credits(rows: Sequence[AwardRow]) -> list[AwardCredit]:
 
 
 def thin_years(rows: Sequence[AwardRow]) -> set[int]:
-    """Years that named no season-level honour, so have nothing to normalise
-    against. Measured on the archive of 2026-08-22 this is 2013, 2014 and 2015,
-    whose whole award record is three, one and one event MVP.
+    """Years that named no season-level honour, so score nothing. Measured on
+    the archive of 2026-08-22 this is 2013, 2014 and 2015, whose whole award
+    record is three, one and one event MVP.
     """
     scored_kinds = TOP_TIER | SECOND_TIER | ROOKIE
     years = {year for _p, _s, year, _a in rows}
@@ -166,22 +169,16 @@ def thin_years(rows: Sequence[AwardRow]) -> set[int]:
 
 
 def score(rows: Sequence[AwardRow]) -> list[SeasonAccolade]:
-    """Pure: the award rows and nothing else. The denominator is the year's own
-    awarded credit, so a season's accolade is its share of what the year
-    recognised.
+    """Pure: the award rows and nothing else. A season's accolade is its credit
+    as a share of `SEASON_MAX`, and nothing in a thin year.
     """
     season_year = {season_id: year for _p, season_id, year, _a in rows}
     thin = thin_years(rows)
 
-    year_credit: dict[int, float] = defaultdict(float)
-    earned = credits(rows)
-    for credit in earned:
-        year_credit[season_year[credit.season_id]] += credit.points
-
     out: list[SeasonAccolade] = []
-    for credit in earned:
+    for credit in credits(rows):
         year = season_year[credit.season_id]
-        available = 0.0 if year in thin else year_credit[year]
+        available = 0.0 if year in thin else SEASON_MAX
         out.append(
             SeasonAccolade(
                 player_id=credit.player_id,
@@ -200,8 +197,8 @@ def density(
 ) -> list[dict[str, Any]]:
     """Per year: how much award credit the record holds, how many seasons carry
     it, how far the tiers stack, and how many rows reach nobody. Published so a
-    reader can see that a 2016 first team and a 2024 one were normalised against
-    very different years rather than assume they were not.
+    reader can see how much each year named, which the denominator no longer
+    reads.
     """
     scored = score(rows)
     by_year: dict[int, list[SeasonAccolade]] = defaultdict(list)

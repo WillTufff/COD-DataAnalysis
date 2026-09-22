@@ -399,3 +399,31 @@ def test_a_refreeze_preserves_the_prior_entry_in_history(_isolated_spans_path: A
 
     with pytest.raises(ValueError):
         blend.refit_spans(built_b, "cr-spans-a", base_run=3000)
+
+
+def test_a_partial_refit_carries_the_other_spans_over(_isolated_spans_path: Any) -> None:
+    built_a = blend.build(full_career(1, 80.0) + full_career(2, 40.0), SEASONS)
+    first = blend.refit_spans(built_a, "cr-spans-a", base_run=1000)
+
+    built_b = blend.build(full_career(1, 90.0) + full_career(2, 30.0), SEASONS)
+    second = blend.refit_spans(built_b, "cr-spans-b", base_run=2000, only=[blend.PRIME])
+
+    fresh = blend.refit_spans(built_b, "cr-spans-c", base_run=3000)
+    for name, span in second["spans"].items():
+        expected = fresh["spans"][name] if name == blend.PRIME else first["spans"][name]
+        assert span == pytest.approx(expected)
+    assert second["base_runs"][blend.PRIME] == 2000
+    assert second["base_runs"][blend.PEAK] == 1000
+
+
+def test_a_partial_refit_refuses_an_unknown_component(_isolated_spans_path: Any) -> None:
+    built = blend.build(full_career(1, 80.0) + full_career(2, 40.0), SEASONS)
+    blend.refit_spans(built, "cr-spans-a", base_run=1000)
+    with pytest.raises(ValueError):
+        blend.refit_spans(built, "cr-spans-b", base_run=2000, only=["PERFORMANCE"])
+
+
+def test_a_partial_refit_needs_a_pin(_isolated_spans_path: Any) -> None:
+    built = blend.build(full_career(1, 80.0) + full_career(2, 40.0), SEASONS)
+    with pytest.raises(ValueError):
+        blend.refit_spans(built, "cr-spans-a", base_run=1000, only=[blend.PEAK])

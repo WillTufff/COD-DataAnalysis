@@ -1,5 +1,5 @@
-"""ACCOLADE: tier caps, the ROTY once-per-career rule, per-year normalisation,
-the thin-year floor and unresolved rows."""
+"""ACCOLADE: tier caps, the ROTY once-per-career rule, the fixed per-season
+denominator, the thin-year floor and unresolved rows."""
 
 from __future__ import annotations
 
@@ -41,24 +41,26 @@ def test_an_unmapped_award_credits_nothing() -> None:
     assert awards.credits([(1, 19, 2022, "unmapped")]) == []
 
 
-def test_accolade_is_the_seasons_share_of_its_own_year() -> None:
-    """One first team and one event MVP in a year: 8 and 4 of a 12-point year."""
+def test_the_season_max_is_every_tier_stacked() -> None:
+    assert pytest.approx(16.0) == awards.SEASON_MAX
+
+
+def test_accolade_is_the_seasons_share_of_the_season_max() -> None:
     scored = _scored((1, 19, 2022, "first_team"), (2, 19, 2022, "event_mvp"))
-    assert scored[(1, 19)].accolade == pytest.approx(8.0 / 12.0)
-    assert scored[(2, 19)].accolade == pytest.approx(4.0 / 12.0)
-    assert scored[(1, 19)].year_credit == pytest.approx(12.0)
+    assert scored[(1, 19)].accolade == pytest.approx(8.0 / 16.0)
+    assert scored[(2, 19)].accolade == pytest.approx(4.0 / 16.0)
+    assert scored[(1, 19)].year_credit == pytest.approx(16.0)
 
 
-def test_the_denominator_is_the_year_and_not_the_season() -> None:
-    """Two seasons inside one year share one budget, so a year with more
-    honours in it is worth less per honour."""
+def test_how_many_honours_a_year_named_does_not_change_one_honours_worth() -> None:
+    """A first team in a crowded year and one in a sparse year score alike."""
     scored = _scored(
-        (1, 19, 2022, "first_team"),
-        (2, 20, 2022, "first_team"),
-        (3, 21, 2023, "first_team"),
+        (1, 19, 2016, "first_team"),
+        (2, 19, 2016, "first_team"),
+        (3, 19, 2016, "first_team"),
+        (4, 20, 2020, "first_team"),
     )
-    assert scored[(1, 19)].accolade == pytest.approx(0.5)
-    assert scored[(3, 21)].accolade == pytest.approx(1.0)
+    assert scored[(1, 19)].accolade == pytest.approx(scored[(4, 20)].accolade)
 
 
 def test_a_year_with_no_season_level_honour_is_silenced() -> None:
@@ -67,7 +69,7 @@ def test_a_year_with_no_season_level_honour_is_silenced() -> None:
     scored = _scored((1, 19, 2014, "event_mvp"), (2, 20, 2015, "first_team"))
     assert scored[(1, 19)].accolade == pytest.approx(0.0)
     assert scored[(1, 19)].credit == pytest.approx(awards.SECOND_TIER_POINTS)
-    assert scored[(2, 20)].accolade == pytest.approx(1.0)
+    assert scored[(2, 20)].accolade == pytest.approx(8.0 / 16.0)
 
 
 def test_thin_years_reads_the_award_kinds_and_not_the_count() -> None:

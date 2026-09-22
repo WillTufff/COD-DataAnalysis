@@ -40,6 +40,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="RUN_ID",
         help="the run --refit-spans stamps as the base its spans were cut from",
     )
+    ap.add_argument(
+        "--only",
+        nargs="+",
+        metavar="COMPONENT",
+        help="with --refit-spans, re-cut these components and carry the rest from the pin",
+    )
     args = ap.parse_args(argv)
     if not args.freeze and not args.population and not args.refit_spans:
         ap.error("one of --freeze, --population or --refit-spans is required")
@@ -61,7 +67,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.refit_spans:
             rows, _ = engine.run_full_archive(conn)
-            pointer = refit_spans([row.career for row in rows], args.refit_spans, args.base_run)
+            pointer = refit_spans(
+                [row.career for row in rows], args.refit_spans, args.base_run, args.only
+            )
             print(
                 f"career-rank spans '{pointer['cut']}' pinned to base run {pointer['base_run']}, "
                 f"sha256 {pointer['sha256'][:16]}"

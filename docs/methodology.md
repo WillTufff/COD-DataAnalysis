@@ -3381,7 +3381,7 @@ used to add a fixed number of percentile points on top of the season score, capp
 fact about what a season was recognised as, and it now sits beside the score as ACCOLADE
 with its own weight, the same shape the finish record already has.
 
-A season's accolade is its share of every award point its year handed out. The points
+A season's accolade is its award points as a share of 16, the most one season can earn. The points
 themselves are unchanged: 8 for a first team or a season MVP, 4 for a second team, an
 event MVP or a mode award, 4 for a Rookie of the Year on the first season that qualifies
 for it. Points are capped per tier before the season sum, so five event MVPs cannot
@@ -3389,13 +3389,14 @@ out-credit one first team, and the tiers stack, because three recognitions in on
 is more than one. That stack reaches its ceiling of 16 on two seasons in the whole
 archive and 12 on 22 more.
 
-The per-year division is what makes 2016 and 2024 comparable. 2016 named eighteen
-first-team slots across its events and 2024 named four, so an unnormalized point is
-worth whatever the year happened to hand out. A year that named no season-level honour
-at all contributes nothing: 2013, 2014 and 2015 hold five event MVPs between them and no
-first team, no season MVP and no rookie award, and dividing by one event MVP would give
-that player the whole of his year. Those three years are silenced by a rule written
-before the run, and the raw points are still published so the division can be undone.
+The denominator is the same in every year, so one first team is worth the same in 2016
+and in 2020. It used to be every award point the season's year handed out, which made an
+honour's worth depend on how many the league named: a first team in 2016, a crowded year,
+was worth less than one in 2020, a sparse one. Dividing by the ceiling of the tier rule
+takes the year's record out of the number. A year that named no season-level honour at
+all contributes nothing: 2013, 2014 and 2015 hold five event MVPs between them and no
+first team, no season MVP and no rookie award. Those three years are silenced by a rule
+written before the run, and the raw points are still published.
 
 Eleven award rows do not resolve to a player. They are published as unresolved and
 reduce nobody's season. The awards a season held are listed on the player page beside
@@ -3619,7 +3620,7 @@ is repeated rather than remembered.
 
 **What net-of-teammates cannot settle.** Career `total` correlates with teammate
 strength, the mean VALUE of a player's modal-team roster averaged over the player's
-seasons, at Spearman +0.563, and with net-of-teammates itself at +0.330. Teammate
+seasons, at Spearman +0.565, and with net-of-teammates itself at +0.325. Teammate
 strength alone explains about 37% of the variance in `total`. About 14 percentage points
 of that is incremental over the player's own season production, read jointly with it.
 Good players are recruited onto good rosters, and that selection accounts for some of
@@ -3702,7 +3703,7 @@ Both are published, side by side, because they disagree.
 They are published side by side for a specific reason. A box-score career total tracks who
 a player's teammates were more strongly than it tracks how far the player out-played them:
 across the 207 qualified careers its rank correlation with career teammate strength is
-+0.563, against +0.330 with the margin over those teammates. Some of that is recruiting,
++0.565, against +0.325 with the margin over those teammates. Some of that is recruiting,
 which is not a defect. Holding the player and the season fixed, about two thirds of the
 association survives, and a map-level box score cannot separate "better teammates inflate
 your stat line" from "better teammates make you better". Nothing in the archive resolves
@@ -3712,8 +3713,8 @@ A plus-minus board does not answer the question. It declines to ask it. The esti
 reads only who was on the server and what the map did, so a stat line inflated by shared
 game state has no route into it. Measured on the 108 careers both boards carry, the
 plus-minus total correlates with career teammate strength at **+0.270** against the
-composite's **+0.597**. A paired bootstrap over careers puts the difference at
-**-0.326**, 95% interval -0.528 to -0.127. The interval clears zero, so the second axis
+composite's **+0.601**. A paired bootstrap over careers puts the difference at
+**-0.330**, 95% interval -0.528 to -0.117. The interval clears zero, so the second axis
 is less situational than the first by an amount the record can actually establish. The run
 recomputes all four of these figures every time, so the page is held against them instead
 of asserting them.

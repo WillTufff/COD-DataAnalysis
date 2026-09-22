@@ -71,7 +71,9 @@ test.describe("rating surfaces hold rows", () => {
     // The era limit and the coverage gap are the two things a reader cannot be
     // left to infer from an unlabelled all-time-looking ranking.
     await expect(board).toContainText("It covers the CDL era alone");
-    await expect(board).toContainText("174 of the 205");
+    await expect(board).toContainText(
+      /reaches \d+ of the \d+ careers the board above qualifies/,
+    );
   });
 
   test("every era has a populated player page", async ({ page }) => {

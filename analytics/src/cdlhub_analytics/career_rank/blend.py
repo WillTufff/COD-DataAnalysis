@@ -277,17 +277,43 @@ def _labels_on_record(pointer: Mapping[str, Any] | None) -> set[str]:
     return {str(label) for label in [pointer.get("cut"), *earlier] if label}
 
 
-def refit_spans(rows: Sequence[CareerRank], cut: str, base_run: int) -> dict[str, Any]:
+def refit_spans(
+    rows: Sequence[CareerRank],
+    cut: str,
+    base_run: int,
+    only: Sequence[str] | None = None,
+) -> dict[str, Any]:
     """Fit the p1/p99 spans against `rows` (a built board) and freeze them
     under `cut`, stamping `base_run` so a later reader knows which run's
     cohort set the scale. A label already on record is refused, the same
     re-freeze contract `anchors.freeze` and `evalpop.freeze` use; the entry it
     replaces moves into `history` rather than being lost.
+
+    `only` re-cuts the named components and carries every other span over
+    from the current pin unchanged. `base_runs` records which run each
+    component's span was cut from.
     """
     previous = load_pinned_spans()
     if cut in _labels_on_record(previous):
         raise ValueError(f"span set '{cut}' is already on record; a re-freeze takes a new label")
     fitted = _spans([(row.qualified, _raw_components(row)) for row in rows])
+    base_runs = {name: base_run for name in fitted}
+    if only is not None:
+        unknown = set(only) - set(CAREER_COMPONENT_WEIGHTS)
+        if unknown:
+            raise ValueError(f"unknown component(s): {', '.join(sorted(unknown))}")
+        if previous is None:
+            raise ValueError("a partial re-cut needs a pinned span set to carry over")
+        carried = _span_map(previous)
+        earlier = previous.get("base_runs")
+        earlier_runs = earlier if isinstance(earlier, dict) else {}
+        fitted = {**carried, **{name: fitted[name] for name in only if name in fitted}}
+        base_runs = {
+            name: base_run
+            if name in only
+            else int(cast(int, earlier_runs.get(name, previous.get("base_run"))))
+            for name in fitted
+        }
     history: list[dict[str, Any]] = []
     if previous is not None:
         earlier = previous.get("history")
@@ -297,6 +323,7 @@ def refit_spans(rows: Sequence[CareerRank], cut: str, base_run: int) -> dict[str
                 "cut": previous.get("cut"),
                 "base_run": previous.get("base_run"),
                 "spans": previous.get("spans"),
+                "base_runs": previous.get("base_runs"),
                 "sha256": previous.get("sha256"),
                 "frozen_at": previous.get("frozen_at"),
             }
@@ -309,6 +336,7 @@ def refit_spans(rows: Sequence[CareerRank], cut: str, base_run: int) -> dict[str
             "order statistics, over the qualified cohort"
         ),
         "spans": {name: list(span) for name, span in sorted(fitted.items())},
+        "base_runs": dict(sorted(base_runs.items())),
         "sha256": _digest(fitted),
         "frozen_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "supersedes": previous.get("cut") if previous else None,
