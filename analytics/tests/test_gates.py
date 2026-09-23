@@ -997,6 +997,7 @@ _PHASE_C_PINS = {
         "longevity_weight": 20.0,
         "resume_weight": 25.0,
         "accolade_weight": 10.0,
+        "performance_weight": 65.0,
         "prime_coverage": 233,
         "accolade_coverage": 430,
         "n_renormalized": 259,
@@ -1598,6 +1599,53 @@ def test_a_blend_weight_that_moved_fails(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     assert len(found) == 1
     assert "blend weight RESUME" in found[0]
+
+
+def test_a_performance_weight_that_moved_fails_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PEAK is one of the three weights that read the performance season
+    score, so moving it moves the pinned PERFORMANCE 65 as well."""
+    monkeypatch.setitem(evalspec.PUBLISHED_FIGURES, "retrodiction_cells_before", 2517)
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "team_strength_proxy",
+        {"n_team_seasons": 200, "pearson": 0.77, "spearman": 0.81},
+    )
+    monkeypatch.setitem(
+        evalspec.PUBLISHED_FIGURES,
+        "career_rank_era_spread",
+        {
+            "shrink_k": 14.55,
+            "eras": {"CDL": {"seasons": 457, "sd_before": 14.86, "sd_after": 11.2}},
+        },
+    )
+    _unpin_phase_c(monkeypatch)
+
+    moved = {
+        **_PHASE_C_RUN["career"],
+        "career_component_weights": {
+            **_PHASE_C_RUN["career"]["career_component_weights"],
+            "PEAK": 25.0,
+        },
+    }
+    found = gates.page_figure_failures(
+        {"cells_before_total": 2517},
+        {
+            **_PHASE_C_RUN,
+            "career": moved,
+            "team_strength_proxy_check": {
+                "n_team_seasons": 200,
+                "pearson": 0.77,
+                "spearman": 0.81,
+            },
+            "shrinkage": {"k": 14.55},
+            "era_season_scores": [
+                {"era": "CDL", "seasons": 457, "sd_before": 14.86, "sd_after": 11.2}
+            ],
+        },
+    )
+    assert len(found) == 2
+    assert any("blend weight PEAK" in f for f in found)
+    assert any("blend weight PERFORMANCE" in f for f in found)
 
 
 def test_a_component_that_stopped_being_renormalized_fails(

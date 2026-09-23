@@ -178,6 +178,15 @@ def test_the_blend_weights_are_the_pre_registered_five() -> None:
     }
 
 
+def test_three_of_the_five_weights_read_one_input() -> None:
+    assert blend.CAREER_AXIS_WEIGHTS == {
+        blend.PERFORMANCE: 65.0,
+        blend.RESUME: 25.0,
+        blend.ACCOLADE: 10.0,
+    }
+    assert sum(blend.CAREER_AXIS_WEIGHTS.values()) == sum(blend.CAREER_COMPONENT_WEIGHTS.values())
+
+
 def test_total_is_the_blend_and_not_the_season_sum() -> None:
     rows = full_career(1, 80.0) + full_career(2, 40.0)
     out = {r.player_id: r for r in blend.build(rows, SEASONS)}

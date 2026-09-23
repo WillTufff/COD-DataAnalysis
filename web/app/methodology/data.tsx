@@ -3820,6 +3820,13 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
               score.
             </p>
             <p>
+              The weights were chosen by judgement when the blend was proposed.
+              No data or outside index derived them. They were fixed before the
+              blend first ran and have not been changed since, because
+              re-deriving them now would mean picking weights after seeing the
+              board.
+            </p>
+            <p>
               The season score itself stays PERFORMANCE alone. Giving the finish
               record a season weight as well would count it twice, once inside
               the peak season it lifted and again at{" "}

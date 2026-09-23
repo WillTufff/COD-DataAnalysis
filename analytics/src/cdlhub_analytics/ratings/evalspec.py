@@ -384,6 +384,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "longevity_weight": 20.0,
         "resume_weight": 25.0,
         "accolade_weight": 10.0,
+        # PEAK + PRIME + LONGEVITY, the one input three of the five read.
+        "performance_weight": 65.0,
         "prime_coverage": 235,
         "accolade_coverage": 426,
         "n_renormalized": 260,

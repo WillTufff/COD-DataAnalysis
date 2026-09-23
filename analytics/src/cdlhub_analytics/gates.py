@@ -33,6 +33,7 @@ from typing import Any, cast
 import psycopg
 
 from . import aging, career, errorcontrol, metrics, role, seriesdyn, style, validation
+from .career_rank import blend as career_rank_blend
 from .career_rank import engine as career_rank
 from .career_rank import evalpop as career_evalpop
 from .career_rank import facevalidity as career_facevalidity
@@ -926,6 +927,15 @@ def page_figure_failures(
                 0.0,
             )
         )
+    performance = [blend.get(name) for name in career_rank_blend.PERFORMANCE_COMPONENTS]
+    checks.append(
+        (
+            "career-rank blend weight PERFORMANCE",
+            None if None in performance else sum(cast(list[float], performance)),
+            pinned_blend.get("performance_weight"),
+            0.0,
+        )
+    )
     for name, key in (("PRIME", "prime_coverage"), ("ACCOLADE", "accolade_coverage")):
         checks.append(
             (f"career-rank {name} coverage", coverage.get(name), pinned_blend.get(key), 0.0)

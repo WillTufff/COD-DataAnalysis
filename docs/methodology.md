@@ -3510,6 +3510,10 @@ else. As independent axes, the blend is **Performance 65, Resume 25, Accolade 10
 five-row table states how the 65 splits across a career's best season, its best stretch
 and its full span. That split is not five separable inputs to the score.
 
+The weights were chosen by judgement when the blend was proposed. No data or outside
+index derived them. They were fixed before the blend first ran and have not been changed
+since, because re-deriving them now would mean picking weights after seeing the board.
+
 Each component is scaled across the players the board ranks before the weights are
 applied, so the weights are shares of one comparable scale and not of five different
 units. The scale is fit to the 1st and 99th percentile of the ranked cohort, not its raw

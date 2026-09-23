@@ -71,6 +71,16 @@ CAREER_COMPONENT_WEIGHTS: Mapping[str, float] = {
     ACCOLADE: 10.0,
 }
 
+# PEAK, PRIME and LONGEVITY are three readings of the one performance season
+# score, so as independent axes the blend is PERFORMANCE / RESUME / ACCOLADE.
+PERFORMANCE_COMPONENTS: tuple[str, ...] = (PEAK, PRIME, LONGEVITY)
+
+CAREER_AXIS_WEIGHTS: Mapping[str, float] = {
+    PERFORMANCE: sum(CAREER_COMPONENT_WEIGHTS[name] for name in PERFORMANCE_COMPONENTS),
+    RESUME: CAREER_COMPONENT_WEIGHTS[RESUME],
+    ACCOLADE: CAREER_COMPONENT_WEIGHTS[ACCOLADE],
+}
+
 CAREER_BLEND_RULE = (
     "each component scaled 0..100 across the qualified cohort against the "
     "pinned p1/p99 span, then "
