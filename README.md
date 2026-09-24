@@ -12,32 +12,33 @@ Everything about how the numbers are produced is written up in
 
 The full loop runs end to end on real data, locally:
 
-- **Data.** Four sources, 2013 through 2026: 138,926 player-map rows across 4,369
-  decided series and 176 events. The Call of Duty Esports Wiki supplies 40,542 of those
-  rows for 2013-2016, pulled through its Cargo API and held locally. The Activision
-  `cwl-data` archive supplies 44,552 and is committed to this repository (2017 Champs on
-  IW, the 2018 WWII season, the 2019 BO4 season); the CDL seasons 2020-2026 come from
-  the Cito API, which carries Breaking Point match data, and are held locally. They are
-  not redistributed. Liquipedia's LPDB supplies the structure around them: 99 enriched
-  events, 1,068 placements with prize money, 3,486 roster stints, 4,898 transfers and
-  player bios.
+- **Data.** Four sources, 2013 through 2026: 151,463 player-map rows across 6,652
+  decided series and 180 events. The Call of Duty Esports Wiki supplies 53,151 of those
+  rows for 2013-2017 and the scores of 3,553 series, pulled through its Cargo API and
+  held locally. The Activision `cwl-data` archive supplies 44,552 and is committed to
+  this repository (2017 Champs on IW, the 2018 WWII season, the 2019 BO4 season); the
+  CDL seasons 2020-2026 come from the Cito API, which carries Breaking Point match
+  data, and are held locally. They are not redistributed. Liquipedia's LPDB supplies the
+  structure around them: 112 enriched events, 1,644 placements (697 with prize money),
+  4,838 roster stints, 9,520 transfers and player bios, plus 46 CDL series the Cito
+  catalog does not list.
 - **Models.** Era adjustment (cohort z-scores and percentiles per season and mode,
   minimum 8 maps), Elo (K=32), Glicko-2 (τ=0.5), an open composite player rating fit on
   what actually wins maps and published as the posterior of a two-level model, so its
   interval comes from the model itself, not a bootstrap of its point estimate, and a
   win-probability model whose result was a published null.
-  Walk-forward backtests over 4,369 decided series put Elo at 0.2194 Brier / 65.2%
-  accuracy and Glicko-2 at 0.2237 / 64.4%. Those gaps are paired and carry intervals:
-  Elo's edge over Glicko-2 (−0.0043, 95% CI −0.0069 to −0.0017) separates, Elo and the
+  Walk-forward backtests over 6,654 decided series put Elo at 0.2166 Brier / 65.9%
+  accuracy and Glicko-2 at 0.2224 / 65.2%. Those gaps are paired and carry intervals:
+  Elo's edge over Glicko-2 (−0.0058, 95% CI −0.0079 to −0.0037) separates, Elo and the
   win-probability model no longer separate from each other, and every null published here
   comes with a power statement saying what size of effect the archive could have found. Every model write is versioned through `model_runs` and replaced on rerun;
   superseded runs of the same model are pruned so only what a run published survives.
 - **Series dynamics.** What a 1-0 lead is worth, measured against an exact enumeration
-  of a race to three with no memory in it. The map-1 winner takes 74.5% of 3,833
+  of a race to three with no memory in it. The map-1 winner takes 75.0% of 4,262
   best-of-fives, which against ratings alone looks like momentum: too many sweeps, too
   few deciders. Modeling the sequence with a per-series quality offset the ratings did
-  not have puts the carryover at +1.1 points of map win probability (95% CI −1.6 to
-  +3.8), against +9.6 from the same data fitted the ordinary way.
+  not have puts the carryover at +0.8 points of map win probability (95% CI −1.8 to
+  +3.3), against +10.3 from the same data fitted the ordinary way.
 - **Rounds.** The first model built on the kill feed: given the survivor count in a Search
   and Destroy round right now, what is each side worth? Sixteen non-terminal states from
   ~104,000 observations, walk-forward by event. Round odds track the *ratio* of survivors
@@ -57,29 +58,29 @@ The full loop runs end to end on real data, locally:
   question of player against team does not move the table. Aging publishes three curves
   and no single peak: a naive fit on every observed season, a delta fit on paired
   consecutive seasons, and the same pairs weighted by a fitted retention probability. The
-  peak sits between 20.5 and 25.4, the naive fit lands a year later than the two
-  within-player fits, and the retention correction moves the answer by a hundredth of a
-  year. Slaying peaks about two years before objective contribution at the point
-  estimate, with intervals that overlap.
+  intervals run from 18.6 to 22.9, the naive fit lands about half a year later than the
+  two within-player fits, and the retention correction moves the answer by six hundredths
+  of a year. Slaying peaks about a year and a half before objective contribution at the
+  point estimate, with intervals that overlap.
 - **Player style.** Are roles a taxonomy or a continuum? With the composite rating
   projected out (style and quality are nearly orthogonal) and only metrics every season
   can reach, no partition beats a cloud with no clusters in it, in either era: over
-  2017-2019 the best-separated k scores a silhouette of 0.286 where an unclustered
-  Gaussian of the same shape scores 0.251 to 0.305. Bootstrap stability of 0.961 looks
+  2017-2019 the best-separated k scores a silhouette of 0.241 where an unclustered
+  Gaussian of the same shape scores 0.223 to 0.262. Bootstrap stability of 0.930 looks
   convincing until the same null reproduces itself just as well. So players are published
   as positions on continuous axes, not as archetype labels. The fit runs once per
   era, because the column sets do not overlap enough to share a basis, and the axes are
   never compared across that seam.
 - **Role.** How often a player is in the first fight of a Search and Destroy round,
   published as a rate and a percentile with no entry or anchor label attached, over 311
-  qualified player-seasons. The opening job costs no measurable K/D: the slope is +0.031 SD
-  per SD of contact rate on an interval of -0.125 to +0.167. Two things do move. A player
+  qualified player-seasons. The opening job costs no measurable K/D: the slope is +0.030 SD
+  per SD of contact rate on an interval of -0.124 to +0.170. Two things do move. A player
   who takes more opening fights does less damage per map and gets a larger share of their
   kills left unanswered. Whether the style axes already carry role is testable only where
   the record names a weapon, which is 2017-2019, and there they recover the observed class
-  72.3% of the time against a 57.5% base rate. The pre-registered rule reads that as
+  69.1% of the time against a 57.5% base rate. The pre-registered rule reads that as
   ambiguous, so no modern-era claim rests on the axes.
-- **Metric layer.** 104 derived metrics per player, season and mode, plus team
+- **Metric layer.** 106 derived metrics per player, season and mode, plus team
   style metrics and loadout meta aggregates, all era-scored against their own cohort.
   Which seasons a metric covers is measured from the data rather than declared, so
   columns a source records but never populated are reported as gaps instead of being
@@ -94,20 +95,21 @@ The full loop runs end to end on real data, locally:
   ledger, and the methodology write-up with an auto-generated metric glossary. Player and
   team pages are prerendered; the filterable views render per request.
 - **Error control.** Every finding is the extreme of a scan, so each one is classified and
-  the testable ones are corrected. 103 of the 227 findings claim a latent quantity the
+  the testable ones are corrected. 131 of the 277 findings claim a latent quantity the
   database holds an error for; the rest are descriptive, self-tested, or claim a quantity
   nothing here can test and say so. A finding is tested against its own screen boundary,
   with the p-value conditioned on the selection that produced it, and Benjamini-Hochberg
-  and Benjamini-Yekutieli both run per family. At the declared q <= 0.10, one of the 103
-  survives. The other 102 keep their rows and move to a retracted list with the q-value
+  and Benjamini-Yekutieli both run per family. At the declared q <= 0.10, two of the 131
+  survive. The other 129 keep their rows and move to a retracted list with the q-value
   that retracted them, and the whole sensitivity curve is published beside the verdict.
 - **Uncertainty.** Every rating the site publishes carries the interval its model
   computed: the composite rating's posterior SD on the player page, the rating board and
   the player index; the era model's standard error on the career arc, the season tables
   and the home leaderboard; Glicko-2's RD on the team pages. Bands are ±1.96 SD on a
   domain shared across the table or plot, so overlap is legible. On the top-twenty rating
-  board, eight of the nineteen chasing seasons reach the leader's interval, and the order
-  between them is not a claim the model can make.
+  board, every one of the nineteen chasing seasons has an interval that overlaps the
+  leader's, and four sit inside it, so the order between them is not a claim the model
+  can make.
 
 The site covers 2013 to 2026.
 
@@ -226,15 +228,20 @@ what you have.
   analysis — ratings, era-adjusted metrics, model outputs — is published. Requests are
   paced under the tier's limits, every response is snapshotted to disk, and a match is
   never fetched twice.
-- 2013-2016 box scores, placements, event rosters and awards come from the
+- 2013-2017 box scores and series scores, and 2013-2016 placements, event rosters and
+  awards, come from the
   [Call of Duty Esports Wiki](https://cod-esports.fandom.com) (CC-BY-SA 3.0) through its
   Cargo API, pulled 2026-08-16 at one request per 20 seconds with an identifying
   User-Agent. Derived data is shared under CC-BY-SA 3.0. These are community
   transcriptions of broadcast scoreboards, so they rank below the two publisher-side
   sources and never overwrite a row either of them holds. The wiki also covers
-  2017-2026, and that half is used only to measure the source against rows already
-  held: 83,418 player-lines reconcile at a 1.57% disagreement rate on kills and deaths,
-  with 2017 and 2019 agreeing exactly. Responses are snapshotted to
+  2017-2026, and outside Infinite Warfare that half is used only to measure the source
+  against rows already held: 83,418 player-lines reconcile at a 1.57% disagreement
+  rate on kills and deaths, with 2017 and 2019 agreeing exactly. Infinite Warfare 2017
+  is the exception: the
+  Activision archive holds only its championship, so the rest of that season loads from
+  the wiki. Series scores come from the wiki's match schedule, pulled 2026-09-24, and
+  the box scores supply the maps. Responses are snapshotted to
   `pipeline/snapshots/codwiki/`, which is not committed.
 - Tournaments, placements, prize money, rosters, transfers and player bios come from
   [Liquipedia](https://liquipedia.net/callofduty) (CC-BY-SA 3.0) through the LPDB API,

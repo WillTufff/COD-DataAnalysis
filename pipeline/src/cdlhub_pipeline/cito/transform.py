@@ -18,10 +18,11 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ..identity import Aliases
 
@@ -273,6 +274,50 @@ def _stats_payload(match_id: str) -> dict[str, Any] | None:
     return inner if isinstance(inner, dict) else None
 
 
+def _restamp(
+    data: dict[str, Any], slug_of: dict[str, str], resolve: Callable[[str], str]
+) -> dict[str, Any]:
+    """Relabel payload team slugs that name a series team under another slug.
+
+    Cito renames a slug in its match list without re-stamping the stats
+    payloads already published, so a payload can carry `paris-gentle-mates`
+    for a fixture listed under `la-guerrillas-m8`. A stamped slug is rewritten
+    to the series slug when both resolve to the same team for the season,
+    everywhere it appears: on the players and inside each map's breakdown.
+    """
+    rename: dict[str, str] = {}
+    for slug in _slugs(data):
+        if slug not in slug_of.values() and slug not in rename:
+            target = slug_of.get(resolve(slug))
+            if target:
+                rename[slug] = target
+    if not rename:
+        return data
+    return cast(dict[str, Any], _relabel(data, rename))
+
+
+def _slugs(node: Any) -> set[str]:
+    if isinstance(node, dict):
+        found = {node["teamSlug"]} if isinstance(node.get("teamSlug"), str) else set()
+        for value in node.values():
+            found |= _slugs(value)
+        return found
+    if isinstance(node, list):
+        return set().union(*(_slugs(item) for item in node)) if node else set()
+    return set()
+
+
+def _relabel(node: Any, rename: dict[str, str]) -> Any:
+    if isinstance(node, dict):
+        out = {k: _relabel(v, rename) for k, v in node.items()}
+        if isinstance(out.get("teamSlug"), str):
+            out["teamSlug"] = rename.get(out["teamSlug"], out["teamSlug"])
+        return out
+    if isinstance(node, list):
+        return [_relabel(item, rename) for item in node]
+    return node
+
+
 def _build_games(
     data: dict[str, Any],
     team1_slug: str,
@@ -400,11 +445,15 @@ def transform(aliases: Aliases) -> TransformResult:
             )
             continue
 
-        def resolve(slug: str, fallback: str) -> str:
+        def resolve(
+            slug: str, fallback: str, count_unmapped: bool = True, opponent: str | None = None
+        ) -> str:
             # A slug that hides two teams this season (Cito files 2020 OpTic
             # Gaming LA under g2-minnesota) is split by which team's roster the
-            # stamped lineup matches.
+            # stamped lineup matches, and never onto the fixture's other team.
             split = aliases.cito_split(slug, season)  # noqa: B023 (loop-stable)
+            if split and opponent in split:
+                return next(team for team in split if team != opponent)
             if split and data is not None:  # noqa: B023
                 lineup = {
                     aliases.player((p.get("playerName") or "").strip()).lower()
@@ -426,7 +475,8 @@ def transform(aliases: Aliases) -> TransformResult:
                 )
             name = aliases.cito_team(slug, season)  # noqa: B023 (season is loop-stable here)
             if name is None:
-                unmapped[slug] += 1
+                if count_unmapped:
+                    unmapped[slug] += 1
                 return fallback
             return name
 
@@ -437,14 +487,23 @@ def transform(aliases: Aliases) -> TransformResult:
             played_at=datetime.fromisoformat(m["matchDate"].replace("Z", "+00:00")),
             team1_slug=t1["slug"],
             team2_slug=t2["slug"],
-            team1_name=resolve(t1["slug"], t1["name"]),
-            team2_name=resolve(t2["slug"], t2["name"]),
+            team1_name=resolve(
+                t1["slug"], t1["name"], opponent=aliases.cito_team(t2["slug"], season)
+            ),
+            team2_name=resolve(
+                t2["slug"], t2["name"], opponent=aliases.cito_team(t1["slug"], season)
+            ),
             team1_score=m["score"]["team1"],
             team2_score=m["score"]["team2"],
             best_of=m.get("bestOf"),
             round_label=m.get("round"),
         )
         if data is not None:
+            data = _restamp(
+                data,
+                {s.team1_name: s.team1_slug, s.team2_name: s.team2_slug},
+                lambda slug: resolve(slug, slug, count_unmapped=False),
+            )
             s.games = _build_games(
                 data, s.team1_slug, s.team2_slug, warnings, quarantined, m["matchId"]
             )

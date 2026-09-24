@@ -95,17 +95,23 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
     # held. Axis 3's marker moved from kills to deaths on a real margin
     # (+0.464 against -0.410) and axis 4 held. Both are unnamed, so nothing
     # published is renamed.
+    # Re-read on 2026-09-24, after Infinite Warfare 2017 loaded from the CoD
+    # wiki and the wiki series took their scores from its match schedule. The
+    # two named axes held; the unnamed fourth dropped below the retention rule.
     "extended 2013-2016": (
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "deaths"),
-        ("axis 4", "deaths"),
     ),
+    # Re-read on 2026-09-24, same load. Axis 4 was `streak depth` and is now
+    # unnamed: it loads hardest on teamkills at +0.4248 against eight-plus
+    # streaks at -0.4124, a contrast between two columns rather than a streak
+    # axis, so the name no longer describes it. `risk` held.
     "core CWL": (
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "assists"),
-        ("streak depth", "deep_streak_rate"),
+        ("axis 4", "teamkills"),
         ("risk", "eight_plus_streaks"),
     ),
     # Re-read on 2026-08-22, after the identity queue was cleared. The
@@ -115,19 +121,20 @@ PUBLISHED_BASES: dict[str, tuple[tuple[str, str], ...]] = {
     # 0.3866 against hill time per map at 0.3690. Axis 8 is a real move, hill
     # time at +0.3276 against streak4 at -0.2841. This is the robustness arm;
     # `core CWL` came back identical.
+    # Re-read on 2026-09-24, same load. Twelve components fell to ten and
+    # everything below axis 3 reordered; `streak depth` is gone here too. This
+    # is the robustness arm, and its first three axes held.
     "extended CWL": (
         ("volume", "kills"),
         ("survival", "deaths"),
         ("axis 3", "assists"),
-        ("axis 4", "kd"),
-        ("risk", "eight_plus_streaks"),
-        ("streak depth", "streak6"),
-        ("axis 7", "hill_time_share"),
-        ("axis 8", "hill_time"),
+        ("axis 4", "blitz_index"),
+        ("risk", "streak8plus"),
+        ("axis 6", "hill_time_share"),
+        ("axis 7", "eight_plus_streaks"),
+        ("axis 8", "four_piece"),
         ("axis 9", "deaths"),
-        ("axis 10", "streak6"),
-        ("axis 11", "suicides"),
-        ("axis 12", "streak7"),
+        ("axis 10", "suicides"),
     ),
     "core CDL": (
         ("volume", "kills"),

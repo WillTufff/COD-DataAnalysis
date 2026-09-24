@@ -23,6 +23,7 @@ import numpy as np
 
 from cdlhub_analytics.regress import fit_logistic_l2
 from cdlhub_analytics.seriesdyn import (
+    BENCHMARKS,
     EVENTS,
     WINS_NEEDED,
     Frozen,
@@ -30,6 +31,8 @@ from cdlhub_analytics.seriesdyn import (
     Sequences,
     Series,
     SeriesMap,
+    _by_era,
+    _content_ordered,
     _swing_pp,
     design,
     expected_events,
@@ -389,3 +392,21 @@ def test_every_published_event_has_an_expectation() -> None:
     events = expected_events([0.5] * 5)
     assert set(events) == set(EVENTS)
     assert set(path_events([True, True, True])) == set(EVENTS)
+
+
+def test_the_era_table_reads_each_era_off_its_own_series() -> None:
+    """The indicator columns are reordered for the bootstrap, and the series
+    list has to move with them. Built from the list in its old order, every era
+    read other eras' rows: early titles all 0 and late ones all 1."""
+    series = [build_series([True, True, True], sid=i, title="BO2", year=2013) for i in range(60)]
+    series += [
+        build_series([False, False, False], sid=100 + i, title="BO7", year=2026) for i in range(60)
+    ]
+    observed = {k: np.zeros(len(series)) for k in EVENTS}
+    observed["team1_won"] = np.array([1.0] * 60 + [0.0] * 60)
+    expected = {b: {k: np.zeros(len(series)) for k in EVENTS} for b in BENCHMARKS}
+    ordered, observed, expected = _content_ordered(series, observed, expected)
+    rates = {
+        row["era"]: row["team1_won"]["observed"] for row in _by_era(ordered, observed, expected)
+    }
+    assert rates == {"2013 BO2": 1.0, "2026 BO7": 0.0}

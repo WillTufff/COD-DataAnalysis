@@ -110,6 +110,16 @@ class Season:
         return self.era or self.league
 
 
+# Seasons measured under a named archive instead of their majority source.
+# Infinite Warfare 2017 is mostly wiki rows and stays in the CWL era.
+ARCHIVE_PINS: dict[int, str] = {2017: "cwl_archive"}
+
+
+def pinned_archive(year: int, archive: str) -> str:
+    """The archive a season is measured under: its pin, or its majority source."""
+    return ARCHIVE_PINS.get(year, archive) if archive else archive
+
+
 SEASON_ARCHIVE_SQL = """
 SELECT se.id, se.year, se.league,
        (SELECT mode() WITHIN GROUP (ORDER BY gps.data_source)
@@ -158,7 +168,12 @@ def _span(seen: list[tuple[int, str]]) -> str:
 
 def load_seasons(conn: psycopg.Connection[tuple[object, ...]]) -> dict[int, Season]:
     rows = [
-        (cast(int, r[0]), cast(int, r[1]), str(r[2]), str(r[3] or ""))
+        (
+            cast(int, r[0]),
+            cast(int, r[1]),
+            str(r[2]),
+            pinned_archive(cast(int, r[1]), str(r[3] or "")),
+        )
         for r in conn.execute(SEASON_ARCHIVE_SQL).fetchall()
     ]
     labels = era_labels(rows)

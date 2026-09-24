@@ -88,7 +88,7 @@ import numpy as np
 import psycopg
 from numpy.typing import NDArray
 
-from .ratings.preflight import era_labels
+from .ratings.preflight import era_labels, pinned_archive
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int_]
@@ -311,7 +311,12 @@ class Era:
 
 def load_eras(conn: psycopg.Connection[tuple[object, ...]]) -> list[Era]:
     rows = [
-        (cast(int, sid), cast(int, year), cast(str, league), cast(str, source))
+        (
+            cast(int, sid),
+            cast(int, year),
+            cast(str, league),
+            pinned_archive(cast(int, year), cast(str, source)),
+        )
         for sid, year, league, source in conn.execute(SEASONS_SQL)
     ]
     labels = era_labels(rows)

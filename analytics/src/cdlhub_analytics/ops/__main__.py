@@ -218,12 +218,24 @@ JOBS: list[dict[str, Any]] = [
         "stages": [],
         "destructive": False,
         # About 171,000 rows. These years are already held from cwl_archive and
-        # cito, so this window feeds the reconciliation and never loads.
+        # cito, so this window feeds the reconciliation; only its Infinite
+        # Warfare pages load.
         "est_seconds": 8400,
     },
     {
+        "id": "codwiki_schedule",
+        "label": "Wiki pull: match schedule (series scores)",
+        "cwd": "pipeline",
+        "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "pull", "schedule"],
+        "stages": [],
+        "destructive": False,
+        # About 3,600 matches over 83 pages in 14 requests. Run before
+        # codwiki_load, which takes its series scores from this snapshot.
+        "est_seconds": 400,
+    },
+    {
         "id": "codwiki_load",
-        "label": "Wiki load: box scores 2013-2016",
+        "label": "Wiki load: box scores 2013-2017",
         "cwd": "pipeline",
         "argv": ["uv", "run", "python", "-m", "cdlhub_pipeline.codwiki", "load"],
         "stages": [],

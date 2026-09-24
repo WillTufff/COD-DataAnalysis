@@ -40,13 +40,13 @@ fitted separately, on the same population and through the same three fits, with
 the plan's prediction that their peaks differ. It is reported whichever way it
 lands.
 
-**Two populations, because they buy different things.** The box score offers ten
-seasons and 530 consecutive-season pairs and can locate a peak. The plus-minus
-offers seven seasons and 263 pairs and is the quantity anyone actually argues
+**Two populations, because they buy different things.** The box score offers
+798 consecutive-season pairs and can locate a peak. The plus-minus offers 265
+pairs and is the quantity anyone actually argues
 about. Publishing one without the other would either answer the wrong question
 or answer the right one with no power.
 
-**Age is known for 439 of 815 players.** A player without a birthdate is fitted
+**Age is known for 497 of 1,098 players.** A player without a birthdate is fitted
 on their career-season index instead, in a separate population that never mixes
 with the age one: the two x-axes are different quantities and averaging them
 would produce a curve of neither.

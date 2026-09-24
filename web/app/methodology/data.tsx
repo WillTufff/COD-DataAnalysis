@@ -1153,18 +1153,35 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
                 );
                 if (!p) return null;
                 const d = p.a === "map_blend" ? p.delta : -p.delta;
+                const lo = p.a === "map_blend" ? p.lo : -p.hi;
+                const hi = p.a === "map_blend" ? p.hi : -p.lo;
+                const clear = p.excludes_zero && Math.abs(d) > p.mde80;
+                const interval = `${lo.toFixed(5)} to ${hi.toFixed(5)}`;
+                if (d < 0 && clear) {
+                  return (
+                    <>
+                      <strong className="text-ink">
+                        Rating maps beats rating series.
+                      </strong>{" "}
+                      The blend arm beats Elo by {Math.abs(d).toFixed(5)} of
+                      Brier ({interval}), clear of zero and of its own
+                      80%-power threshold ({p.mde80.toFixed(5)}).
+                    </>
+                  );
+                }
                 return (
                   <>
                     <strong className="text-ink">
-                      Rating maps beats rating series.
+                      Rating maps does not beat rating series here.
                     </strong>{" "}
-                    The blend arm beats Elo by {Math.abs(d).toFixed(5)} of
-                    Brier, with an interval clear of zero and clear of its own
-                    80%-power threshold ({p.mde80.toFixed(5)}) — the only model
-                    gap on this page that passes both tests. Nothing about the
-                    model changed; it saw 3.9× as many results. The contrasts{" "}
-                    <em>within</em> map_elo do not clear power, so which of the
-                    three arms is best is not settled here.
+                    The blend arm&rsquo;s gap to Elo is {d.toFixed(5)} of Brier
+                    ({interval}), against an 80%-power threshold of{" "}
+                    {p.mde80.toFixed(5)}
+                    {p.excludes_zero
+                      ? ", clear of zero but under what this sample can resolve."
+                      : ", on an interval that includes zero."}{" "}
+                    The contrasts <em>within</em> map_elo are in the methodology
+                    write-up.
                   </>
                 );
               })()}

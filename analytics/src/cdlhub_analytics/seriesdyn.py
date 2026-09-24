@@ -1095,6 +1095,22 @@ def fit_specs(
 # ----------------------------------------------------------------- artifacts
 
 
+def _content_ordered(
+    usable: Sequence[Series],
+    observed: dict[str, FloatArray],
+    expected: dict[str, dict[str, FloatArray]],
+) -> tuple[list[Series], dict[str, FloatArray], dict[str, dict[str, FloatArray]]]:
+    """Series and their indicator columns, reordered together by what they hold."""
+    take = content_order(
+        [observed[k] for k in EVENTS] + [expected[b][k] for b in BENCHMARKS for k in EVENTS]
+    )
+    return (
+        [usable[i] for i in take],
+        {k: v[take] for k, v in observed.items()},
+        {b: {k: v[take] for k, v in cols.items()} for b, cols in expected.items()},
+    )
+
+
 def _by_era(
     series: Sequence[Series],
     observed: dict[str, FloatArray],
@@ -1159,11 +1175,7 @@ def build_artifacts(
     # series would move all of them while no observed or expected rate moved.
     # Ordered by what each series produced, on every column at once so the
     # pairing that makes an observed-minus-expected gap legitimate survives it.
-    take = content_order(
-        [observed[k] for k in EVENTS] + [expected[b][k] for b in BENCHMARKS for k in EVENTS]
-    )
-    observed = {k: v[take] for k, v in observed.items()}
-    expected = {b: {k: v[take] for k, v in cols.items()} for b, cols in expected.items()}
+    ordered, observed, expected = _content_ordered(usable, observed, expected)
 
     # Five columns into one seed. `stream` combines them with an exclusive or,
     # so two identical indicators cancel — a cohort with neither sweeps nor
@@ -1194,7 +1206,7 @@ def build_artifacts(
         "bootstrap_b": BOOTSTRAP_B,
         "map1": _conditional_map1(observed, expected, idx),
         "rates": _rates(observed, expected, idx),
-        "by_era": _by_era(usable, observed, expected),
+        "by_era": _by_era(ordered, observed, expected),
         "min_era_series": MIN_ERA_SERIES,
         "strength_check": _strength_check(usable, frozen),
     }

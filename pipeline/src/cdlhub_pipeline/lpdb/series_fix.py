@@ -1,6 +1,6 @@
 """Reconcile local series against LPDB /match (match2) data, both eras.
 
-Three fixes for the Cito era, all driven by the Cito load report and idempotent
+Four fixes for the Cito era, idempotent
 per run, plus one link for the CWL era (`link_cwl_series`) that repairs nothing
 and exists to disagree:
 
@@ -21,6 +21,11 @@ and exists to disagree:
    null on every CWL series here, populated on all 1,230 of LPDB's — and
    publishing a score reconciliation. Until this ran, every CWL number the
    project publishes rested on the Activision archive alone.
+
+5. Create the CDL-era series Cito never lists (`backfill_unheld`): an LPDB
+   match on one of our events, between two teams we already hold, with no
+   local series for that pair within two days. Cito's catalog skips whole
+   stretches, such as most of the 2026 Championship.
 
 A cito reload nulls/loses these fixes, so rerun `lpdb load` after any
 `cito load`. Disagreements between the local series score and LPDB are
@@ -105,6 +110,8 @@ class SeriesFixer:
             "dates_corrected": [],
             "unmatched": [],
             "inconsistent_lpdb_maps": [],
+            "unheld_backfilled": [],
+            "unheld_skipped": {},
             # The CWL era's second source (link_cwl_series), reported the same
             # way the modern era's reconciliation already is.
             "cwl_score_agreements": 0,
@@ -153,6 +160,7 @@ class SeriesFixer:
                     "scores": scores,
                     "winner": row.get("winner"),
                     "bestof": row.get("bestof"),
+                    "walkover": row.get("walkover"),
                     "games": row.get("match2games") or [],
                 }
             )
@@ -585,6 +593,7 @@ class SeriesFixer:
         self.backfill_quarantined()
         self.check_nulled()
         self.check_score_only()
+        self.backfill_unheld()
         # a score-only cdl fixture with no LPDB counterpart anywhere near its
         # claimed date is a phantom record (verified by hand for the Dec 2025
         # slate: the claimed pairings happened weeks later or not at all) —
@@ -596,6 +605,90 @@ class SeriesFixer:
             u for u in self.report["unmatched"] if not str(u.get("cito", "")).isdigit()
         ]
         self.link_cwl_series()
+
+    # ----- fix 5: CDL-era series no other source lists -----
+
+    UNHELD_WINDOW_DAYS = 2
+
+    def backfill_unheld(self) -> None:
+        """Create a series for each CDL-era LPDB match that no local series covers.
+
+        A match qualifies when its page resolves to one of our events, both
+        teams already exist (a team is never created here), it was played
+        rather than forfeited, and no series between those two teams sits
+        within `UNHELD_WINDOW_DAYS` of it in any event. The window is wider
+        than the one-day match used elsewhere so that a series Cito dates a day
+        off is found rather than duplicated.
+        """
+        held: dict[frozenset[int], list[date]] = defaultdict(list)
+        for t1, t2, played in self.conn.execute(
+            "SELECT s.team1_id, s.team2_id, s.played_at::date FROM series s "
+            "JOIN events e ON e.id = s.event_id JOIN seasons se ON se.id = e.season_id "
+            "WHERE se.league = 'CDL' AND s.played_at IS NOT NULL"
+        ).fetchall():
+            held[frozenset((cast(int, t1), cast(int, t2)))].append(cast(date, played))
+        skipped: Counter[str] = Counter()
+        for matches in self._index.values():
+            for m in matches:
+                if m["season"] < 2020:
+                    continue
+                event_id = self.loader.match_event(m["pagename"], "", m["season"])
+                if event_id is None:
+                    skipped["no local event"] += 1
+                    continue
+                ids = [self.loader.team_id(n, m["season"]) for n in m["names"]]
+                if None in ids:
+                    skipped["team not held"] += 1
+                    continue
+                team_ids = (cast(int, ids[0]), cast(int, ids[1]))
+                pair = frozenset(team_ids)
+                if any(abs((d - m["date"]).days) <= self.UNHELD_WINDOW_DAYS for d in held[pair]):
+                    continue
+                if m["walkover"]:
+                    skipped["walkover"] += 1
+                    continue
+                row = self.conn.execute(
+                    """
+                    INSERT INTO series (event_id, team1_id, team2_id, team1_score, team2_score,
+                                        best_of, played_at, source_uid, liquipedia_match_id,
+                                        data_source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_uid) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        event_id,
+                        team_ids[0],
+                        team_ids[1],
+                        m["scores"][0],
+                        m["scores"][1],
+                        m["bestof"],
+                        m["dt"] or m["date"],
+                        f"lpdb:{m['match2id']}",
+                        None,
+                        SOURCE,
+                    ),
+                ).fetchone()
+                if row is None:
+                    continue
+                series_id = cast(int, row[0])
+                self._set_match_id(series_id, cast(str, m["match2id"]))
+                held[pair].append(m["date"])
+                self.counts["unheld_series"] += 1
+                games_ok = self._insert_games(
+                    series_id, m, team_ids, [0, 1], (m["scores"][0], m["scores"][1])
+                )
+                self.report["unheld_backfilled"].append(
+                    {
+                        "match2id": m["match2id"],
+                        "page": m["pagename"],
+                        "date": str(m["date"]),
+                        "teams": m["names"],
+                        "score": m["scores"],
+                        "games": games_ok,
+                    }
+                )
+        self.report["unheld_skipped"] = dict(sorted(skipped.items()))
 
     # ----- CWL era: a second source for a record that has one -----
 

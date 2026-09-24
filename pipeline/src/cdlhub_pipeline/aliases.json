@@ -66,7 +66,10 @@
     "Complexity Gaming": "Complexity",
     "Luminosity Gaming": "Luminosity",
     "ExcelerateGG": "Excelerate",
-    "Envy": "Team Envy"
+    "Envy": "Team Envy",
+    "Orbit eSports EU": "Orbit eSport EU",
+    "Team IN2ITION (European Team)": "Team IN2ITION",
+    "XtroVert eSports EU": "XtroVert Esports"
   },
   "orgs": {
     "eRa Eternity": [
@@ -470,6 +473,33 @@
         "name": "Still Orgless",
         "seasons": [
           2026,
+          2026
+        ]
+      }
+    ],
+    "la-guerrillas-m8": [
+      {
+        "name": "Los Angeles Guerrillas M8",
+        "seasons": [
+          2025,
+          2025
+        ]
+      }
+    ],
+    "optic-gaming-los-angeles": [
+      {
+        "name": "OpTic Gaming LA",
+        "seasons": [
+          2020,
+          2020
+        ]
+      }
+    ],
+    "project-notorious": [
+      {
+        "name": "Project Notorious",
+        "seasons": [
+          2025,
           2026
         ]
       }

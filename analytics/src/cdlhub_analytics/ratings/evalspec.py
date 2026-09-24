@@ -290,6 +290,17 @@ REPRODUCE = (
 # resolvable. The same day, five wiki games with box-score lines for one team
 # only lost those lines, which moved the four association figures once more. Nothing about a method
 # changed; every figure below that reads those seasons moved with them.
+#
+# Re-pinned 2026-09-24, against the run_all that ended in metric_diff run 2159.
+# Three data changes landed together. Infinite Warfare 2017 now loads from the
+# CoD wiki as well as the Activision archive, which took 2017 from 126 series
+# to 831, and the season is pinned to the CWL era. Every wiki series now takes
+# its score from the wiki's own MatchSchedule, which corrected about 190
+# series the box scores had short or drawn and added about 1,750 series the
+# box scores never covered. And the CDL years gained 48 series from LPDB that
+# Cito does not list, most of the 2026 Championship among them. Nothing about
+# a method changed; every figure below that reads those seasons moved with
+# them. The SKILL floor is again the exception.
 PUBLISHED_FIGURES: dict[str, Any] = {
     # Two figures the page stated that no artifact carried, added 2026-08-17.
     # Both are now computed every run — the first by `validation.retrodiction`,
@@ -299,8 +310,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # re-pinned on 2026-08-18: an identity merge joins split careers, so the
     # player-seasons the one-sided property is checked on are fewer and each
     # covers more of a career. Two merges took 5,079 cells to 5,061.
-    "retrodiction_cells_before": 5271,
-    "team_strength_proxy": {"n_team_seasons": 327, "pearson": 0.7613, "spearman": 0.7953},
+    "retrodiction_cells_before": 5217,
+    "team_strength_proxy": {"n_team_seasons": 337, "pearson": 0.7543, "spearman": 0.7953},
     # The table /methodology prints for the map-count shrinkage, pinned on the
     # day it was published. Its whole purpose is to show that admitting the
     # 2013-2016 era did not clear the era-balance gate on a variance artifact,
@@ -331,12 +342,12 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # stat counts are untouched — the families change how the metrics are
     # averaged, not which ones survive.
     "career_rank_era_spread": {
-        "on": "2026-08-22",
+        "on": "2026-09-24",
         "shrink_k": 21.8718,
         "eras": {
-            "2013-2016": {"seasons": 518, "sd_before": 18.5616, "sd_after": 10.5501},
-            "CWL": {"seasons": 496, "sd_before": 15.2085, "sd_after": 9.6537},
-            "CDL": {"seasons": 457, "sd_before": 14.6518, "sd_after": 10.5245},
+            "2013-2016": {"seasons": 514, "sd_before": 18.5616, "sd_after": 10.6022},
+            "CWL": {"seasons": 531, "sd_before": 14.9175, "sd_after": 9.7716},
+            "CDL": {"seasons": 455, "sd_before": 14.5198, "sd_after": 10.5026},
         },
     },
     # Phase C's own three figures, pinned the day they were published. The
@@ -351,18 +362,18 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # taking it out of a performance score costs agreement with an outside
     # rating. That is the price of the component being a component.
     "career_rank_convergent": {
-        "on": "2026-08-22",
+        "on": "2026-09-24",
         "eras_covered": ["CDL"],
         "n_seasons": 7,
-        "n_player_seasons": 457,
-        "median_rho": 0.7918,
+        "n_player_seasons": 455,
+        "median_rho": 0.7852,
     },
     "career_rank_era_gap": {
-        "on": "2026-08-22",
+        "on": "2026-09-24",
         "n_players": 90,
-        "mean": 7.9555,
-        "median": 9.3009,
-        "share_higher_in_cwl": 0.8667,
+        "mean": 8.4261,
+        "median": 9.5708,
+        "share_higher_in_cwl": 0.8889,
     },
     # Phase D's own numbers. The thin-year rule and the stack ceiling are both
     # declared rules, and a declared rule nothing checks is a rule that drifts.
@@ -386,15 +397,15 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "accolade_weight": 10.0,
         # PEAK + PRIME + LONGEVITY, the one input three of the five read.
         "performance_weight": 65.0,
-        "prime_coverage": 235,
-        "accolade_coverage": 426,
-        "n_renormalized": 260,
+        "prime_coverage": 238,
+        "accolade_coverage": 440,
+        "n_renormalized": 270,
         # The same two counts over the careers the board ranks, added in Phase
         # F because that is the sentence the page states: of the 207 ranked
         # careers, 205 carry all five components and two are scored without
         # their award axis.
-        "prime_coverage_qualified": 207,
-        "accolade_coverage_qualified": 205,
+        "prime_coverage_qualified": 209,
+        "accolade_coverage_qualified": 207,
         "n_renormalized_qualified": 2,
     },
     # Phase F. Four things the pages state that nothing was holding against a
@@ -454,8 +465,8 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     },
     "career_rank_value_coverage": {
         "on": "2026-08-22",
-        "n_seasons": 1471,
-        "n_with_value": 1461,
+        "n_seasons": 1500,
+        "n_with_value": 1499,
         "breadth_weight": 0.75,
         "value_weight": 0.25,
     },
@@ -485,17 +496,17 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "on": "2026-09-18",
         "boards": {
             "plus_minus.deviation.cdl": {
-                "n": 108,
-                "spearman_plus_minus": 0.2705,
-                "spearman_composite": 0.6009,
-                "difference": -0.3304,
+                "n": 107,
+                "spearman_plus_minus": 0.2415,
+                "spearman_composite": 0.6174,
+                "difference": -0.3759,
                 "excludes_zero": True,
             },
             "plus_minus.deviation.cwl": {
-                "n": 144,
-                "spearman_plus_minus": 0.4638,
-                "spearman_composite": 0.6262,
-                "difference": -0.1624,
+                "n": 145,
+                "spearman_plus_minus": 0.4451,
+                "spearman_composite": 0.6061,
+                "difference": -0.161,
                 "excludes_zero": True,
             },
         },
@@ -505,17 +516,17 @@ PUBLISHED_FIGURES: dict[str, Any] = {
         "on": "2026-09-18",
         "clear_sd": 2.0,
         "keys": {
-            "composite.none.all": {"n": 322, "n_clear_of_zero": 240},
+            "composite.none.all": {"n": 325, "n_clear_of_zero": 242},
             "plus_minus.deviation.cdl": {"n": 148, "n_clear_of_zero": 62},
             "plus_minus.deviation_plus_team.cdl": {"n": 148, "n_clear_of_zero": 63},
-            "plus_minus.deviation.cwl": {"n": 198, "n_clear_of_zero": 99},
+            "plus_minus.deviation.cwl": {"n": 208, "n_clear_of_zero": 99},
             "plus_minus.deviation_plus_team.cwl": {"n": 167, "n_clear_of_zero": 99},
         },
     },
-    "persistence_pairs": 567,
-    "persistence_delta_r": -0.2139,
+    "persistence_pairs": 568,
+    "persistence_delta_r": -0.2368,
     "delta_r_tol": 5e-4,
-    "forecast_maps": 9391,
+    "forecast_maps": 10806,
     "brier_tol": 5e-5,
     # The panel the next rating will be gated on, and the floor computed for it
     # before that rating exists. Pinned for the same reason as everything else
@@ -538,15 +549,15 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # That is a larger archive, not a better result, and the release has to show
     # the distance rather than quietly close it.
     "skill_panel_remeasured": {
-        "on": "2026-08-19",
+        "on": "2026-09-24",
         "why": (
-            "two more identity merges, Burnsoff into Burns and Felony into FeLo, the"
-            " second moving 887 maps onto one player, so the lineups the plus-minus is"
-            " fitted on changed again and the panel it reads moved with them; the"
-            " method is unchanged"
+            "the 2017 season loaded from the CoD wiki and every wiki series rescored"
+            " from its match schedule, so the plus-minus is fitted on more and"
+            " corrected series and the panel it reads moved with it; the method is"
+            " unchanged"
         ),
-        "mde80_clustered": 0.1734,
-        "distance_to_clear": 0.4076,
+        "mde80_clustered": 0.1731,
+        "distance_to_clear": 0.4084,
     },
     # The plus-minus read forward, at the resolution the read is valid at, with
     # the pooled figure the page corrects and the era figure that inflated it.
@@ -557,7 +568,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # moved with them; nothing about the method changed. The season-resolution
     # correlation fell from 0.2029 to 0.1956, so the merges made the read harder
     # rather than easier.
-    "plusminus_forward": {"n": 269, "r": 0.1999, "pooled_r": 0.2866, "era_r": 0.3537},
+    "plusminus_forward": {"n": 269, "r": 0.1988, "pooled_r": 0.2871, "era_r": 0.3545},
     # What the gate returned once the fourth predictor existed, from run 431/432.
     #
     # The panel is 218 rather than the 267 the floor was computed for, and the
@@ -572,7 +583,7 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # moved is the plus-minus underneath it. The gap narrowed from -0.2428 to
     # -0.2401 and the floor fell from 0.1733 to 0.1625, which leaves SKILL
     # losing by more than the floor either way.
-    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2379, "mde80": 0.1625},
+    "skill_result": {"n": 220, "clusters": 75, "delta_r": -0.2332, "mde80": 0.156},
     # The three-way panel the page quotes beside the four-way gate, and the
     # adversary's row in the gate table. Pinned 2026-08-18: each had a live
     # artifact and no comparison, so each drifted for several phases before a
@@ -581,11 +592,11 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # the block: one more transition, and the design effect and the adversary's
     # row moved with the fit underneath them.
     "retained_three_way": {
-        "n": 567,
-        "clusters": 191,
-        "composite_delta_r": -0.2139,
-        "design_effect": 1.313,
-        "openskill_gate_delta_r": -0.6871,
+        "n": 568,
+        "clusters": 192,
+        "composite_delta_r": -0.2368,
+        "design_effect": 1.335,
+        "openskill_gate_delta_r": -0.7015,
     },
     # The one secondary test the page quotes, scored against the quantity the
     # rating was fitted for rather than against the baseline's own ground.
@@ -593,14 +604,14 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # before: it had a live artifact and nothing comparing it, and the page had
     # drifted to 215 transitions and r = 0.4232 while the run returned 216 and
     # 0.4002.
-    "prior_target": {"n": 216, "skill": 0.377, "composite": 0.2816, "kd_z": 0.2534},
+    "prior_target": {"n": 216, "skill": 0.3807, "composite": 0.2821, "kd_z": 0.2534},
     "forecast_brier": {
-        "rapm": 0.24636,
-        "rapm_prior": 0.24693,
-        "rating": 0.24763,
-        "rating_zshrink": 0.2485,
-        "glicko": 0.25006,
-        "kd": 0.25181,
+        "rapm": 0.24455,
+        "rapm_prior": 0.24538,
+        "rating": 0.24699,
+        "rating_zshrink": 0.24771,
+        "glicko": 0.25056,
+        "kd": 0.25058,
     },
 }
 

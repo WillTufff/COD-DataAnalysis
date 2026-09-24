@@ -64,7 +64,7 @@ def run_load(dsn: str, dry_run: bool) -> None:
     # with no kill count would otherwise earn a player row carrying no stats.
     rows = [
         row
-        for row in json.loads(transform.rows_path().read_text())
+        for row in transform.load_rows()
         if (row.get("PlayerName") or "").strip() and (row.get("Kills") or "") != ""
     ]
     aliases = Aliases.load()
@@ -73,7 +73,7 @@ def run_load(dsn: str, dry_run: bool) -> None:
     ).get("codwiki_players", {})
     with psycopg.connect(dsn) as conn:
         player_ids, id_report = identity.resolve(conn, rows, overrides)
-        result = transform.transform(player_ids)
+        result = transform.transform(player_ids, lambda name: aliases.team(name).lower())
         report = load_module.load(conn, result, aliases)
         if dry_run:
             conn.rollback()
@@ -86,12 +86,16 @@ def run_load(dsn: str, dry_run: bool) -> None:
             )
             conn.commit()
     report["identity"] = id_report
+    report["schedule"] = result.schedule
+    report["schedule_conflicts"] = result.conflicts
     report["quarantine"] = result.quarantine
     REPORT_PATH.write_text(json.dumps(report, indent=1))
     print("identity:", {k: v if not isinstance(v, list) else len(v) for k, v in id_report.items()})
     print("counts:", report["counts"])
     print("dropped rows:", report["dropped"])
     print("collisions:", len(report["collisions"]))
+    print("schedule:", result.schedule)
+    print("schedule conflicts (map winners nulled):", len(result.conflicts))
     print(f"report: {REPORT_PATH}")
 
 
@@ -101,14 +105,14 @@ def main() -> None:
     p_fields = sub.add_parser("fields", help="read a Cargo table's declared fields")
     p_fields.add_argument("table")
     p_pull = sub.add_parser("pull", help="pull Cargo tables to snapshots")
-    p_pull.add_argument("target", choices=["reference", *pull.WINDOWS])
+    p_pull.add_argument("target", choices=["reference", "schedule", *pull.WINDOWS])
     p_pull.add_argument(
         "tables",
         nargs="*",
         metavar="table",
         help=f"reference only; default: all of {list(pull.REFERENCE_TABLES)}",
     )
-    p_load = sub.add_parser("load", help="load the 2013-2016 window into Postgres")
+    p_load = sub.add_parser("load", help="load the 2013-2016 window and Infinite Warfare 2017")
     p_load.add_argument("--dsn", default=os.environ.get("DATABASE_URL", _DEFAULT_DSN))
     p_load.add_argument("--dry-run", action="store_true", help="transform and roll back")
     p_results = sub.add_parser("results", help="load 2013-2016 placements, rosters and awards")

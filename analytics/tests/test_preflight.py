@@ -334,6 +334,12 @@ def test_an_archive_that_spans_two_leagues_is_named_by_its_span() -> None:
     assert labels == {"codwiki": "2013-2016", "cwl_archive": "CWL", "cito": "CDL"}
 
 
+def test_infinite_warfare_stays_in_the_cwl_era_whatever_its_majority_source() -> None:
+    assert preflight.pinned_archive(2017, "codwiki") == "cwl_archive"
+    assert preflight.pinned_archive(2016, "codwiki") == "codwiki"
+    assert preflight.pinned_archive(2017, "") == ""
+
+
 def test_no_two_eras_share_a_name() -> None:
     labels = preflight.era_labels(
         [

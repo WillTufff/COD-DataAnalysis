@@ -24,6 +24,7 @@ import json
 from typing import Any
 
 from .client import SNAPSHOT_ROOT, CodWikiClient, RateLimited, read_state, write_state
+from .transform import IW_OVERLAP_EVENTS, SCHEDULE_ONLY_EVENTS, load_rows, schedule_path
 
 # The owner set both floors at 2013: box scores and results start together.
 SCOPE_START = "2013-01-01"
@@ -168,12 +169,48 @@ def consolidate_playerstats(window: str) -> int:
     return len(rows)
 
 
+SCHEDULE_BATCH = 25
+SCHEDULE_FIELDS = (
+    "OverviewPage,SeriesId,MatchId,Team1,Team2,Winner,Team1Score,Team2Score,FF,"
+    "WinnerScoreUnknown,BestOf,DateTime_UTC,Round,Tab"
+)
+
+
+def pull_schedule(client: CodWikiClient) -> int:
+    """Pull `MatchSchedule` for every page the box-score load reaches.
+
+    The schedule is where the load takes series scores from. Pages go in
+    batches, since one page is a few dozen matches.
+    """
+    _banner("match schedule")
+    pages = sorted(
+        {row["TournamentPage"] for row in load_rows() if row.get("TournamentPage")}
+        | set(IW_OVERLAP_EVENTS)
+        | set(SCHEDULE_ONLY_EVENTS)
+    )
+    rows: list[dict[str, Any]] = []
+    for i in range(0, len(pages), SCHEDULE_BATCH):
+        batch = pages[i : i + SCHEDULE_BATCH]
+        quoted = ",".join("'" + page.replace("'", "''") + "'" for page in batch)
+        rows += client.query_all(
+            "MatchSchedule",
+            fields=SCHEDULE_FIELDS,
+            where=f"OverviewPage IN ({quoted})",
+            order_by="MatchId",
+        )
+    schedule_path().write_text(json.dumps(rows, indent=1))
+    print(f"  {len(pages)} pages, {len(rows)} matches -> {schedule_path()}", flush=True)
+    return len(rows)
+
+
 def run(what: str, tables: list[str] | None = None) -> None:
     client = CodWikiClient()
     SNAPSHOT_ROOT.mkdir(parents=True, exist_ok=True)
     if what == "reference":
         pull_reference(client, tables)
         inventory_awards(client)
+    elif what == "schedule":
+        pull_schedule(client)
     elif what in WINDOWS:
         pull_playerstats(client, what)
         consolidate_playerstats(what)

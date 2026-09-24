@@ -64,6 +64,10 @@ HARD_CHECKS: tuple[Check, ...] = (
         """,
     ),
     Check(
+        "series_teams_distinct",
+        "SELECT id FROM series WHERE team1_id = team2_id",
+    ),
+    Check(
         "game_winner_in_series_teams",
         """
         SELECT g.id FROM games g JOIN series s ON s.id = g.series_id

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { DistributionStrip } from "@/components/charts/DistributionStrip";
-import { EloExplorer } from "@/components/charts/EloExplorer";
+import { EloHistory } from "@/components/charts/EloHistory";
 import { PaceByMode } from "@/components/charts/PaceByMode";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { Leaderboard } from "@/components/Leaderboard";
@@ -8,14 +8,15 @@ import {
   getArchiveStats,
   getEloTimelines,
   getEraSpans,
-  getEventMarkers,
   getFeedHighlights,
   getBacktestCards,
   getPaceByMode,
   getPlayerLeaderboard,
   getSeasonEras,
+  getSeasonChampions,
   getSeasonKdSpread,
   getSeriesRecords,
+  getTeamHistories,
   getTeamStandings,
   latestRun,
   teamSlug,
@@ -63,7 +64,6 @@ export default async function Home() {
   const [
     stats,
     eras,
-    events,
     pace,
     standings,
     leaderboard,
@@ -72,10 +72,10 @@ export default async function Home() {
     records,
     kdSpread,
     seasonEras,
+    champions,
   ] = await Promise.all([
       getArchiveStats(),
       getEraSpans(),
-      getEventMarkers(),
       getPaceByMode(),
       getTeamStandings(eloRun.id, glickoRun?.id ?? eloRun.id),
       getPlayerLeaderboard(eraRun.id),
@@ -86,14 +86,15 @@ export default async function Home() {
       getSeriesRecords(),
       getSeasonKdSpread(eraRun.id),
       getSeasonEras(),
+      getSeasonChampions(),
     ]);
   const topTeams = standings.slice(0, 10);
   const topTeamIds = topTeams.map((t) => t.teamId);
-  // Both systems for the same teams: the explorer toggles between them, and
-  // only the Glicko run carries a rating deviation to shade.
-  const [timelines, glickoTimelines] = await Promise.all([
+  // Top-10 timelines feed the standings sparklines; full histories feed the chart.
+  const [timelines, eloHistory, glickoHistory] = await Promise.all([
     getEloTimelines(eloRun.id, topTeamIds),
-    glickoRun ? getEloTimelines(glickoRun.id, topTeamIds) : Promise.resolve([]),
+    getTeamHistories(eloRun.id),
+    glickoRun ? getTeamHistories(glickoRun.id) : Promise.resolve([]),
   ]);
   const sparkByTeam = new Map(timelines.map((tl) => [tl.teamId, tl.points]));
   const allSpark = timelines.flatMap((tl) => tl.points.map((p) => p.rating));
@@ -132,16 +133,15 @@ export default async function Home() {
 
       <section className="mt-14">
         <SectionHeader
-          title={`Team Elo, ${stats.span}`}
-          note={`after every rated series · top ${topTeams.length} teams by final rating`}
+          title={`Team ratings, ${stats.span}`}
+          note="after every rated series · every team, by game"
         />
         <div className="mt-4">
-          <EloExplorer
-            timelines={timelines}
-            glicko={glickoTimelines}
+          <EloHistory
+            elo={eloHistory}
+            glicko={glickoHistory}
             eras={eras}
-            events={events}
-            height={380}
+            champions={champions}
           />
         </div>
       </section>

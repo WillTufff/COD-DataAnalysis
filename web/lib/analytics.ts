@@ -936,6 +936,79 @@ export async function getEloTimelines(
   return teamIds.map((id) => byTeam.get(id)).filter((x): x is EloTimeline => !!x);
 }
 
+// Every team's rating path in one run, column-packed: t is epoch ms, r the
+// post-series rating, rd the rating deviation (null outside Glicko-2).
+export type TeamHistory = {
+  teamId: number;
+  team: string;
+  t: number[];
+  r: number[];
+  rd: (number | null)[];
+};
+
+export async function getTeamHistories(
+  runId: number,
+  minSeries = 5,
+): Promise<TeamHistory[]> {
+  const rows = await db
+    .select({
+      teamId: teamRatings.teamId,
+      team: teams.name,
+      playedAt: series.playedAt,
+      rating: teamRatings.ratingPost,
+      rd: teamRatings.ratingSd,
+    })
+    .from(teamRatings)
+    .innerJoin(series, eq(series.id, teamRatings.seriesId))
+    .innerJoin(teams, eq(teams.id, teamRatings.teamId))
+    .where(eq(teamRatings.runId, runId))
+    .orderBy(series.playedAt, series.id);
+
+  const byTeam = new Map<number, TeamHistory>();
+  for (const row of rows) {
+    if (!row.playedAt) continue;
+    let h = byTeam.get(row.teamId);
+    if (!h) {
+      h = { teamId: row.teamId, team: row.team, t: [], r: [], rd: [] };
+      byTeam.set(row.teamId, h);
+    }
+    h.t.push(row.playedAt.getTime());
+    h.r.push(Math.round(row.rating * 10) / 10);
+    h.rd.push(row.rd == null ? null : Math.round(row.rd));
+  }
+  return [...byTeam.values()].filter((h) => h.t.length >= minSeries);
+}
+
+// World champion per season, with the time of its last series at that
+// championship (the event's end date when its series are not loaded). Same
+// ring rule as the career-rank title predicates.
+export type SeasonChampion = { year: number; teamId: number; team: string; t: number };
+
+export async function getSeasonChampions(): Promise<SeasonChampion[]> {
+  const rows = await db.execute(sql`
+    SELECT se.year, ep.team_id, t.name AS team,
+           coalesce(max(s.played_at), max(e.end_date)::timestamptz) AS won_at
+    FROM event_placements ep
+    JOIN events e ON e.id = ep.event_id
+    JOIN seasons se ON se.id = e.season_id
+    JOIN teams t ON t.id = ep.team_id
+    LEFT JOIN series s ON s.event_id = e.id AND ep.team_id IN (s.team1_id, s.team2_id)
+    WHERE ep.placement_min = 1
+      AND coalesce(e.tier_type, '') NOT IN ('Qualifier', 'Showmatch')
+      AND e.tier IN ('1', '2')
+      AND e.name !~* '(qualif|relegation|play-in|regional final|regular season)'
+      AND e.name ~* '(call of duty|world league|cwl|cdl) championship'
+    GROUP BY se.year, ep.team_id, t.name
+    ORDER BY se.year
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    year: Number(r.year),
+    teamId: Number(r.team_id),
+    team: String(r.team),
+    t: new Date(String(r.won_at)).getTime(),
+  }));
+}
+
 export type LeaderboardRow = {
   playerId: number;
   handle: string;
