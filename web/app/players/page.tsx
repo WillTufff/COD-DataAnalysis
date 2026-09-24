@@ -47,6 +47,7 @@ const SORTS: Record<PlayerIndexSort, "asc" | "desc"> = {
   teams: "desc",
   rating: "desc",
   last_year: "desc",
+  earnings: "desc",
 };
 
 const DEFAULT_SORT: PlayerIndexSort = "rating";
@@ -302,7 +303,9 @@ export default async function PlayersPage({
         The team column shows the most recent roster stint. Best rating is the
         player&rsquo;s highest all-modes season rating at 30 maps or more, with
         the season it came from; players who never reached 30 maps in a season
-        show &ldquo;—&rdquo;. Per-season and per-metric leaderboards are on the{" "}
+        show &ldquo;—&rdquo;. Earnings are Liquipedia&rsquo;s career prize
+        money total, including events before the archive starts; a dash means
+        Liquipedia lists none. Per-season and per-metric leaderboards are on the{" "}
         <Link href="/stats" className="underline">
           stat explorer
         </Link>

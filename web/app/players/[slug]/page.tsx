@@ -21,6 +21,8 @@ import { RatingIntervals, overlaps } from "@/components/charts/RatingInterval";
 import { SkillBlend } from "@/components/charts/SkillBlend";
 import { PctlBar } from "@/components/PctlBar";
 import { Tabs } from "@/components/Tabs";
+import { EarningsByYear } from "@/components/charts/EarningsByYear";
+import { formatMoney, formatMoneyExact } from "@/lib/earnings";
 import {
   formatLeagueSpans,
   getAllPlayerSlugs,
@@ -34,6 +36,7 @@ import {
   getPlayerCareer,
   getCareerRankSeasons,
   getPlayerCareerRank,
+  getPlayerEarnings,
   getPlayerSkill,
   getPlayerSpans,
   getPlayerStints,
@@ -56,6 +59,7 @@ import {
   type PlayerCareerRow,
   type PlayerCareerRankSummary,
   type PlayerCareerRankSeason,
+  type PlayerEarnings,
   type PlayerSkillSeason,
   type PlayerStyle,
   type PlayerStylePoint,
@@ -1720,6 +1724,51 @@ function RoleSection({
   );
 }
 
+/** Liquipedia's prize money for the player, by calendar year. The career total
+ *  and the year columns are both printed as published, including years before
+ *  the archive starts. */
+function EarningsSection({
+  earnings,
+  playerYears,
+}: {
+  earnings: PlayerEarnings;
+  playerYears: number[];
+}) {
+  const yearSum = earnings.byYear.reduce((s, y) => s + y.amount, 0);
+  const differs =
+    earnings.total !== null && Math.abs(earnings.total - yearSum) >= 2;
+  return (
+    <section data-surface="earnings" className="mt-10">
+      <h2 className="lower-third">
+        Earnings by year
+        <span className="lt-note">prize money &middot; Liquipedia</span>
+      </h2>
+      {earnings.byYear.length > 0 && (
+        <div className="mt-4 border border-hairline bg-surface p-4">
+          <EarningsByYear
+            years={earnings.byYear}
+            coveredYears={playerYears}
+            loadedOn={earnings.loadedOn}
+          />
+        </div>
+      )}
+      <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+        Liquipedia&rsquo;s figures, by the calendar year the money was won.
+        They count every event Liquipedia lists, so they reach back past the
+        first season in this archive.
+        {differs && earnings.total !== null && (
+          <>
+            {" "}Liquipedia publishes a career total of{" "}
+            {formatMoneyExact(earnings.total)} and years that add up to{" "}
+            {formatMoneyExact(yearSum)}; both are shown as published.
+          </>
+        )}{" "}
+        See <Link href="/methodology/earnings">methodology</Link>.
+      </p>
+    </section>
+  );
+}
+
 function CareerTab({
   arcPoints,
   fingerprint,
@@ -1737,6 +1786,7 @@ function CareerTab({
   lastYear,
   allModes,
   playerInsights,
+  earnings,
 }: {
   arcPoints: ArcPoint[];
   fingerprint: FingerprintData | null;
@@ -1757,6 +1807,7 @@ function CareerTab({
   lastYear: number | null;
   allModes: SeasonAdjusted[];
   playerInsights: { id: number; kind: string; headline: string }[];
+  earnings: PlayerEarnings | null;
 }) {
   // The seasons this player is rated in at all: the population every
   // era-conditional surface below is measured against.
@@ -1781,6 +1832,10 @@ function CareerTab({
       </section>
 
       <CareerTotalsSection rows={careerTotals} />
+
+      {earnings && (
+        <EarningsSection earnings={earnings} playerYears={playerYears} />
+      )}
 
       <CareerRankSection
         summary={careerRank.summary}
@@ -2262,6 +2317,7 @@ export default async function PlayerPage({
     careerRank,
     roleYears,
     careerRankYears,
+    earnings,
   ] =
     await Promise.all([
       eraRun ? getPlayerAdjusted(player.id, eraRun.id) : Promise.resolve([]),
@@ -2293,6 +2349,7 @@ export default async function PlayerPage({
       careerRankRun
         ? getCareerRankSeasons(careerRankRun.id)
         : Promise.resolve([]),
+      getPlayerEarnings(player.id),
     ]);
   const skillYears = skillSeasons.map((s) => s.year);
   const metricCards = buildMetricCards(metricValues, metricCatalog, modeCatalog);
@@ -2353,6 +2410,16 @@ export default async function PlayerPage({
             ))}
           </>
         )}
+        {earnings?.total != null && earnings.total > 0 && (
+          <>
+            {" · "}
+            <span title={formatMoneyExact(earnings.total)}>
+              {formatMoney(earnings.total)}
+            </span>{" "}
+            career earnings{" "}
+            <span className="text-ink-muted">(Liquipedia)</span>
+          </>
+        )}
       </p>
 
       <div className="mt-8">
@@ -2382,6 +2449,7 @@ export default async function PlayerPage({
                   }
                   allModes={allModes}
                   playerInsights={playerInsights}
+                  earnings={earnings}
                 />
               ),
             },

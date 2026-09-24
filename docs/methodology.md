@@ -241,6 +241,30 @@ fill a gap. Missing data is stored as NULL, and every aggregate carries a
 `completeness` figure: the share of underlying maps that have full box scores. A
 per-season coverage report is generated after each ingest and published, not buried.
 
+### Earnings and prize money
+
+Player earnings are Liquipedia's figures from the LPDB API: a career total and a split
+by year. 700 of the 1,098 players in the database have one. Liquipedia counts every
+event it lists, so the figures reach back as far as 2004 and are shown in full. The
+player page draws the years this archive holds no maps for in a lighter shade.
+
+The split is by calendar year. A season runs from one winter to the next summer, so a
+year of earnings is not a season, and the chart is labelled by year. The current year is
+partial and carries the date the figures were loaded.
+
+For most players the total and the sum of the years agree to within a dollar. For six
+(Bance, Goonjar, Joee, Shockz, Zed and Tommey) they differ by two. The gap is in
+Liquipedia's own data, and both figures are shown as published.
+
+Team prize money is summed from `event_placements.prize`, one prize per team per event.
+The `teams.earnings` column is loaded and not read by the site. Liquipedia keeps one
+page per franchise under its current name, so its team figure is the whole lineage's
+money and lands on the newest brand: FaZe Vegas carries $8.0M and Atlanta FaZe nothing.
+Summed placements belong to the name that won them, so a team page reports prize money
+in tracked events under that name. It is not an organisation's lifetime total.
+Placement prizes come from Liquipedia, and for some 2013-2017 events from the Call of
+Duty Esports Wiki.
+
 ## Tier 1: Era adjustment (shipped)
 
 Everything else stands on this. Raw stats are not comparable across titles, because a

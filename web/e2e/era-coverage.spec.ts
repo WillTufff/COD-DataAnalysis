@@ -236,3 +236,16 @@ test.describe("rating surfaces hold rows", () => {
     await expect(main).toContainText(/q 0\.\d\d · retracted/);
   });
 });
+
+test.describe("prize money follows the brand that won it", () => {
+  test.skip(SMOKE, "smoke mode: the seeded database has no placements");
+
+  for (const slug of ["atlanta-faze", "faze-vegas"]) {
+    test(`/teams/${slug} carries its own prize money`, async ({ page }) => {
+      await page.goto(`/teams/${slug}`);
+      const section = page.locator('[data-surface="prize-money"]');
+      await expect(section).toBeVisible();
+      expect(await section.locator("tbody tr").count()).toBeGreaterThan(0);
+    });
+  }
+});

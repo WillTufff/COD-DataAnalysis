@@ -5,6 +5,7 @@ import { type Column, DataTable } from "@/components/table/DataTable";
 import type { SortState } from "@/components/table/tableState";
 import type { Per } from "@/lib/paging";
 import type { PlayerIndexRow } from "@/lib/analytics";
+import { formatMoney, formatMoneyExact } from "@/lib/earnings";
 import { teamSlug } from "@/lib/slug";
 
 const NUM =
@@ -103,6 +104,21 @@ const COLUMNS: Column<PlayerIndexRow>[] = [
           )}
           <span className="ml-1 text-ink-muted">{r.bestRatingYear}</span>
         </>
+      ) : (
+        "—"
+      ),
+  },
+  {
+    id: "earnings",
+    header: "Earnings",
+    align: "right",
+    cellClassName: NUM,
+    sortable: true,
+    sortDir: "desc",
+    sortValue: (r) => (r.earnings !== null && r.earnings > 0 ? r.earnings : null),
+    render: (r) =>
+      r.earnings !== null && r.earnings > 0 ? (
+        <span title={formatMoneyExact(r.earnings)}>{formatMoney(r.earnings)}</span>
       ) : (
         "—"
       ),

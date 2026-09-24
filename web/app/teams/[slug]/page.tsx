@@ -21,6 +21,7 @@ import {
   getTeamModeSplits,
   getTeamModeStrength,
   getTeamPlacements,
+  getTeamPrizeBySeason,
   getTeamSpans,
   getTeamStints,
   getTeamStandings,
@@ -32,6 +33,7 @@ import {
   type TeamStint,
   getModeCatalog,
 } from "@/lib/analytics";
+import { formatMoney, formatMoneyExact } from "@/lib/earnings";
 import { modeLabel } from "@/lib/modes";
 
 type StyleRow = {
@@ -141,6 +143,7 @@ export default async function TeamPage({
     teamMetrics,
     metricCatalog,
     modeCatalog,
+    prizeBySeason,
   ] = await Promise.all([
       getTeamStandings(eloRun.id, glickoRun?.id ?? eloRun.id),
       getSeriesRecords(),
@@ -156,6 +159,7 @@ export default async function TeamPage({
       metricRun ? getTeamMetrics(metricRun.id, team.id) : Promise.resolve([]),
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
       getModeCatalog(),
+      getTeamPrizeBySeason(team.id),
     ]);
   // The same team under Glicko-2, so the trajectory chart can shade its RD.
   const glickoTimelines = glickoRun
@@ -176,6 +180,7 @@ export default async function TeamPage({
   const rank = standings.findIndex((s) => s.teamId === team.id) + 1;
   const record = records.get(team.id);
   const wins = placements.filter((p) => p.placementMin === 1).length;
+  const prizeTotal = prizeBySeason.reduce((s, r) => s + r.prize, 0);
   const podiums = placements.filter(
     (p) => p.placementMin !== null && p.placementMin <= 3,
   ).length;
@@ -266,6 +271,64 @@ export default async function TeamPage({
           <div className="mt-4 border border-hairline bg-surface p-4">
             <PlacementTimeline placements={placements} />
           </div>
+        </section>
+      )}
+
+      {prizeTotal > 0 && (
+        <section data-surface="prize-money" className="mt-12">
+          <h2 className="lower-third">
+            Prize money
+            <span className="lt-note">in tracked events</span>
+          </h2>
+          <p className="mt-3 text-sm text-ink-secondary">
+            <span
+              className="font-mono text-2xl text-ink"
+              title={formatMoneyExact(prizeTotal)}
+            >
+              {formatMoney(prizeTotal)}
+            </span>{" "}
+            won by {team.name} across{" "}
+            {prizeBySeason.reduce((s, r) => s + r.paidEvents, 0)} paid events
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full max-w-2xl text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-4 font-normal">Season</th>
+                  <th className="py-2 pr-4 text-right font-normal">Events</th>
+                  <th className="py-2 pr-4 text-right font-normal">Paid</th>
+                  <th className="py-2 text-right font-normal">Prize money</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prizeBySeason.map((r) => (
+                  <tr key={r.seasonId} className="border-b border-hairline/60">
+                    <td className="py-1.5 pr-4">
+                      {r.year} {r.title}
+                      <span className="ml-1.5 text-xs text-ink-muted">{r.league}</span>
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.events}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                      {r.paidEvents}
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular-nums">
+                      {r.prize > 0 ? formatMoneyExact(r.prize) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 max-w-3xl text-xs leading-relaxed text-ink-muted">
+            The sum of the prize listed for each placement on record under this
+            name, from Liquipedia or, for some 2013&ndash;2017 events, the Call
+            of Duty Esports Wiki. A franchise that rebranded keeps each
+            name&rsquo;s winnings on that name&rsquo;s page, so this is not the
+            organisation&rsquo;s lifetime total. See{" "}
+            <Link href="/methodology/earnings">methodology</Link>.
+          </p>
         </section>
       )}
 

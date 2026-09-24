@@ -5567,6 +5567,50 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
       </section>
       );
 
+      const secEarnings = (
+      <section id="earnings" className="mt-12">
+        <h2 className="font-display text-2xl font-semibold uppercase">
+          Earnings and prize money
+        </h2>
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink-secondary">
+          <p>
+            Player earnings are Liquipedia&rsquo;s figures, loaded through the
+            LPDB API: a career total and a split by year. 700 of the 1,098
+            players in the database have one. Liquipedia counts every event it
+            lists, so the figures reach back as far as 2004 and are shown in
+            full. The player page draws the years this archive holds no maps
+            for in a lighter shade, since there are no box scores behind them.
+          </p>
+          <p>
+            The split is by <strong className="text-ink">calendar year</strong>.
+            A Call of Duty season runs from one winter to the next summer, so a
+            year of earnings is not a season and the chart is labelled by year.
+            The current year is partial, and its column carries the date the
+            figures were loaded.
+          </p>
+          <p>
+            For most players the total and the sum of the years agree to within
+            a dollar. For six (Bance, Goonjar, Joee, Shockz, Zed and Tommey)
+            they differ by two. That gap is in Liquipedia&rsquo;s own data. Both
+            figures are shown as published and neither is adjusted to match.
+          </p>
+          <p>
+            Team prize money is summed from event placements, one prize per
+            team per event. Liquipedia also publishes a team earnings figure,
+            and this site does not use it. Liquipedia keeps one page per
+            franchise under its current name, so that figure is the whole
+            lineage&rsquo;s money and lands on the newest brand: FaZe Vegas
+            would show $8.0M and Atlanta FaZe nothing. Summed placements belong
+            to the name that won them. A team page therefore reports prize
+            money <strong className="text-ink">in tracked events</strong> under
+            that name, which is not an organisation&rsquo;s lifetime total.
+            Placement prizes come from Liquipedia, and for some 2013&ndash;2017
+            events from the Call of Duty Esports Wiki.
+          </p>
+        </div>
+      </section>
+      );
+
       const secAttribution = (
       <section id="attribution" className="mt-12">
         <h2 className="font-display text-2xl font-semibold uppercase">
@@ -5689,6 +5733,7 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
     "round-win-probability": secRoundWinProbability,
     "segment-win-probability": secSegmentWinProbability,
     metrics: secMetrics,
+    earnings: secEarnings,
     attribution: secAttribution,
   };
 }

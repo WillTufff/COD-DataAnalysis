@@ -3,6 +3,12 @@
 // versioned snapshot and never mix runs.
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import {
+  type EarningsYear,
+  type SeasonPrize,
+  parseEarningsByYear,
+  sumPrizeBySeason,
+} from "@/lib/earnings";
 import type { SeasonEra } from "@/lib/eras";
 import type { ModeCatalog } from "@/lib/modes";
 import { playerSlug, teamSlug } from "@/lib/slug";
@@ -537,6 +543,7 @@ export type PlayerIndexRow = {
   bestRatingSd: number | null; // posterior sd of that rating
   bestRatingYear: number | null;
   bestRatingTitle: string | null;
+  earnings: number | null; // Liquipedia career total
 };
 
 export type PlayerIndexSort =
@@ -545,7 +552,8 @@ export type PlayerIndexSort =
   | "seasons"
   | "teams"
   | "rating"
-  | "last_year";
+  | "last_year"
+  | "earnings";
 
 export type PlayerIndexQuery = {
   q?: string; // handle substring
@@ -562,6 +570,7 @@ const PLAYER_INDEX_SORT_COLS: Record<PlayerIndexSort, string> = {
   teams: "r.team_count",
   rating: "b.rating",
   last_year: "c.last_year",
+  earnings: "p.earnings",
 };
 
 /** Matching players, for sizing the pager before the page itself is fetched. */
@@ -629,7 +638,8 @@ export async function queryPlayerIndex(
     SELECT p.id AS player_id, p.handle,
            c.maps, c.seasons, c.first_year, c.last_year,
            r.team_count, r.latest_team,
-           b.rating, b.rating_sd, b.rating_year, b.rating_title
+           b.rating, b.rating_sd, b.rating_year, b.rating_title,
+           p.earnings
     FROM players p
     JOIN career c ON c.player_id = p.id
     LEFT JOIN rosters r ON r.player_id = p.id
@@ -653,6 +663,7 @@ export async function queryPlayerIndex(
     bestRatingSd: r.rating_sd === null ? null : Number(r.rating_sd),
     bestRatingYear: r.rating_year === null ? null : Number(r.rating_year),
     bestRatingTitle: r.rating_title === null ? null : String(r.rating_title),
+    earnings: r.earnings === null ? null : Number(r.earnings),
   }));
 }
 
@@ -665,6 +676,44 @@ export async function getPlayerBySlug(slug: string) {
     .where(sql`lower(${players.handle}) = ${slug}`)
     .limit(1);
   return rows[0] ?? null;
+}
+
+export type PlayerEarnings = {
+  /** Liquipedia's career total. Null when it publishes years but no total. */
+  total: number | null;
+  byYear: EarningsYear[];
+  /** Date of the newest Liquipedia load, which bounds the current year. */
+  loadedOn: string | null;
+};
+
+/** Liquipedia earnings as published. The total and the year sum are both
+ *  shown and never reconciled. Null for a player with no earnings. */
+export async function getPlayerEarnings(
+  playerId: number,
+): Promise<PlayerEarnings | null> {
+  const [rows, loads] = await Promise.all([
+    db
+      .select({
+        earnings: players.earnings,
+        earningsByYear: players.earningsByYear,
+      })
+      .from(players)
+      .where(eq(players.id, playerId))
+      .limit(1),
+    db.execute(sql`
+      SELECT max(started_at)::date::text AS loaded_on
+      FROM ingest_runs WHERE kind = 'lpdb' AND status = 'success'
+    `),
+  ]);
+  const row = rows[0];
+  if (!row) return null;
+  const total = row.earnings === null ? null : Number(row.earnings);
+  const byYear = parseEarningsByYear(row.earningsByYear);
+  if ((total === null || total <= 0) && !byYear.some((y) => y.amount > 0)) {
+    return null;
+  }
+  const loaded = (loads as unknown as { loaded_on: string | null }[])[0];
+  return { total, byYear, loadedOn: loaded?.loaded_on ?? null };
 }
 
 /** Every player slug, for prerendering the player pages at build time. */
@@ -1437,6 +1486,30 @@ export async function getTeamPlacements(teamId: number): Promise<PlacementRow[]>
     placementMax: r.placementMax === null ? null : Number(r.placementMax),
     prize: r.prize === null ? null : Number(r.prize),
   }));
+}
+
+/** Prize money this team won in the events on record, per season. Read from
+ *  placements and not `teams.earnings`, which Liquipedia keeps per franchise
+ *  and the loader attaches to its newest brand. */
+export async function getTeamPrizeBySeason(
+  teamId: number,
+): Promise<SeasonPrize[]> {
+  const rows = await db
+    .select({
+      seasonId: seasons.id,
+      year: seasons.year,
+      title: titles.shortName,
+      league: seasons.league,
+      prize: eventPlacements.prize,
+    })
+    .from(eventPlacements)
+    .innerJoin(events, eq(events.id, eventPlacements.eventId))
+    .innerJoin(seasons, eq(seasons.id, events.seasonId))
+    .innerJoin(titles, eq(titles.id, seasons.titleId))
+    .where(eq(eventPlacements.teamId, teamId));
+  return sumPrizeBySeason(
+    rows.map((r) => ({ ...r, prize: r.prize === null ? null : Number(r.prize) })),
+  );
 }
 
 export type TeamStint = {

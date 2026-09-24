@@ -66,6 +66,7 @@ export const TOC: TocTier[] = [
     label: "Reference",
     sections: [
       { id: "validation", title: "Four checks the ratings could have failed" },
+      { id: "earnings", title: "Earnings and prize money" },
       { id: "attribution", title: "Data & attribution" },
     ],
   },
