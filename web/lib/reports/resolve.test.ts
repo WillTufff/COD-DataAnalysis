@@ -180,6 +180,32 @@ describe("resolveReport", () => {
   });
 });
 
+describe("resolveReport gate and view", () => {
+  it("gates unless small samples are on or a row filter is set", async () => {
+    expect((await resolveReport(1, { metrics: "kd" }, CATALOG)).gateActive).toBe(true);
+    expect((await resolveReport(1, { metrics: "kd", all: "1" }, CATALOG)).gateActive).toBe(false);
+    expect((await resolveReport(1, { metrics: "kd", players: "scump" }, CATALOG)).gateActive).toBe(false);
+    expect((await resolveReport(1, { metrics: "kd", teams: "optic" }, CATALOG)).gateActive).toBe(false);
+  });
+
+  it("ignores a player filter on a team report when deciding the gate", async () => {
+    const teamCatalog = [entry("map_win_rate")];
+    const r = await resolveReport(
+      1,
+      { entity: "teams", metrics: "map_win_rate", players: "scump" },
+      teamCatalog,
+    );
+    expect(r.gateActive).toBe(true);
+  });
+
+  it("carries the view into the query the export sorts by", async () => {
+    const r = await resolveReport(1, { metrics: "kd", view: "pctl" }, CATALOG);
+    expect(r.view).toBe("pctl");
+    expect(r.query.view).toBe("pctl");
+    expect((await resolveReport(1, { metrics: "kd", view: "bogus" }, CATALOG)).view).toBe("value");
+  });
+});
+
 // The page and the export route both go through this, so a bare visit and a
 // bare download cannot resolve to different reports.
 describe("resolveReportForUrl", () => {

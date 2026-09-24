@@ -6,6 +6,7 @@ import { useTableState } from "@/components/table/tableState";
 import type { Per } from "@/lib/paging";
 import type { FeedItem } from "@/lib/analytics";
 import { kindLabel } from "@/lib/insightKinds";
+import { ordinal } from "@/lib/ordinal";
 
 // Insight details carry the mode as its display label; /stats filters by slug.
 const MODE_SLUG: Record<string, string> = {
@@ -69,7 +70,7 @@ function Chips({ detail }: { detail: Record<string, unknown> }) {
     chips.push(`rest ${detail.rest_vs_slay.toFixed(1)}× slaying`);
   if (typeof detail.n_maps === "number") chips.push(`${detail.n_maps} maps`);
   if (typeof detail.pctl === "number")
-    chips.push(`${Math.round(detail.pctl * 100)}th pctl`);
+    chips.push(`${ordinal(Math.round(detail.pctl * 100))} pctl`);
   if (typeof detail.z === "number")
     chips.push(`${detail.z > 0 ? "+" : ""}${detail.z.toFixed(1)}σ`);
   if (typeof detail.n === "number") chips.push(`n=${Math.round(detail.n)}`);

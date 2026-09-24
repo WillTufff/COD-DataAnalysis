@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { ordinal } from "@/lib/ordinal";
 
 export type ArcPoint = {
   year: number;
@@ -113,7 +114,7 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
               fill="var(--ink)"
               className="font-mono"
             >
-              {Math.round(p.kdPctl * 100)}th
+              {ordinal(Math.round(p.kdPctl * 100))}
             </text>
             {/* x tick: year + title annotation (cohort boundary) */}
             <text
@@ -175,7 +176,7 @@ export function CareerArc({ points }: { points: ArcPoint[] }) {
               className="font-mono"
             >
               z {points[hover].kdZ >= 0 ? "+" : ""}
-              {points[hover].kdZ.toFixed(2)} · {Math.round(points[hover].kdPctl * 100)}th
+              {points[hover].kdZ.toFixed(2)} · {ordinal(Math.round(points[hover].kdPctl * 100))}
               pctl
             </text>
             <text

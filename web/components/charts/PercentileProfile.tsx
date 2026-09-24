@@ -1,3 +1,5 @@
+import { ordinal } from "@/lib/ordinal";
+
 // Percentile panel: one labeled 0–100 track per stat, filled to the subject's
 // cohort percentile. The accent marks the subject, as in PctlBar; the midpoint
 // tick is the cohort median.
@@ -23,7 +25,7 @@ export function PercentileProfile({ stats }: { stats: ProfileStat[] }) {
               className="h-3.5 min-w-0 flex-1"
               preserveAspectRatio="none"
               role="img"
-              aria-label={`${s.label}: ${pct}th percentile`}
+              aria-label={`${s.label}: ${ordinal(pct)} percentile`}
             >
               <rect x={0} y={5.5} width={300} height={3} fill="var(--baseline)" />
               <rect x={149.5} y={2.5} width={1} height={9} fill="var(--ink-muted)" />
@@ -37,7 +39,7 @@ export function PercentileProfile({ stats }: { stats: ProfileStat[] }) {
               <circle cx={Math.max(4, Math.min(296, pct * 3))} cy={7} r={4} fill="var(--accent)" />
             </svg>
             <span className="w-10 flex-none text-right font-mono text-xs tabular-nums">
-              {pct}th
+              {ordinal(pct)}
             </span>
             <span className="w-14 flex-none text-right font-mono text-xs tabular-nums text-ink-secondary">
               {s.value}

@@ -22,6 +22,8 @@ import {
   queryTeamReport,
   getModeCatalog,
 } from "@/lib/analytics";
+import { categoryLabel } from "@/lib/reports/labels";
+import { gateReportRows } from "@/lib/reports/rows";
 import { REPORT_PRESETS } from "@/lib/reports/presets";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import {
@@ -35,22 +37,6 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Report builder" };
 
 const TIER_ORDER = ["gold", "gold-fun", "standard", "fun"];
-
-const CATEGORY_LABELS: Record<string, string> = {
-  team: "Team",
-  slaying: "Slaying & engagement",
-  discipline: "Discipline & survival",
-  trades: "Trades & entries",
-  advantage: "Man-advantage",
-  clutch: "Clutch",
-  hardpoint: "Hardpoint",
-  snd: "Search & Destroy",
-  control: "Control",
-  ctf: "Capture the Flag",
-  uplink: "Uplink",
-  streaks: "Multikills & streaks",
-  scorestreaks: "Scorestreaks",
-};
 
 /** Gold tier first, then by category, so the picker leads with the good stuff. */
 function sortMetrics(metrics: MetricCatalogEntry[]): MetricCatalogEntry[] {
@@ -109,7 +95,7 @@ export default async function StatsPage({
   const metricOptions: MetricOption[] = metrics.map((m) => ({
     key: m.key,
     label: m.label,
-    category: m.category,
+    category: categoryLabel(m.category),
     gold: m.tier.startsWith("gold"),
   }));
 
@@ -177,10 +163,7 @@ export default async function StatsPage({
         </p>
         {entity === "players" && <div className="mt-8">{presetSection}</div>}
         <div className="mt-8 flex items-center gap-3 border-t border-hairline pt-4 text-sm text-ink-secondary print:hidden">
-          <AddFirstColumn
-            catalog={metricOptions}
-            categoryLabels={CATEGORY_LABELS}
-          />
+          <AddFirstColumn catalog={metricOptions} />
           <span>or add a metric column to start from scratch.</span>
         </div>
       </main>
@@ -193,15 +176,20 @@ export default async function StatsPage({
     teamSlugs,
     modeSlug,
     qualifiedOnly,
+    gateActive,
+    view,
     sort,
     dir,
     defaultSortKey,
     defaultDir,
   } = resolved;
+  // Rows come back ungated: the table applies the qualified gate to whichever
+  // column it is sorted on, which a header click can change without a request.
+  const ungated = { ...resolved.query, qualifiedOnly: false };
   const [{ columns, rows }, scopePlayers, scopeTeams] = await Promise.all([
     entity === "teams"
-      ? queryTeamReport(run.id, resolved.query, selectedEntries)
-      : queryReport(run.id, resolved.query, selectedEntries),
+      ? queryTeamReport(run.id, ungated, selectedEntries)
+      : queryReport(run.id, ungated, selectedEntries),
     // The Players token has no place on a team report — the rows are teams.
     entity === "teams" ? Promise.resolve([]) : getReportPlayers(run.id),
     getReportTeams(),
@@ -255,7 +243,7 @@ export default async function StatsPage({
         metric_layer v{run.version}
       </p>
 
-      {rows.length === 0 ? (
+      {gateReportRows(rows, sort, resolved.selected, gateActive).length === 0 ? (
         <p className="mt-8 text-sm text-ink-secondary">
           {playerSlugs.length > 0 || teamSlugs.length > 0
             ? `No rows for ${[
@@ -276,10 +264,9 @@ export default async function StatsPage({
           columns={columns}
           rows={rows}
           catalog={metricOptions}
-          categoryLabels={CATEGORY_LABELS}
-          modeCatalog={modeCatalog}
-          showMode={modeSlug === undefined}
           qualifiedOnly={qualifiedOnly}
+          gateActive={gateActive}
+          initialView={view}
           initialPer={parsePer(sp)}
           initialPage={parsePage(sp)}
           initialSort={{ id: sort, dir }}

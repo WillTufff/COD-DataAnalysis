@@ -27,6 +27,7 @@ function matrix(overrides: Partial<ExportMatrix> = {}): ExportMatrix {
       cohort: { seasons: [2018], mode: "hardpoint", players: "all", teams: "all" },
       sort: "kd",
       dir: "desc",
+      view: "value",
       qualifiedOnly: true,
       detail: false,
       rowCount: 2,

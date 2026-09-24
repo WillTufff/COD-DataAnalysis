@@ -8,7 +8,6 @@ import {
   latestRun,
   queryReport,
   queryTeamReport,
-  getModeCatalog,
 } from "@/lib/analytics";
 import { buildExportMatrix, cohortSlug } from "@/lib/reports/export";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
@@ -88,7 +87,6 @@ export async function GET(request: Request) {
     columns,
     rows,
     { model: "metric_layer", version: run.version },
-    await getModeCatalog(),
   );
 
   const { body, contentType, ext } = serialize(matrix);

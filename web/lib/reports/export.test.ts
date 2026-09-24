@@ -5,17 +5,6 @@ import type { ResolvedReport } from "./resolve";
 
 const RUN = { model: "metric_layer", version: "2.1.0" };
 
-// The mode catalog the site reads from `game_modes`, as a fixture: the export's
-// Mode column is a lookup against it, and a slug it lacks must survive as itself.
-const MODES = {
-  order: ["hardpoint", "search-and-destroy", "overload"],
-  names: {
-    hardpoint: "Hardpoint",
-    "search-and-destroy": "Search & Destroy",
-    overload: "Overload",
-  },
-};
-
 function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
   return {
     entity: "players",
@@ -28,8 +17,10 @@ function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
     teamSlugs: [],
     modeSlug: undefined,
     qualifiedOnly: true,
+    gateActive: true,
     sort: "kd",
     dir: "desc",
+    view: "value",
     defaultSortKey: "kd",
     defaultDir: "desc",
     query: { metrics: ["kd"], qualifiedOnly: true, sort: "kd", dir: "desc" },
@@ -62,44 +53,44 @@ function row(overrides: Partial<ReportRow> = {}): ReportRow {
 }
 
 describe("buildExportMatrix", () => {
-  it("adds a Mode column only for all-modes cohorts, with display labels", () => {
-    const all = buildExportMatrix(resolved(), [kdColumn], [row()], RUN, MODES);
-    expect(all.headers).toEqual(["Player", "Season", "Mode", "K/D"]);
-    expect(all.rows[0]).toEqual(["Scump", "2018 WWII", "Hardpoint", 1.13]);
+  it("leads with player and season, and names the mode only in the meta", () => {
+    const all = buildExportMatrix(resolved(), [kdColumn], [row({ mode: null })], RUN);
+    expect(all.headers).toEqual(["Player", "Season", "K/D"]);
+    expect(all.rows[0]).toEqual(["Scump", "2018 WWII", 1.13]);
+    expect(all.meta.cohort.mode).toBe("all");
 
     const one = buildExportMatrix(
       resolved({ modeSlug: "hardpoint" }),
       [kdColumn],
       [row()],
       RUN,
-      MODES,
     );
     expect(one.headers).toEqual(["Player", "Season", "K/D"]);
+    expect(one.meta.cohort.mode).toBe("hardpoint");
   });
 
-  it("labels an all-modes row 'All' and a missing cell null", () => {
+  it("writes a missing cell as null", () => {
     const m = buildExportMatrix(
       resolved(),
       [kdColumn],
       [row({ mode: null, cells: {} })],
       RUN,
-      MODES,
     );
-    expect(m.rows[0]).toEqual(["Scump", "2018 WWII", "All", null]);
+    expect(m.rows[0]).toEqual(["Scump", "2018 WWII", null]);
   });
 
   it("caps rows at MAX_EXPORT_ROWS and records the truncation", () => {
     const many = Array.from({ length: MAX_EXPORT_ROWS + 1 }, (_, i) =>
       row({ playerId: i }),
     );
-    const m = buildExportMatrix(resolved(), [kdColumn], many, RUN, MODES);
+    const m = buildExportMatrix(resolved(), [kdColumn], many, RUN);
     expect(m.rows).toHaveLength(MAX_EXPORT_ROWS);
     expect(m.meta.truncated).toBe(true);
     expect(m.meta.rowCount).toBe(MAX_EXPORT_ROWS);
   });
 
   it("records empty filters as 'all' in the cohort meta", () => {
-    const m = buildExportMatrix(resolved(), [kdColumn], [row()], RUN, MODES);
+    const m = buildExportMatrix(resolved(), [kdColumn], [row()], RUN);
     expect(m.meta.cohort).toEqual({
       seasons: "all",
       mode: "all",
@@ -111,7 +102,6 @@ describe("buildExportMatrix", () => {
       [kdColumn],
       [row()],
       RUN,
-      MODES,
     );
     expect(picked.meta.cohort.seasons).toEqual([2018]);
     expect(picked.meta.cohort.players).toEqual(["scump"]);

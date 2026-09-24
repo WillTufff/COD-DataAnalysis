@@ -13,6 +13,11 @@ import type { SeasonEra } from "@/lib/eras";
 import type { ModeCatalog } from "@/lib/modes";
 import { playerSlug, teamSlug } from "@/lib/slug";
 import {
+  type ReportView,
+  gateReportRows,
+  sortReportRows,
+} from "@/lib/reports/rows";
+import {
   backtests,
   eventPlacements,
   events,
@@ -2057,6 +2062,7 @@ export type ReportQuery = {
   qualifiedOnly: boolean; // gate rows on the SORT metric's qualified flag
   sort: string; // a metric key, or "player"
   dir: "asc" | "desc";
+  view?: ReportView; // which cell field the sort reads; default the value
 };
 
 /**
@@ -2170,12 +2176,9 @@ export async function queryReport(
 }
 
 /**
- * The report's shared tail, after the pivot and any row filters. "Qualified
- * only" gates each row on the sort column's cell: a row without a qualified
- * value in the column being ranked has no business being ranked. Other columns
- * keep their cells (greyed when below their own minimum). When sorting by name
- * there is no metric to gate on, so the flag is a no-op. An explicit row
- * filter (`filtered`) suspends the gate too — asking for Scump, or for OpTic,
+ * The report's shared tail, after the pivot and any row filters: the
+ * qualified gate on the sort column, then the sort itself. An explicit row
+ * filter (`filtered`) suspends the gate — asking for Scump, or for OpTic,
  * means seeing those rows (cells still grey themselves), not a table missing
  * whoever fell short of one column's sample floor.
  */
@@ -2185,26 +2188,8 @@ function gateAndSortReportRows(
   keys: string[],
   filtered: boolean,
 ): ReportRow[] {
-  const sortIsMetric = keys.includes(q.sort);
-  if (q.qualifiedOnly && sortIsMetric && !filtered) {
-    rows = rows.filter((row) => row.cells[q.sort]?.qualified === true);
-  }
-
-  const factor = q.dir === "asc" ? 1 : -1;
-  rows.sort((a, b) => {
-    if (!sortIsMetric) return factor * a.handle.localeCompare(b.handle);
-    const av = a.cells[q.sort]?.value ?? null;
-    const bv = b.cells[q.sort]?.value ?? null;
-    // Absent values sink to the bottom regardless of direction, then name
-    // breaks ties so paging is stable.
-    if (av === null && bv === null) return a.handle.localeCompare(b.handle);
-    if (av === null) return 1;
-    if (bv === null) return -1;
-    if (av === bv) return a.handle.localeCompare(b.handle);
-    return factor * (av - bv);
-  });
-
-  return rows;
+  const gated = gateReportRows(rows, q.sort, keys, q.qualifiedOnly && !filtered);
+  return sortReportRows(gated, q.sort, q.dir, q.view ?? "value", keys);
 }
 
 /**

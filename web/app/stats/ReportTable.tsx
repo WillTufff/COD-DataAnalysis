@@ -2,15 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { PctlBar } from "@/components/PctlBar";
 import { type Column, DataTable } from "@/components/table/DataTable";
 import type { Per } from "@/lib/paging";
 import type { SortState } from "@/components/table/tableState";
 import type { ReportColumn, ReportRow } from "@/lib/analytics";
 import type { ReportEntity } from "@/lib/reports/resolve";
+import {
+  type ReportView,
+  gateReportRows,
+  sortReading,
+} from "@/lib/reports/rows";
 import { AddColumnMenu, type MetricOption } from "./AddColumnMenu";
-import { type CellMode, ReportToolbar } from "./ReportToolbar";
-import { type ModeCatalog, modeLabel } from "./cohortLabel";
+import { ReportToolbar } from "./ReportToolbar";
 import { useReportUrl } from "./reportUrl";
 
 // Mirrors the single-metric table's formatting: shares render as percentages,
@@ -26,19 +31,19 @@ function formatValue(v: number, unit: string): string {
 function Cell({
   cell,
   col,
-  mode,
+  view,
 }: {
   cell: ReportRow["cells"][string] | undefined;
   col: ReportColumn;
-  mode: CellMode;
+  view: ReportView;
 }) {
   // An absent cell — this column does not cover the row's season/mode.
   if (!cell) return <span className="text-ink-muted">—</span>;
 
   let body: React.ReactNode;
-  if (mode === "pctl") {
+  if (view === "pctl") {
     body = cell.pctl !== null ? <PctlBar pctl={cell.pctl} /> : "—";
-  } else if (mode === "z") {
+  } else if (view === "z") {
     body =
       cell.z !== null ? `${cell.z >= 0 ? "+" : ""}${cell.z.toFixed(2)}σ` : "—";
   } else {
@@ -81,10 +86,9 @@ export function ReportTable({
   columns,
   rows,
   catalog,
-  categoryLabels,
-  modeCatalog,
-  showMode,
   qualifiedOnly,
+  gateActive,
+  initialView,
   initialPer,
   initialPage,
   initialSort,
@@ -94,17 +98,49 @@ export function ReportTable({
   columns: ReportColumn[];
   rows: ReportRow[];
   catalog: MetricOption[];
-  categoryLabels: Record<string, string>;
-  modeCatalog: ModeCatalog;
-  showMode: boolean;
   qualifiedOnly: boolean;
+  gateActive: boolean;
+  initialView: ReportView;
   initialPer: Per;
   initialPage: number;
   initialSort: SortState;
   defaultSort: SortState;
 }) {
   const push = useReportUrl();
-  const [cellMode, setCellMode] = useState<CellMode>("value");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [view, setViewState] = useState<ReportView>(initialView);
+
+  // The view only changes how cells read and sort, so it rewrites the URL in
+  // place rather than asking the server for the same rows again.
+  const setView = useCallback(
+    (next: ReportView) => {
+      setViewState(next);
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "value") params.delete("view");
+      else params.set("view", next);
+      params.sort();
+      const qs = params.toString();
+      window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
+    },
+    [pathname, searchParams],
+  );
+
+  // The sort the table is showing. A header click re-sorts on the client, and
+  // the qualified gate follows it here, so the rows on screen are the rows the
+  // same URL gives on a reload or an export. A new server sort (after a column
+  // edit) replaces a client one.
+  const serverSortKey = initialSort ? `${initialSort.id}:${initialSort.dir}` : "";
+  const [clientSort, setClientSort] = useState<{
+    seed: string;
+    sort: SortState;
+  } | null>(null);
+  const activeSort =
+    clientSort && clientSort.seed === serverSortKey ? clientSort.sort : initialSort;
+  const onSortChange = useCallback(
+    (sort: SortState) => setClientSort({ seed: serverSortKey, sort }),
+    [serverSortKey],
+  );
   // The column being dragged, and the in-flight column order it is being
   // dragged through. The preview reorders live under the pointer; the URL is
   // only rewritten on release. Each preview remembers which `selected` it was
@@ -119,6 +155,10 @@ export function ReportTable({
   const orderRef = useRef<string[] | null>(null);
 
   const selected = useMemo(() => columns.map((c) => c.key), [columns]);
+  const shownRows = useMemo(
+    () => gateReportRows(rows, activeSort?.id ?? "player", selected, gateActive),
+    [rows, activeSort, selected, gateActive],
+  );
   const byKey = useMemo(
     () => new Map(columns.map((c) => [c.key, c])),
     [columns],
@@ -152,14 +192,14 @@ export function ReportTable({
       // the URL makes the link claim a column it no longer has. Dropping the
       // sort here is not guessing — removing the ranked column is what made it
       // stale.
-      const staleSort = initialSort?.id === key;
+      const staleSort = activeSort?.id === key;
       push({
         metrics: next.length > 0 ? next.join(",") : null,
         preset: null,
         ...(staleSort ? { sort: null, dir: null } : {}),
       });
     },
-    [selected, push, initialSort],
+    [selected, push, activeSort],
   );
 
   /** Lift a column out of the order and drop it back at `to`. */
@@ -252,14 +292,6 @@ export function ReportTable({
         render: (r) => `${r.year} ${r.title}`,
       },
     ];
-    if (showMode) {
-      cols.push({
-        id: "mode",
-        header: "Mode",
-        cellClassName: "text-ink-secondary",
-        render: (r) => modeLabel(modeCatalog, r.mode, "All"),
-      });
-    }
     for (const key of order) {
       const col = byKey.get(key);
       if (!col) continue;
@@ -317,19 +349,17 @@ export function ReportTable({
         sortable: true,
         // Best-first on first click: descending when higher is better.
         sortDir: col.higherIsBetter ? "desc" : "asc",
-        sortValue: (r) => r.cells[col.key]?.value ?? null,
-        render: (r) => <Cell cell={r.cells[col.key]} col={col} mode={cellMode} />,
+        sortValue: (r) => sortReading(r, col.key, view),
+        render: (r) => <Cell cell={r.cells[col.key]} col={col} view={view} />,
       });
     }
     return cols;
   }, [
     byKey,
     entity,
-    modeCatalog,
     order,
     selected,
-    showMode,
-    cellMode,
+    view,
     dragKey,
     moveColumn,
     removeColumn,
@@ -338,11 +368,11 @@ export function ReportTable({
   return (
     <div className="mt-4">
       <ReportToolbar
-        rowCount={rows.length}
+        rowCount={shownRows.length}
         columnCount={columns.length}
         qualifiedOnly={qualifiedOnly}
-        cellMode={cellMode}
-        setCellMode={setCellMode}
+        view={view}
+        setView={setView}
       />
       <p className="mb-1 mt-2 text-right font-mono text-[0.66rem] text-ink-muted print:hidden">
         <span className="tracking-tighter">⠿</span> drag to reorder · click to
@@ -355,8 +385,9 @@ export function ReportTable({
         // was the one just removed — so re-seed whenever the resolved sort
         // differs from what this table was mounted with.
         key={initialSort ? `${initialSort.id}:${initialSort.dir}` : "unsorted"}
-        rows={rows}
+        rows={shownRows}
         columns={tableColumns}
+        onSortChange={onSortChange}
         rowKey={(r) => `${r.playerId}-${r.year}-${r.mode ?? "all"}`}
         rank
         initialPer={initialPer}
@@ -369,7 +400,6 @@ export function ReportTable({
           <AddColumnMenu
             catalog={catalog}
             selected={selected}
-            categoryLabels={categoryLabels}
             onAdd={addColumn}
           />
         }

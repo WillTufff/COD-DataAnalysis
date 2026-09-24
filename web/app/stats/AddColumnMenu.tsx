@@ -5,9 +5,31 @@ import { useEffect, useMemo, useRef, useState } from "react";
 export type MetricOption = {
   key: string;
   label: string;
-  category: string;
+  category: string; // display name
   gold: boolean;
 };
+
+/** Where the menu sits, in viewport pixels. */
+type Anchor = { right: number } & ({ top: number } | { bottom: number });
+
+/** Menu height plus a margin, for deciding whether it fits below the button. */
+const MENU_HEIGHT = 340;
+
+/**
+ * Pin the menu to the viewport under the button, right edges aligned, or above
+ * it when there is no room below. Fixed positioning is what lets the menu escape
+ * the table's horizontal scroll box, which would otherwise clip it to the rows.
+ */
+function anchorBelowOrAbove(button: HTMLElement): Anchor {
+  const rect = button.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth;
+  const right = Math.max(8, viewportWidth - rect.right);
+  const below = window.innerHeight - rect.bottom;
+  if (below < MENU_HEIGHT && rect.top > below) {
+    return { right, bottom: window.innerHeight - rect.top + 4 };
+  }
+  return { right, top: rect.bottom + 4 };
+}
 
 /**
  * The dashed `+` cell at the end of the header row, and the menu behind it.
@@ -21,17 +43,17 @@ export type MetricOption = {
 export function AddColumnMenu({
   catalog,
   selected,
-  categoryLabels,
   onAdd,
 }: {
   catalog: MetricOption[];
   selected: string[];
-  categoryLabels: Record<string, string>;
   onAdd: (key: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -58,13 +80,34 @@ export function AddColumnMenu({
         buttonRef.current?.focus();
       }
     }
+    // The menu is pinned to the viewport, so any scroll outside it (the page,
+    // or the table sliding sideways) would leave it floating off its button.
+    function onScroll(e: Event) {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      setQuery("");
+    }
+    function onResize() {
+      setOpen(false);
+      setQuery("");
+    }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
   }, [open]);
+
+  function openMenu() {
+    const button = buttonRef.current;
+    if (button) setAnchor(anchorBelowOrAbove(button));
+    setOpen(true);
+  }
 
   const available = useMemo(
     () => catalog.filter((m) => !selected.includes(m.key)),
@@ -77,9 +120,9 @@ export function AddColumnMenu({
     return available.filter(
       (m) =>
         m.label.toLowerCase().includes(q) ||
-        (categoryLabels[m.category] ?? m.category).toLowerCase().includes(q),
+        m.category.toLowerCase().includes(q),
     );
-  }, [available, query, categoryLabels]);
+  }, [available, query]);
 
   function add(key: string) {
     close();
@@ -95,7 +138,7 @@ export function AddColumnMenu({
         aria-expanded={open}
         aria-label="Add a metric column"
         title="Add a metric column"
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : openMenu())}
         className={`h-6 w-6 border border-dashed text-sm leading-none transition-colors motion-reduce:transition-none ${
           open
             ? "border-accent text-accent"
@@ -104,8 +147,12 @@ export function AddColumnMenu({
       >
         +
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-68 border border-hairline bg-surface shadow-lg">
+      {open && anchor && (
+        <div
+          ref={menuRef}
+          style={anchor}
+          className="fixed z-30 w-68 border border-hairline bg-surface shadow-lg"
+        >
           <input
             ref={inputRef}
             type="text"
@@ -144,7 +191,7 @@ export function AddColumnMenu({
                     )}
                   </span>
                   <span className="shrink-0 font-mono text-[0.6rem] text-ink-muted">
-                    {categoryLabels[m.category] ?? m.category}
+                    {m.category}
                   </span>
                 </button>
               ))

@@ -2,15 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { REPORT_VIEWS, type ReportView } from "@/lib/reports/rows";
 import { useReportUrl } from "./reportUrl";
-
-export type CellMode = "value" | "pctl" | "z";
-
-export const CELL_MODES: { id: CellMode; label: string }[] = [
-  { id: "value", label: "Value" },
-  { id: "pctl", label: "Percentile" },
-  { id: "z", label: "vs cohort" },
-];
 
 // Each format links to the export route carrying the live URL state, so the
 // file always matches the on-screen report.
@@ -99,14 +92,14 @@ export function ReportToolbar({
   rowCount,
   columnCount,
   qualifiedOnly,
-  cellMode,
-  setCellMode,
+  view,
+  setView,
 }: {
   rowCount: number;
   columnCount: number;
   qualifiedOnly: boolean;
-  cellMode: CellMode;
-  setCellMode: (mode: CellMode) => void;
+  view: ReportView;
+  setView: (view: ReportView) => void;
 }) {
   const push = useReportUrl();
 
@@ -130,14 +123,14 @@ export function ReportToolbar({
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex border border-hairline">
-          {CELL_MODES.map((m) => (
+          {REPORT_VIEWS.map((m) => (
             <button
               key={m.id}
               type="button"
-              aria-pressed={cellMode === m.id}
-              onClick={() => setCellMode(m.id)}
+              aria-pressed={view === m.id}
+              onClick={() => setView(m.id)}
               className={`px-2.5 py-1 ${
-                cellMode === m.id
+                view === m.id
                   ? "bg-surface-raised text-ink"
                   : "text-ink-muted hover:text-ink"
               }`}

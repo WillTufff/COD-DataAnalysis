@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SERIES_STEPS } from "@/lib/eras";
+import { ordinal } from "@/lib/ordinal";
 
 export type StyleAxisMeta = {
   index: number;
@@ -149,9 +150,9 @@ export function StyleAxes({
                           onMouseEnter={() => setHover(key)}
                         >
                           <title>
-                            {`${axis.name} · ${p.year} ${p.title}: ${Math.round(
-                              p.pctl * 100,
-                            )}th percentile of ${cohortN}`}
+                            {`${axis.name} · ${p.year} ${p.title}: ${ordinal(
+                              Math.round(p.pctl * 100),
+                            )} percentile of ${cohortN}`}
                           </title>
                         </circle>
                       );

@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { ordinal } from "@/lib/ordinal";
 
 export type FingerprintSeason = { year: number; title: string };
 
@@ -88,7 +89,7 @@ export function Fingerprint({
                               ? "var(--surface)"
                               : "var(--ink)",
                           }}
-                          title={`${r.label} · ${seasons[i].year} ${seasons[i].title}: ${c.value} (${Math.round(c.pctl * 100)}th percentile)`}
+                          title={`${r.label} · ${seasons[i].year} ${seasons[i].title}: ${c.value} (${ordinal(Math.round(c.pctl * 100))} percentile)`}
                         >
                           {Math.round(c.pctl * 100)}
                         </div>

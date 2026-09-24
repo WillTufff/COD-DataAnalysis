@@ -45,6 +45,7 @@ export function DataTable<T>({
   initialSort = null,
   defaultSort = null,
   syncUrl = true,
+  onSortChange,
   headerRowClassName,
   trailingHeader,
   trailingHeaderClassName,
@@ -61,6 +62,8 @@ export function DataTable<T>({
   initialSort?: SortState;
   defaultSort?: SortState;
   syncUrl?: boolean;
+  /** Called after a header click changes the sort. */
+  onSortChange?: (sort: SortState) => void;
   /** Extra classes on the header `<tr>` — the hook a table needs to drive
    *  row-wide hover states across its header cells. */
   headerRowClassName?: string;
@@ -89,6 +92,7 @@ export function DataTable<T>({
     defaultSort,
     sortSpecs,
     syncUrl,
+    onSortChange,
   });
 
   return (

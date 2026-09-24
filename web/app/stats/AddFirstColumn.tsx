@@ -10,17 +10,14 @@ import { useReportUrl } from "./reportUrl";
  */
 export function AddFirstColumn({
   catalog,
-  categoryLabels,
 }: {
   catalog: MetricOption[];
-  categoryLabels: Record<string, string>;
 }) {
   const push = useReportUrl();
   return (
     <AddColumnMenu
       catalog={catalog}
       selected={[]}
-      categoryLabels={categoryLabels}
       onAdd={(key) => push({ metrics: key, preset: null })}
     />
   );

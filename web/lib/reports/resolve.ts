@@ -17,6 +17,7 @@ import {
   presetById,
   sanitizePresetMetrics,
 } from "./presets";
+import { type ReportView, parseView } from "./rows";
 
 export type ReportScope = {
   years: number[];
@@ -52,8 +53,11 @@ export type ResolvedReport = {
   teamSlugs: string[]; // empty = every team
   modeSlug?: string;
   qualifiedOnly: boolean;
+  /** Whether the qualified gate applies: on, and no explicit row filter. */
+  gateActive: boolean;
   sort: string;
   dir: "asc" | "desc";
+  view: ReportView;
   defaultSortKey: string;
   defaultDir: "asc" | "desc";
   query: ReportQuery;
@@ -192,6 +196,12 @@ export async function resolveReport(
   const qualifiedOnly = one(sp, "all") !== "1";
   const playerSlugs = parsePlayers(sp);
   const teamSlugs = parseTeams(sp);
+  const view = parseView(sp);
+  // The row filters that apply to this entity: a team report has no player
+  // filter, so a stray `players=` must not switch its gate off.
+  const filtered =
+    teamSlugs.length > 0 || (entity === "players" && playerSlugs.length > 0);
+  const gateActive = qualifiedOnly && !filtered;
 
   if (selected.length === 0) {
     return {
@@ -205,11 +215,13 @@ export async function resolveReport(
       playerSlugs,
       teamSlugs,
       qualifiedOnly,
+      gateActive,
       sort: "player",
       dir: "asc",
+      view,
       defaultSortKey: "",
       defaultDir: "asc",
-      query: { metrics: [], qualifiedOnly, sort: "player", dir: "asc" },
+      query: { metrics: [], qualifiedOnly, sort: "player", dir: "asc", view },
     };
   }
 
@@ -281,8 +293,10 @@ export async function resolveReport(
     teamSlugs,
     modeSlug,
     qualifiedOnly,
+    gateActive,
     sort,
     dir,
+    view,
     defaultSortKey,
     defaultDir,
     query: {
@@ -294,6 +308,7 @@ export async function resolveReport(
       qualifiedOnly,
       sort,
       dir,
+      view,
     },
   };
 }

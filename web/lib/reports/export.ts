@@ -4,8 +4,8 @@
 // always matches the table it came from.
 
 import { type ReportColumn, type ReportRow } from "@/lib/analytics";
-import { type ModeCatalog, modeLabel } from "./labels";
 import { type ResolvedReport } from "./resolve";
+import { type ReportView } from "./rows";
 
 // A hard ceiling so a pathological request can't stream an unbounded file. The
 // matrix records when it bit, so a truncated export is never silent.
@@ -37,6 +37,7 @@ export type ExportMeta = {
   };
   sort: string;
   dir: "asc" | "desc";
+  view: ReportView;
   qualifiedOnly: boolean;
   detail: boolean;
   rowCount: number;
@@ -76,24 +77,21 @@ export function cohortSlug(resolved: ResolvedReport): string {
 /**
  * Flatten the report into headers + numeric rows + metadata. With `detail`, each
  * metric contributes its percentile and z-score columns alongside the value.
- * The fixed left columns mirror the on-screen table: player, season, and — only
- * for an all-modes cohort, where a player can appear per mode — the mode.
+ * The fixed left columns mirror the on-screen table: player and season. The
+ * cohort holds one mode, which the metadata names.
  */
 export function buildExportMatrix(
   resolved: ResolvedReport,
   columns: ReportColumn[],
   rows: ReportRow[],
   run: { model: string; version: string },
-  modeCatalog: ModeCatalog,
 ): ExportMatrix {
   const detail = false; // reserved for a future ?detail=1; value-only for v1
-  const showMode = resolved.modeSlug === undefined;
 
   const headers: string[] = [
     resolved.entity === "teams" ? "Team" : "Player",
     "Season",
   ];
-  if (showMode) headers.push("Mode");
   for (const c of columns) {
     headers.push(c.label);
     if (detail) headers.push(`${c.label} (pctl)`, `${c.label} (z)`);
@@ -104,7 +102,6 @@ export function buildExportMatrix(
 
   const matrixRows: (string | number | null)[][] = used.map((r) => {
     const out: (string | number | null)[] = [r.handle, `${r.year} ${r.title}`];
-    if (showMode) out.push(modeLabel(modeCatalog, r.mode, "All"));
     for (const c of columns) {
       const cell = r.cells[c.key];
       out.push(cell ? cell.value : null);
@@ -133,6 +130,7 @@ export function buildExportMatrix(
       },
       sort: resolved.sort,
       dir: resolved.dir,
+      view: resolved.view,
       qualifiedOnly: resolved.qualifiedOnly,
       detail,
       rowCount: matrixRows.length,

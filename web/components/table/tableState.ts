@@ -33,6 +33,7 @@ export function useTableState<T>({
   defaultSort = null,
   sortSpecs,
   syncUrl = true,
+  onSortChange,
 }: {
   rows: T[];
   defaultPer?: Per;
@@ -42,6 +43,7 @@ export function useTableState<T>({
   defaultSort?: SortState;
   sortSpecs?: Record<string, SortSpec<T>>;
   syncUrl?: boolean;
+  onSortChange?: (sort: SortState) => void;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -91,6 +93,7 @@ export function useTableState<T>({
           : { id, dir: spec.dir };
       setSortState(next);
       setPageState(1);
+      onSortChange?.(next);
       const isDefault =
         defaultSort != null &&
         next.id === defaultSort.id &&
@@ -101,7 +104,7 @@ export function useTableState<T>({
         page: null,
       });
     },
-    [sort, sortSpecs, defaultSort, writeUrl],
+    [sort, sortSpecs, defaultSort, writeUrl, onSortChange],
   );
 
   const sorted = useMemo(() => {
