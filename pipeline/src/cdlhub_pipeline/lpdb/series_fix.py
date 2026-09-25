@@ -14,8 +14,13 @@ and exists to disagree:
    LPDB map set is consistent with the authoritative series score. Filled game
    rows are retagged data_source='lpdb' — the tag names where the RESULT came
    from; their stat lines stay Cito-tagged.
-3. Cross-check the score-only cdl-catalog fixtures (numeric source_uid, no
-   games) and create their game rows from LPDB map data.
+3. Place the cdl-catalog fixtures (numeric source_uid). That catalog files
+   every 2026 match under "CDL 2026 Regular Season", Majors included, so the
+   LPDB match page sets the event. A fixture that repeats a series another
+   catalog already holds is deleted; a score-only one gets its game rows from
+   LPDB map data.
+   Any other CDL series with no game rows gets them the same way
+   (`fill_mapless`).
 
 4. Link 2017-2019 series to their LPDB match rows, backfilling `best_of` —
    null on every CWL series here, populated on all 1,230 of LPDB's — and
@@ -23,9 +28,11 @@ and exists to disagree:
    project publishes rested on the Activision archive alone.
 
 5. Create the CDL-era series Cito never lists (`backfill_unheld`): an LPDB
-   match on one of our events, between two teams we already hold, with no
-   local series for that pair within two days. Cito's catalog skips whole
-   stretches, such as most of the 2026 Championship.
+   match on one of our events, between two teams we already hold, that no
+   local series accounts for. Each local series accounts for one LPDB match,
+   so a grand final that rematches the winners final is not taken as held.
+   Cito's catalog skips whole stretches, such as most of the 2026
+   Championship.
 
 A cito reload nulls/loses these fixes, so rerun `lpdb load` after any
 `cito load`. Disagreements between the local series score and LPDB are
@@ -111,6 +118,10 @@ class SeriesFixer:
             "unmatched": [],
             "inconsistent_lpdb_maps": [],
             "unheld_backfilled": [],
+            "cdl_events_placed": [],
+            "cdl_duplicates_deleted": [],
+            "mapless_filled": [],
+            "mapless_duplicates_deleted": [],
             "unheld_skipped": {},
             # The CWL era's second source (link_cwl_series), reported the same
             # way the modern era's reconciliation already is.
@@ -509,13 +520,75 @@ class SeriesFixer:
                 {"cito": s["source_uid"], "match2id": m["match2id"], "maps_filled": filled}
             )
 
-    def check_score_only(self) -> None:
-        rows = self._local_series(
-            r"s.source_uid ~ '^[0-9]+$' AND s.data_source = 'cito' "
-            "AND NOT EXISTS (SELECT 1 FROM games g WHERE g.series_id = s.id)",
-            (),
+    def _team_ids(self, series_id: int) -> tuple[int, int]:
+        row = self.conn.execute(
+            "SELECT team1_id, team2_id FROM series WHERE id = %s", (series_id,)
+        ).fetchone()
+        assert row is not None
+        return cast(int, row[0]), cast(int, row[1])
+
+    def _delete_series(self, series_id: int) -> None:
+        self.conn.execute("DELETE FROM team_ratings WHERE series_id = %s", (series_id,))
+        self.conn.execute(
+            "DELETE FROM game_player_stats WHERE game_id IN "
+            "(SELECT id FROM games WHERE series_id = %s)",
+            (series_id,),
         )
+        self.conn.execute("DELETE FROM games WHERE series_id = %s", (series_id,))
+        self.conn.execute("DELETE FROM series WHERE id = %s", (series_id,))
+
+    def _held_copy(
+        self,
+        s: dict[str, Any],
+        match2id: str | None,
+        when: date,
+        window: int,
+        with_games: bool = False,
+    ) -> str | None:
+        """source_uid of another catalog's series for the same match: the one
+        linked to `match2id`, or else the same teams and score within
+        `window` days of `when`. `with_games` takes only a copy that has game
+        rows or comes from the bp catalog."""
+        t1, t2 = self._team_ids(cast(int, s["id"]))
+        row = self.conn.execute(
+            r"""
+            SELECT source_uid FROM series
+            WHERE id <> %s AND source_uid !~ '^[0-9]+$'
+              AND (NOT %s OR source_uid LIKE 'bp-match-%%'
+                   OR EXISTS (SELECT 1 FROM games g WHERE g.series_id = series.id))
+              AND (liquipedia_match_id = %s
+                   OR (abs(played_at::date - %s::date) <= %s
+                       AND ((team1_id, team2_id, team1_score, team2_score) = (%s, %s, %s, %s)
+                            OR (team1_id, team2_id, team1_score, team2_score)
+                               = (%s, %s, %s, %s))))
+            ORDER BY liquipedia_match_id IS NULL, id
+            LIMIT 1
+            """,
+            (
+                s["id"],
+                with_games,
+                match2id,
+                when,
+                window,
+                t1,
+                t2,
+                s["team1_score"],
+                s["team2_score"],
+                t2,
+                t1,
+                s["team2_score"],
+                s["team1_score"],
+            ),
+        ).fetchone()
+        return cast(str, row[0]) if row else None
+
+    def check_cdl_fixtures(self) -> None:
+        rows = self._local_series(r"s.source_uid ~ '^[0-9]+$' AND s.data_source = 'cito'", ())
         for s in rows:
+            series_id = cast(int, s["id"])
+            mapless = not self.conn.execute(
+                "SELECT 1 FROM games WHERE series_id = %s LIMIT 1", (series_id,)
+            ).fetchone()
             when = cast(datetime, s["played_at"])
             if when.tzinfo is None:
                 when = when.replace(tzinfo=UTC)
@@ -523,8 +596,8 @@ class SeriesFixer:
             # its claimed date is a phantom record — delete it; the staleness
             # guard keeps current-season fixtures alive until LPDB catches up
             stale = (datetime.now(UTC) - when).days > 14
-            if stale and not self.find(s["team1"], s["team2"], when.date(), window=7):
-                self.conn.execute("DELETE FROM series WHERE id = %s", (s["id"],))
+            if mapless and stale and not self.find(s["team1"], s["team2"], when.date(), window=7):
+                self._delete_series(series_id)
                 self.counts["phantom_series_deleted"] += 1
                 self.report["phantom_fixtures_deleted"].append(
                     {
@@ -539,11 +612,30 @@ class SeriesFixer:
             m = self._match_local(s, window=7)
             if m is None:
                 continue
-            self._set_match_id(cast(int, s["id"]), m["match2id"])
+            kept = self._held_copy(s, m["match2id"], m["date"], self.UNHELD_WINDOW_DAYS)
+            if kept is not None:
+                self._delete_series(series_id)
+                self.counts["cdl_duplicates_deleted"] += 1
+                self.report["cdl_duplicates_deleted"].append(
+                    {"cito": s["source_uid"], "kept": kept, "match2id": m["match2id"]}
+                )
+                continue
+            self._set_match_id(series_id, m["match2id"])
+            event_id = self.loader.match_event(m["pagename"], "", m["season"])
+            if event_id is not None:
+                cur = self.conn.execute(
+                    "UPDATE series SET event_id = %s WHERE id = %s AND event_id <> %s",
+                    (event_id, series_id, event_id),
+                )
+                if cur.rowcount:
+                    self.counts["cdl_events_placed"] += 1
+                    self.report["cdl_events_placed"].append(
+                        {"cito": s["source_uid"], "match2id": m["match2id"], "page": m["pagename"]}
+                    )
             local_date = cast(datetime, s["played_at"]).date()
             if m["dt"] is not None and m["date"] != local_date:
                 self.conn.execute(
-                    "UPDATE series SET played_at = %s WHERE id = %s", (m["dt"], s["id"])
+                    "UPDATE series SET played_at = %s WHERE id = %s", (m["dt"], series_id)
                 )
                 self.report["dates_corrected"].append(
                     {
@@ -553,20 +645,58 @@ class SeriesFixer:
                         "new": str(m["date"]),
                     }
                 )
-            team_row = self.conn.execute(
-                "SELECT team1_id, team2_id FROM series WHERE id = %s", (s["id"],)
-            ).fetchone()
-            assert team_row is not None
+            if not mapless:
+                continue
             ok = self._insert_games(
-                cast(int, s["id"]),
+                series_id,
                 m,
-                (cast(int, team_row[0]), cast(int, team_row[1])),
+                self._team_ids(series_id),
                 m["order"],
                 (cast(int, s["team1_score"]), cast(int, s["team2_score"])),
             )
             if ok:
                 self.report["scoreonly_games_added"].append(
                     {"cito": s["source_uid"], "match2id": m["match2id"]}
+                )
+
+    def fill_mapless(self) -> None:
+        """Game rows from LPDB for any other CDL series that has none.
+
+        A mapless series that repeats one another catalog holds is a
+        duplicate Cito's dedup missed (the catalogs slug a team differently),
+        and is deleted instead.
+        """
+        rows = self._local_series(
+            r"se.league = 'CDL' AND s.data_source <> %s AND s.source_uid !~ '^[0-9]+$' "
+            "AND NOT EXISTS (SELECT 1 FROM games g WHERE g.series_id = s.id)",
+            (SOURCE,),
+        )
+        for s in rows:
+            series_id = cast(int, s["id"])
+            when = cast(datetime, s["played_at"]).date()
+            kept = self._held_copy(s, None, when, 1, with_games=True)
+            if kept is not None:
+                self._delete_series(series_id)
+                self.counts["mapless_duplicates_deleted"] += 1
+                self.report["mapless_duplicates_deleted"].append(
+                    {"series": s["source_uid"], "kept": kept}
+                )
+                continue
+            m = self._match_local(s)
+            if m is None:
+                continue
+            self._set_match_id(series_id, m["match2id"])
+            ok = self._insert_games(
+                series_id,
+                m,
+                self._team_ids(series_id),
+                m["order"],
+                (cast(int, s["team1_score"]), cast(int, s["team2_score"])),
+            )
+            if ok:
+                self.counts["mapless_filled"] += 1
+                self.report["mapless_filled"].append(
+                    {"series": s["source_uid"], "match2id": m["match2id"]}
                 )
 
     def run(self, matches: list[dict[str, Any]]) -> None:
@@ -592,7 +722,8 @@ class SeriesFixer:
         self.conn.execute("DELETE FROM series WHERE data_source = %s", (SOURCE,))
         self.backfill_quarantined()
         self.check_nulled()
-        self.check_score_only()
+        self.check_cdl_fixtures()
+        self.fill_mapless()
         self.backfill_unheld()
         # a score-only cdl fixture with no LPDB counterpart anywhere near its
         # claimed date is a phantom record (verified by hand for the Dec 2025
@@ -615,19 +746,35 @@ class SeriesFixer:
 
         A match qualifies when its page resolves to one of our events, both
         teams already exist (a team is never created here), it was played
-        rather than forfeited, and no series between those two teams sits
-        within `UNHELD_WINDOW_DAYS` of it in any event. The window is wider
-        than the one-day match used elsewhere so that a series Cito dates a day
-        off is found rather than duplicated.
+        rather than forfeited, and no local series accounts for it. A local
+        series accounts for the match that carries its liquipedia_match_id, or
+        else for the nearest one between the same two teams within
+        `UNHELD_WINDOW_DAYS`, and for one match only: a weekend where two
+        teams meet twice needs two local series. The window is wider than the
+        one-day match used elsewhere so that a series Cito dates a day off is
+        found rather than duplicated. Among the series in the window, one with
+        the same score is taken first, so a winners final cannot claim the
+        grand final's series.
         """
-        held: dict[frozenset[int], list[date]] = defaultdict(list)
-        for t1, t2, played in self.conn.execute(
-            "SELECT s.team1_id, s.team2_id, s.played_at::date FROM series s "
+        held: dict[frozenset[int], list[tuple[date, dict[int, int], str | None]]] = defaultdict(
+            list
+        )
+        for t1, t2, s1, s2, played, match2id in self.conn.execute(
+            "SELECT s.team1_id, s.team2_id, s.team1_score, s.team2_score, s.played_at::date, "
+            "s.liquipedia_match_id "
+            "FROM series s "
             "JOIN events e ON e.id = s.event_id JOIN seasons se ON se.id = e.season_id "
             "WHERE se.league = 'CDL' AND s.played_at IS NOT NULL"
         ).fetchall():
-            held[frozenset((cast(int, t1), cast(int, t2)))].append(cast(date, played))
+            held[frozenset((cast(int, t1), cast(int, t2)))].append(
+                (
+                    cast(date, played),
+                    {cast(int, t1): cast(int, s1), cast(int, t2): cast(int, s2)},
+                    cast("str | None", match2id),
+                )
+            )
         skipped: Counter[str] = Counter()
+        candidates: list[tuple[dict[str, Any], int, tuple[int, int]]] = []
         for matches in self._index.values():
             for m in matches:
                 if m["season"] < 2020:
@@ -640,54 +787,78 @@ class SeriesFixer:
                 if None in ids:
                     skipped["team not held"] += 1
                     continue
-                team_ids = (cast(int, ids[0]), cast(int, ids[1]))
+                candidates.append((m, event_id, (cast(int, ids[0]), cast(int, ids[1]))))
+        # linked series are spoken for first, then same-score series, then any
+        free: dict[frozenset[int], list[tuple[date, dict[int, int]]]] = defaultdict(list)
+        linked: set[str] = set()
+        for pair, rows in held.items():
+            for played, scores, match2id in rows:
+                if match2id is None:
+                    free[pair].append((played, scores))
+                else:
+                    linked.add(match2id)
+        candidates.sort(key=lambda c: (c[0]["date"], c[0]["match2id"]))
+        unheld = [c for c in candidates if c[0]["match2id"] not in linked]
+        for same_score in (True, False):
+            remaining = []
+            for m, event_id, team_ids in unheld:
                 pair = frozenset(team_ids)
-                if any(abs((d - m["date"]).days) <= self.UNHELD_WINDOW_DAYS for d in held[pair]):
-                    continue
-                if m["walkover"]:
-                    skipped["walkover"] += 1
-                    continue
-                row = self.conn.execute(
-                    """
-                    INSERT INTO series (event_id, team1_id, team2_id, team1_score, team2_score,
-                                        best_of, played_at, source_uid, liquipedia_match_id,
-                                        data_source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (source_uid) DO NOTHING
-                    RETURNING id
-                    """,
-                    (
-                        event_id,
-                        team_ids[0],
-                        team_ids[1],
-                        m["scores"][0],
-                        m["scores"][1],
-                        m["bestof"],
-                        m["dt"] or m["date"],
-                        f"lpdb:{m['match2id']}",
-                        None,
-                        SOURCE,
-                    ),
-                ).fetchone()
-                if row is None:
-                    continue
-                series_id = cast(int, row[0])
-                self._set_match_id(series_id, cast(str, m["match2id"]))
-                held[pair].append(m["date"])
-                self.counts["unheld_series"] += 1
-                games_ok = self._insert_games(
-                    series_id, m, team_ids, [0, 1], (m["scores"][0], m["scores"][1])
-                )
-                self.report["unheld_backfilled"].append(
-                    {
-                        "match2id": m["match2id"],
-                        "page": m["pagename"],
-                        "date": str(m["date"]),
-                        "teams": m["names"],
-                        "score": m["scores"],
-                        "games": games_ok,
-                    }
-                )
+                score = {team_ids[0]: m["scores"][0], team_ids[1]: m["scores"][1]}
+                near = [
+                    f
+                    for f in free[pair]
+                    if abs((f[0] - m["date"]).days) <= self.UNHELD_WINDOW_DAYS
+                    and (f[1] == score or not same_score)
+                ]
+                if near:
+                    free[pair].remove(min(near, key=lambda f: abs((f[0] - m["date"]).days)))
+                else:
+                    remaining.append((m, event_id, team_ids))
+            unheld = remaining
+        for m, event_id, team_ids in unheld:
+            if m["walkover"]:
+                skipped["walkover"] += 1
+                continue
+            row = self.conn.execute(
+                """
+                INSERT INTO series (event_id, team1_id, team2_id, team1_score, team2_score,
+                                    best_of, played_at, source_uid, liquipedia_match_id,
+                                    data_source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_uid) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    event_id,
+                    team_ids[0],
+                    team_ids[1],
+                    m["scores"][0],
+                    m["scores"][1],
+                    m["bestof"],
+                    m["dt"] or m["date"],
+                    f"lpdb:{m['match2id']}",
+                    None,
+                    SOURCE,
+                ),
+            ).fetchone()
+            if row is None:
+                continue
+            series_id = cast(int, row[0])
+            self._set_match_id(series_id, cast(str, m["match2id"]))
+            self.counts["unheld_series"] += 1
+            games_ok = self._insert_games(
+                series_id, m, team_ids, [0, 1], (m["scores"][0], m["scores"][1])
+            )
+            self.report["unheld_backfilled"].append(
+                {
+                    "match2id": m["match2id"],
+                    "page": m["pagename"],
+                    "date": str(m["date"]),
+                    "teams": m["names"],
+                    "score": m["scores"],
+                    "games": games_ok,
+                }
+            )
         self.report["unheld_skipped"] = dict(sorted(skipped.items()))
 
     # ----- CWL era: a second source for a record that has one -----

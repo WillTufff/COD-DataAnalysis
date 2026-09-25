@@ -99,7 +99,7 @@
       "reason": "online league matches that seed the Major"
     },
     "CDL Regular Season": {
-      "reason": "2026 catch-all: its Major qualifier and group rounds are league play; its bracket rounds are the Major 4 bracket",
+      "reason": "2026 cdl-catalog fixtures LPDB has not placed yet: qualifier and group rounds are league play, bracket rounds belong to a Major",
       "playoffs": true
     }
   }

@@ -455,8 +455,8 @@ maps with box scores, per era.
 | Maps | 5,079 | 6,870 | 6,540 |
 | Tier 1 events | 2,549 | 3,516 | 6,527 |
 | Tier 2 events | 176 | 3,270 | 13 |
-| LAN | 3,055 | 6,870 | 2,074 |
-| Online | 2,024 | 0 | 4,393 |
+| LAN | 3,055 | 6,870 | 2,124 |
+| Online | 2,024 | 0 | 4,416 |
 | League play | 2,001 | 1,940 | 4,077 |
 | Event groups | 936 | 2,602 | 110 |
 | Brackets | 1,913 | 2,156 | 2,111 |
@@ -472,9 +472,8 @@ Dates are whole days on the series date, both ends included, and every map carri
 
 Venue is the event's flag, from the derivation under match context below. Before 2017 it
 comes from the CoD wiki, where the 2016 World League regular seasons and two small 2014
-events are online and everything else is LAN. Every map from 2017 to 2019 is LAN. The 73 maps of the 2026 CDL
-regular season are in neither, because Liquipedia records that event as both and an
-event-level flag cannot say which maps were which.
+events are online and everything else is LAN. Every map from 2017 to 2019 is LAN. From 2020 on, every map sits in an event that
+Liquipedia records as either LAN or online.
 
 Stage is decided at the event first and by the round label second. A round label alone
 reads three eras wrong. The 2020 CDL home series were league play, but each weekend was
