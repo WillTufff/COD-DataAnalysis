@@ -24,7 +24,7 @@ export function definitionLine(col: ReportColumn): string {
 }
 
 /**
- * The ▾ on a metric header and the menu behind it: the column's definition
+ * The info icon on a metric header and the menu behind it: the column's definition
  * (formula, unit, sample floor, direction), sort either way, move one place,
  * and remove. Every column
  * edit here is also reachable by keyboard, which dragging the header is not.
@@ -75,15 +75,26 @@ export function ColumnMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`${col.label} column options`}
-        title="Column options"
+        title="Column info"
         onClick={() =>
           open ? close() : buttonRef.current && setAnchor(anchorBelowOrAbove(buttonRef.current))
         }
-        className={`ml-0.5 px-0.5 text-[0.6rem] leading-none transition-colors motion-reduce:transition-none ${
-          open ? "text-accent" : "text-baseline hover:text-accent group-hover/th:text-ink-muted"
+        className={`mr-1 flex items-center transition-colors motion-reduce:transition-none ${
+          open ? "text-accent" : "text-ink-muted hover:text-accent"
         }`}
       >
-        ▾
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          className="h-3 w-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <circle cx="8" cy="8" r="6.75" />
+          <path d="M8 7.25v4" strokeLinecap="round" />
+          <circle cx="8" cy="4.75" r="0.9" fill="currentColor" stroke="none" />
+        </svg>
       </button>
       {open && (
         <div

@@ -201,8 +201,7 @@ export async function resolveReport(
 
   // Explicit `metrics` (or the legacy single `metric`) always wins; a `preset`
   // only seeds columns when none were named, so editing a preset's columns —
-  // which writes explicit `metrics` and drops `preset` — is respected. A
-  // preset seeded by the fallback is the active preset, and the strip says so.
+  // which writes explicit `metrics` and drops `preset` — is respected.
   const explicit = parseMetrics(sp).filter((k) => byKey.has(k));
   const untouched =
     !("metrics" in sp) && !("metric" in sp) && !("preset" in sp);

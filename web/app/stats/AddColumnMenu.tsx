@@ -50,8 +50,9 @@ function OptionRow({
  *
  * It sits where the next column will appear. The menu is a search over the
  * catalog minus the current columns, split in two: metrics with rows for the
- * seasons and mode in view, then the rest, greyed and labelled with the seasons
- * they cover, since adding one of those gives a column of dashes.
+ * seasons and mode in view, then the rest, collapsed by default, greyed and
+ * labelled with the seasons they cover. The rest opens by itself when a search
+ * matches nothing in view.
  */
 export function AddColumnMenu({
   catalog,
@@ -64,6 +65,7 @@ export function AddColumnMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [showElsewhere, setShowElsewhere] = useState(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -74,6 +76,7 @@ export function AddColumnMenu({
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
+    setShowElsewhere(false);
   }, []);
   useDismiss({
     open,
@@ -101,7 +104,8 @@ export function AddColumnMenu({
   }, [catalog, selected, query]);
   const inView = matches.filter((m) => m.inView);
   const elsewhere = matches.filter((m) => !m.inView);
-  const first = inView[0] ?? elsewhere[0];
+  const elsewhereOpen = showElsewhere || inView.length === 0;
+  const first = inView[0] ?? (elsewhereOpen ? elsewhere[0] : undefined);
 
   function add(key: string) {
     close();
@@ -158,12 +162,19 @@ export function AddColumnMenu({
             ))}
             {elsewhere.length > 0 && (
               <>
-                <div className="mt-1 border-t border-hairline px-2.5 pb-1 pt-2 font-display text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-ink-muted">
-                  No rows in this view
-                </div>
-                {elsewhere.map((m) => (
-                  <OptionRow key={m.key} m={m} onAdd={add} />
-                ))}
+                <button
+                  type="button"
+                  aria-expanded={elsewhereOpen}
+                  onClick={() => setShowElsewhere(!elsewhereOpen)}
+                  className="mt-1 flex w-full items-center justify-between border-t border-hairline px-2.5 pb-1 pt-2 font-display text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-ink-muted hover:text-ink"
+                >
+                  <span>No rows in this view ({elsewhere.length})</span>
+                  <span aria-hidden="true">{elsewhereOpen ? "▴" : "▾"}</span>
+                </button>
+                {elsewhereOpen &&
+                  elsewhere.map((m) => (
+                    <OptionRow key={m.key} m={m} onAdd={add} />
+                  ))}
               </>
             )}
           </div>

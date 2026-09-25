@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { PctlBar } from "@/components/PctlBar";
@@ -63,12 +70,34 @@ function Cell({
 /** How far a mouse has to travel on a header before a press becomes a drag. */
 const DRAG_THRESHOLD = 6;
 
+/** How long a displaced or dropped column takes to slide into place. */
+const SLIDE_MS = 180;
+const SLIDE = `transform ${SLIDE_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`;
+
+/** Where a drag started, in the table's own coordinates. */
+type DragOrigin = {
+  key: string;
+  startX: number;
+  startLeft: number;
+  scroller: HTMLElement | null;
+  startScroll: number;
+};
+
+function clearCellStyle(el: HTMLElement) {
+  el.style.transform = "";
+  el.style.transition = "";
+  el.style.position = "";
+  el.style.zIndex = "";
+  el.style.background = "";
+  el.style.boxShadow = "";
+}
+
 /**
  * The report, with its own column editing built into the header row.
  *
  * A click on a metric header sorts it. A mouse press that travels past a few
  * pixels drags the column instead, and the click that ends the drag is
- * swallowed so it does not also sort. The ▾ beside each label opens the column
+ * swallowed so it does not also sort. The info icon beside each label opens the column
  * menu, which holds the same edits for touch and keyboard.
  *
  * Add, remove and reorder all rewrite the ordered `metrics` CSV on the URL and
@@ -223,9 +252,127 @@ export function ReportTable({
     [selected, setColumns],
   );
 
+  const tableRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragOrigin | null>(null);
+  const pointerXRef = useRef(0);
+  // Each column's on-screen left before a reorder, for the slide that follows.
+  const flipRef = useRef<Map<string, number> | null>(null);
+
+  const headerOf = useCallback(
+    (key: string) =>
+      tableRef.current?.querySelector<HTMLElement>(
+        `th[data-col-id="${CSS.escape(key)}"]`,
+      ) ?? null,
+    [],
+  );
+  const cellsOf = useCallback(
+    (key: string) => [
+      ...(tableRef.current?.querySelectorAll<HTMLElement>(
+        `[data-col-id="${CSS.escape(key)}"]`,
+      ) ?? []),
+    ],
+    [],
+  );
+
+  // The dragged column follows the pointer, clamped to the metric columns.
+  // When its leading edge crosses a neighbour's centre the two swap, and the
+  // neighbour slides over in the layout effect below.
+  const applyDrag = useCallback(
+    (clientX: number) => {
+      const d = dragRef.current;
+      const cur = orderRef.current;
+      if (!d || !cur) return;
+      pointerXRef.current = clientX;
+      const th = headerOf(d.key);
+      const first = headerOf(cur[0]);
+      const last = headerOf(cur[cur.length - 1]);
+      if (!th || !first || !last) return;
+      const scrolled = d.scroller ? d.scroller.scrollLeft - d.startScroll : 0;
+      const pos = Math.min(
+        Math.max(d.startLeft + clientX - d.startX + scrolled, first.offsetLeft),
+        last.offsetLeft + last.offsetWidth - th.offsetWidth,
+      );
+      for (const el of cellsOf(d.key)) {
+        el.style.transition = "none";
+        el.style.transform = `translateX(${pos - th.offsetLeft}px)`;
+        el.style.position = "relative";
+        el.style.zIndex = "2";
+        el.style.background = "var(--color-surface)";
+        el.style.boxShadow =
+          "inset 1px 0 var(--color-hairline), inset -1px 0 var(--color-hairline)";
+      }
+
+      const i = cur.indexOf(d.key);
+      const left = i > 0 ? headerOf(cur[i - 1]) : null;
+      const right = i < cur.length - 1 ? headerOf(cur[i + 1]) : null;
+      let to = i;
+      if (left && pos < left.offsetLeft + left.offsetWidth / 2) to = i - 1;
+      else if (
+        right &&
+        pos + th.offsetWidth > right.offsetLeft + right.offsetWidth / 2
+      )
+        to = i + 1;
+      if (to === i) return;
+
+      const before = new Map<string, number>();
+      for (const k of cur) {
+        const h = headerOf(k);
+        if (h) before.set(k, h.getBoundingClientRect().left);
+      }
+      flipRef.current = before;
+      const next = [...cur];
+      next.splice(i, 1);
+      next.splice(to, 0, d.key);
+      orderRef.current = next;
+      setPreview({ base: selected, order: next });
+    },
+    [headerOf, cellsOf, selected],
+  );
+
+  // After a swap: each displaced column starts where it was drawn and slides
+  // to its new place. Measured from the drawn position, so a swap that lands
+  // mid-slide carries on from there.
+  useLayoutEffect(() => {
+    const before = flipRef.current;
+    if (!before) return;
+    flipRef.current = null;
+    for (const [key, x] of before) {
+      if (key === dragRef.current?.key) continue;
+      const th = headerOf(key);
+      if (!th) continue;
+      const cells = cellsOf(key);
+      for (const el of cells) {
+        el.style.transition = "none";
+        el.style.transform = "";
+      }
+      const dx = x - th.getBoundingClientRect().left;
+      if (dx === 0) continue;
+      for (const el of cells) el.style.transform = `translateX(${dx}px)`;
+      void th.offsetWidth;
+      for (const el of cells) {
+        el.style.transition = SLIDE;
+        el.style.transform = "";
+      }
+    }
+    if (dragRef.current) applyDrag(pointerXRef.current);
+  }, [order, headerOf, cellsOf, applyDrag]);
+
   const endDrag = useCallback(() => {
     const dropped = orderRef.current;
+    const d = dragRef.current;
+    dragRef.current = null;
     setDragKey(null);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    // The dragged column settles into its slot, then drops its lifted look.
+    if (d) {
+      const cells = cellsOf(d.key);
+      for (const el of cells) {
+        el.style.transition = SLIDE;
+        el.style.transform = "";
+      }
+      setTimeout(() => cells.forEach(clearCellStyle), SLIDE_MS + 20);
+    }
     // The swallow is for the click this release produces, which fires before
     // any timer; if the release lands off the header no click comes, and the
     // listener must not linger to eat the next real one.
@@ -242,35 +389,13 @@ export function ReportTable({
       setPreview(null);
       orderRef.current = null;
     }
-  }, [selected, setColumns]);
+  }, [selected, setColumns, cellsOf]);
 
-  // The drag listens on the window, not the grip. Pointer capture would be the
-  // idiomatic choice, but the first live reorder moves the grip's DOM node —
-  // React reinserts the reordered header cells — and reinsertion silently
-  // cancels capture, killing the drag one swap in. Window listeners survive
-  // any amount of header churn under the pointer.
+  // The drag listens on the window, not the grip: the first reorder moves the
+  // header's DOM node, and reinsertion cancels pointer capture.
   useEffect(() => {
     if (dragKey === null) return;
-    const onMove = (e: PointerEvent) => {
-      const cur = orderRef.current;
-      if (cur === null) return;
-      // Hit-test the header cells rather than tracking offsets. Crossing
-      // another metric header reorders the preview immediately — the column
-      // follows the pointer instead of waiting for the drop.
-      const under = document
-        .elementFromPoint(e.clientX, e.clientY)
-        ?.closest<HTMLElement>("th[data-col-id]");
-      const id = under?.dataset.colId;
-      if (!id || id === dragKey || !cur.includes(id)) return;
-      const from = cur.indexOf(dragKey);
-      const to = cur.indexOf(id);
-      if (from === to) return;
-      const next = [...cur];
-      next.splice(from, 1);
-      next.splice(to, 0, dragKey);
-      orderRef.current = next;
-      setPreview({ base: selected, order: next });
-    };
+    const onMove = (e: PointerEvent) => applyDrag(e.clientX);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
@@ -279,7 +404,7 @@ export function ReportTable({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [dragKey, selected, endDrag]);
+  }, [dragKey, applyDrag, endDrag]);
 
   // A mouse press on a metric header waits to see whether it is a click (sort)
   // or a drag (reorder). Touch never drags here: a horizontal swipe on the
@@ -289,8 +414,9 @@ export function ReportTable({
       if (e.pointerType !== "mouse" || e.button !== 0) return;
       const target = e.target as HTMLElement;
       if (target.closest("[data-col-menu]")) return;
-      const key = target.closest<HTMLElement>("th[data-col-id]")?.dataset.colId;
-      if (!key || !selected.includes(key)) return;
+      const th = target.closest<HTMLElement>("th[data-col-id]");
+      const key = th?.dataset.colId;
+      if (!th || !key || !selected.includes(key)) return;
       const x0 = e.clientX;
       const y0 = e.clientY;
       const cleanup = () => {
@@ -306,14 +432,25 @@ export function ReportTable({
         };
         swallowRef.current = swallow;
         window.addEventListener("click", swallow, { capture: true, once: true });
+        const scroller = th.closest<HTMLElement>(".overflow-x-auto");
+        dragRef.current = {
+          key,
+          startX: x0,
+          startLeft: th.offsetLeft,
+          scroller,
+          startScroll: scroller?.scrollLeft ?? 0,
+        };
         orderRef.current = order;
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
         setPreview({ base: selected, order });
         setDragKey(key);
+        applyDrag(ev.clientX);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", cleanup);
     },
-    [order, selected],
+    [order, selected, applyDrag],
   );
 
   const tableColumns = useMemo<Column<ReportRow>[]>(() => {
@@ -361,7 +498,6 @@ export function ReportTable({
       const col = byKey.get(key);
       if (!col) continue;
       const index = order.indexOf(key);
-      const dragging = dragKey === col.key;
       cols.push({
         id: col.key,
         header: (
@@ -370,18 +506,11 @@ export function ReportTable({
             className={col.unavailable ? "text-ink-muted" : ""}
           >
             {col.label}
-            {col.higherIsBetter ? "" : (
-              <span className="ml-0.5 text-ink-secondary" aria-hidden="true">
-                ↓
-              </span>
-            )}
           </span>
         ),
         align: "right",
         cellClassName: "font-mono tabular-nums",
-        headerClassName: `group/th select-none ${dragging ? "opacity-50" : ""} ${
-          dragKey ? "cursor-grabbing" : ""
-        }`,
+        headerClassName: `group/th select-none ${dragKey ? "" : "cursor-grab"}`,
         headerMenu: (api) => (
           <ColumnMenu
             col={col}
@@ -391,6 +520,30 @@ export function ReportTable({
             onMove={(to) => moveColumn(col.key, to)}
             onRemove={() => removeColumn(col.key)}
           />
+        ),
+        headerEnd: (
+          <button
+            type="button"
+            data-col-menu
+            aria-label={`Remove ${col.label}`}
+            title="Remove column"
+            onClick={() => removeColumn(col.key)}
+            className={`ml-1 hidden items-center text-ink-muted opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 motion-reduce:transition-none print:hidden [@media(hover:hover)]:flex ${
+              dragKey ? "" : "group-hover/th:opacity-100"
+            }`}
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              className="h-3 w-3"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+            </svg>
+          </button>
         ),
         sortable: true,
         // Best-first on first click: descending when higher is better.
@@ -420,9 +573,8 @@ export function ReportTable({
         aggregated={aggregated}
         span={span}
         setSpan={(on) => push({ rows: on ? "span" : null })}
-        lowerIsBetter={columns.some((c) => !c.higherIsBetter)}
       />
-      <div onPointerDownCapture={onHeaderPointerDown}>
+      <div ref={tableRef} onPointerDownCapture={onHeaderPointerDown}>
       <DataTable
         // The table owns its sort as client state, seeded once from the URL. A
         // column edit is a navigation, and the server may have moved the sort

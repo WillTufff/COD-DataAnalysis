@@ -246,8 +246,8 @@ type RowFilter = "season" | "players" | "teams" | "minmaps" | "where" | "top";
 type MapsFilter = "tier" | "venue" | "stage" | "map" | "dates";
 
 const TIERS: { tier: EventTier; note: string }[] = [
-  { tier: "1", note: "Premier events: championships, the CWL Pro League, the CDL" },
-  { tier: "2", note: "Majors below them, and the CWL opens" },
+  { tier: "1", note: "Championships, CWL Pro League, CDL" },
+  { tier: "2", note: "Lower majors and CWL opens" },
 ];
 
 /** The event tier menu: one tier at a time, as the title rule reads it. */
@@ -277,15 +277,15 @@ function TierMenu({
         </button>
       ))}
       <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
-        Events with no tier (qualifiers and minors before 2017) are in neither.
+        Untiered events (pre-2017 qualifiers and minors) are in neither.
       </p>
     </div>
   );
 }
 
 const VENUES: { venue: Venue; note: string }[] = [
-  { venue: "lan", note: "Played in person at a venue" },
-  { venue: "online", note: "Played remotely, as most of the 2020 CDL season was" },
+  { venue: "lan", note: "In person" },
+  { venue: "online", note: "Remote" },
 ];
 
 /** LAN or online, as each event's venue is recorded. */
@@ -315,19 +315,19 @@ function VenueMenu({
         </button>
       ))}
       <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
-        Every map from 2017 to 2019 is LAN. The 2026 regular season mixes both
-        and is in neither.
+        2017–2019 is all LAN. The 2026 regular season is unrecorded and in
+        neither.
       </p>
     </div>
   );
 }
 
 const STAGE_NOTES: { stage: Stage; note: string }[] = [
-  { stage: "league", note: "Pro League and CDL regular-season matches, and the 2016 CWL stages" },
-  { stage: "event", note: "Everything but league play: groups, brackets and finals" },
-  { stage: "group", note: "Groups and pools at events" },
-  { stage: "bracket", note: "Bracket rounds and finals, a league's own playoffs included" },
-  { stage: "final", note: "The deciding series of each bracket" },
+  { stage: "league", note: "CWL Pro League, CDL regular season, 2016 CWL stages" },
+  { stage: "event", note: "Groups, brackets and finals" },
+  { stage: "group", note: "Event groups and pools" },
+  { stage: "bracket", note: "Brackets and finals, league playoffs included" },
+  { stage: "final", note: "Each bracket's last series" },
 ];
 
 /** League play or a part of an event, as each series' stage is recorded. */
@@ -357,8 +357,7 @@ function StageMenu({
         </button>
       ))}
       <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
-        There was no league before 2016. The 2020 home series count as league
-        play.
+        No league before 2016. 2020 home series count as league play.
       </p>
     </div>
   );
@@ -412,7 +411,7 @@ function DateMenu({
         />
       </label>
       <p className="text-[0.66rem] leading-snug text-ink-muted">
-        Both ends included. Leave one empty to leave it open.
+        Inclusive. Leave one blank for an open range.
       </p>
       <button
         type="submit"
@@ -425,7 +424,7 @@ function DateMenu({
   );
 }
 
-/** Top N quick picks. */
+/** Row limit quick picks. */
 const TOP_PICKS = [10, 25, 50, 100];
 
 /** A band: a caps label, its chips, and a one-line note on what it changes. */
@@ -455,10 +454,7 @@ function Band({
   );
 }
 
-/**
- * The mode menu. The name picks that mode alone; the box beside it adds or
- * drops it from a mix, which combines the ticked modes into one row.
- */
+/** The mode menu. Two or more ticked modes combine into one row. */
 function ModeMenu({
   modes,
   picked,
@@ -487,43 +483,24 @@ function ModeMenu({
         </button>
       )}
       <p className="px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
-        Tick two or more to combine them into one row.
+        Tick two or more to combine them.
       </p>
       {modes.map((m) => {
         const on = picked.includes(m);
-        const next = on ? picked.filter((p) => p !== m) : [...picked, m];
         return (
-          <div key={m} className="flex items-center">
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={on}
-              aria-label={`${on ? "Drop" : "Add"} ${modeLabel(modeCatalog, m)} ${on ? "from" : "to"} the mix`}
-              onClick={() => pick(next, false)}
-              className="group/box py-1.5 pl-2.5 pr-1.5"
-            >
-              <span
-                aria-hidden="true"
-                className={`flex h-3.5 w-3.5 items-center justify-center border text-[0.6rem] leading-none ${
-                  on
-                    ? "border-accent text-accent"
-                    : "border-hairline text-transparent group-hover/box:border-accent-dim"
-                }`}
-              >
-                ✓
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => pick([m], true)}
-              className={`${MENU_ROW} pl-1`}
-            >
-              <span className={on ? "text-ink" : ""}>{modeLabel(modeCatalog, m)}</span>
-              {picked.length !== 1 || !on ? (
-                <span className="ml-auto pl-2 text-[0.66rem] text-ink-muted">only</span>
-              ) : null}
-            </button>
-          </div>
+          <button
+            key={m}
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={on}
+            onClick={() =>
+              pick(on ? picked.filter((p) => p !== m) : [...picked, m], false)
+            }
+            className={MENU_ROW}
+          >
+            <Check on={on} />
+            <span className={on ? "text-ink" : ""}>{modeLabel(modeCatalog, m)}</span>
+          </button>
         );
       })}
     </div>
@@ -669,8 +646,8 @@ export function FilterBands({
     addable.push({ id: "players", label: "Player" });
   }
   if (!teamsOn && teams.length > 0) addable.push({ id: "teams", label: "Team" });
-  if (columns.length > 0) addable.push({ id: "where", label: "Value threshold" });
-  if (!topOn) addable.push({ id: "top", label: "Top N" });
+  if (columns.length > 0) addable.push({ id: "where", label: "Stat cutoff" });
+  if (!topOn) addable.push({ id: "top", label: "Row limit" });
 
   const modePicked = modeMix.length > 0 ? modeMix : modeSlug ? [modeSlug] : [];
   const modeText =
@@ -1011,7 +988,7 @@ export function FilterBands({
 
           {openChip === "where" && columns.length > 0 && (
             <Chip
-              label="Threshold"
+              label="Cutoff"
               value="new"
               open
               setOpen={opener("where")}
@@ -1026,7 +1003,7 @@ export function FilterBands({
 
           {shown("top", topOn) && (
             <Chip
-              label="Top"
+              label="Show top"
               value={top !== null ? String(top) : "all"}
               open={openChip === "top"}
               setOpen={opener("top")}

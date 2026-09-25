@@ -501,7 +501,7 @@ _SLAYING: tuple[Metric, ...] = (
         sources=("kills", "deaths", DURATION_KEY),
         modes=(ALL_MODES,),
         compute=_p10("kills", "deaths"),
-        note="A pace and aggression axis rather than a quality one.",
+        note="Measures pace and aggression.",
     ),
     Metric(
         key="assists_p10",
@@ -1712,7 +1712,7 @@ _ADVANTAGE: tuple[Metric, ...] = (
         sources=(KF_DISADV_WINS, KF_DISADV_ROUNDS),
         modes=(MODE_SND,),
         compute=_feed_rate(KF_DISADV_WINS, KF_DISADV_ROUNDS),
-        note="Winning a round the team opened a man down — a steal.",
+        note="Winning a round after the team lost the opening duel.",
     ),
     Metric(
         key="snd_adv_thrown_deaths_pr",
@@ -1750,7 +1750,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("kills",),
         modes=(ALL_MODES,),
         compute=_pm("kills"),
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="deaths_pm",
@@ -1765,7 +1765,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("deaths",),
         modes=(ALL_MODES,),
         compute=_pm("deaths"),
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="plus_minus_pm",
@@ -1780,7 +1780,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("kills", "deaths"),
         modes=(ALL_MODES,),
         compute=_weighted_pm((("kills", 1.0), ("deaths", -1.0))),
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="engagement_pm",
@@ -1795,7 +1795,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("kills", "deaths"),
         modes=(ALL_MODES,),
         compute=_pm("kills", "deaths"),
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="assists_pm",
@@ -1810,7 +1810,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("assists",),
         modes=(ALL_MODES,),
         compute=_pm("assists"),
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="damage_pm",
@@ -1825,7 +1825,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("damage",),
         modes=(ALL_MODES,),
         compute=_damage_pm,
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="non_traded_kill_rate",
@@ -1841,9 +1841,8 @@ _UNTIMED: tuple[Metric, ...] = (
         modes=(ALL_MODES,),
         compute=_rate(_terms("non_traded_kills"), "kills"),
         note=(
-            "A kill the opposing team did not answer. Counted by the data "
-            "source rather than reconstructed from a kill feed, so it is not "
-            "the same measurement as the archive's trade columns."
+            "A kill the opposing team did not answer, as the data source "
+            "counts it. Not comparable with the archive's trade columns."
         ),
     ),
     Metric(
@@ -1859,7 +1858,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("hill_time",),
         modes=(MODE_HARDPOINT,),
         compute=_pm("hill_time"),
-        note="Per map rather than per unit of time, which every title records.",
+        note="Per map: map length is recorded only for 2017–2019.",
     ),
     Metric(
         key="contested_hill_share",
@@ -1889,10 +1888,7 @@ _UNTIMED: tuple[Metric, ...] = (
         sources=("clutch_1v1", "snd_rounds"),
         modes=(MODE_SND,),
         compute=_rate(_terms("clutch_1v1", "clutch_1v2", "clutch_1v3", "clutch_1v4"), "snd_rounds"),
-        note=(
-            "Rounds won as the last player alive, counted by the data source. "
-            "Rare enough that a season total is a handful of rounds."
-        ),
+        note=("Rounds won as the last player alive, as the data source counts it."),
     ),
 )
 
@@ -2456,10 +2452,7 @@ SPLIT_METRIC = Metric(
     sources=("hill_time", "kills"),
     modes=(MODE_HARDPOINT,),
     compute=lambda _agg: None,
-    note=(
-        "Positive means the player takes more hill time than their slaying would predict; "
-        "negative means the reverse. Not a quality ranking."
-    ),
+    note=("Positive means more hill time than the player's slaying predicts; negative means less."),
 )
 
 

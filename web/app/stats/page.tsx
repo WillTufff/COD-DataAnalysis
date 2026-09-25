@@ -4,7 +4,6 @@ import type { MetricOption } from "./AddColumnMenu";
 import { AddFirstColumn } from "./AddFirstColumn";
 import { EntityTabs } from "./EntityTabs";
 import { FilterBands } from "./FilterBands";
-import { PresetStrip, type PresetTile } from "./PresetStrip";
 import { ReportTable } from "./ReportTable";
 import {
   ALL_MODES_LABEL,
@@ -28,12 +27,11 @@ import {
   contentSeasons,
   contentViewPlayers,
 } from "@/lib/reports/aggregate";
-import { CONTENT_KEYS, contentParts, hasContent } from "@/lib/reports/content";
+import { contentParts, hasContent } from "@/lib/reports/content";
 import { loadReport } from "@/lib/reports/load";
 import { coversModes } from "@/lib/reports/summed";
 import { categoryLabel } from "@/lib/reports/labels";
 import { applyResultFilters } from "@/lib/reports/rows";
-import { presetsFor } from "@/lib/reports/presets";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import {
   type SearchParams,
@@ -64,20 +62,6 @@ function yearSpan(years: number[]): string {
   const hi = Math.max(...years);
   return lo === hi ? String(lo) : `${lo}–${hi}`;
 }
-
-/** The filters a preset link keeps, so switching presets keeps the view. */
-const CARRIED_PARAMS = [
-  ...CONTENT_KEYS,
-  "years",
-  "players",
-  "teams",
-  "all",
-  "minmaps",
-  "where",
-  "top",
-  "view",
-  "rows",
-];
 
 export default async function StatsPage({
   searchParams,
@@ -117,13 +101,11 @@ export default async function StatsPage({
         ),
     getMetricCoverage(run.id, entity),
   ]);
-  const knownKeys = new Set(metrics.map((m) => m.key));
 
   // One resolution, shared with the export route so a download always matches
   // the table it came from.
   const resolved = await resolveReportForUrl(run.id, sp, metrics);
-  const { selected, activePreset, scope, rankedScope } =
-    resolved;
+  const { selected, scope, rankedScope } = resolved;
   const { years, playerSlugs, teamSlugs, modeSlug, modeMix, content } = resolved;
   const filtered = hasContent(content);
 
@@ -170,45 +152,17 @@ export default async function StatsPage({
     };
   });
 
-  // Preset links keep the row filters already set, so moving between presets
-  // changes the columns and mode and nothing else.
-  const carried = new URLSearchParams();
-  for (const k of CARRIED_PARAMS) {
-    const v = sp[k];
-    if (typeof v === "string") carried.set(k, v);
-  }
-  const presetTiles: PresetTile[] = presetsFor(entity).map((p) => {
-    const kept = p.metrics.filter((k) => knownKeys.has(k));
-    const params = new URLSearchParams(carried);
-    if (entity === "teams") params.set("entity", "teams");
-    params.set("preset", p.id);
-    params.sort();
-    const span = yearSpan([...new Set(kept.flatMap(coverageYears))]);
-    return {
-      id: p.id,
-      name: p.name,
-      blurb: p.blurb,
-      href: `/stats?${params.toString()}`,
-      span,
-    };
-  });
-
   const header = (
     <>
       <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
         Stats
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-ink-secondary">
-        {metrics.length} {entity === "teams" ? "team" : "player"} metrics,
-        season by season. Each number is scored against the qualified field of
-        its own season and mode, or, for a mix of modes or a combined span,
-        against the other rows in that mix.
+        {metrics.length} {entity === "teams" ? "team" : "player"} metrics by
+        season, scored against the qualified field for that season and mode.
       </p>
       <div className="mt-6">
         <EntityTabs entity={entity} />
-      </div>
-      <div className="mt-4">
-        <PresetStrip presets={presetTiles} activeId={activePreset?.id} />
       </div>
     </>
   );
@@ -221,14 +175,12 @@ export default async function StatsPage({
   const footnote = (
     <p className="mt-3 max-w-3xl text-xs text-ink-muted">
       {mixedField &&
-        "In 2017–2019 the field is every event's, CWL open brackets included, so it runs two to three times a CDL season's. Stage: League play scores the pro league alone. "}
-      {resolved.aggregated
-        ? `These numbers are summed from the picked maps${filtered ? ` (${contentText.join(", ")})` : ""} and scored within the qualified ${entity} of this mix${resolved.span ? " over the whole span" : ", season by season"}. Metrics that are not sums over maps, such as the kill-feed ones, show as dashes; each column's ▾ says why. `
-        : `Each cell is scored within the qualified ${entity} of its own season and mode. `}
-      A column can qualify a {entity === "teams" ? "team" : "player"}{" "}
-      the next column does not. Those cells are greyed, never dropped. Min maps hides
-      whole rows, and defaults to the published floor. Each
-      column&apos;s ▾ gives its formula and floor; full definitions are on the{" "}
+        "2017–2019 fields include CWL open brackets; set Stage to League play for the pro league alone. "}
+      {resolved.aggregated &&
+        `Summed from the selected maps${filtered ? ` (${contentText.join(", ")})` : ""} and scored against the other rows here. Columns that cannot be summed show a dash. `}
+      Cells below a column&apos;s sample floor are greyed. Min maps defaults to
+      the published floor. Definitions are under each column&apos;s info icon
+      and on the{" "}
       <Link href="/methodology/metrics" className="underline">
         methodology
       </Link>{" "}
@@ -243,7 +195,7 @@ export default async function StatsPage({
         {header}
         <div className="mt-8 flex items-center gap-3 border-t border-hairline pt-4 text-sm text-ink-secondary print:hidden">
           <AddFirstColumn catalog={metricOptions} />
-          <span>Add a metric column, or pick a preset above.</span>
+          <span>Add a metric column.</span>
         </div>
       </main>
     );
@@ -325,7 +277,6 @@ export default async function StatsPage({
       {/* Print-only stamp: the controls are hidden on paper, so the printout
           names its own filters. */}
       <p className="mt-4 hidden font-mono text-xs text-ink-secondary print:block">
-        {activePreset ? `${activePreset.name} · ` : ""}
         {entity === "teams" ? "teams · " : ""}
         {seasonLabel(scope.seasons, years)} ·{" "}
         {modeMix.length > 0
@@ -340,8 +291,7 @@ export default async function StatsPage({
           ? ` · ${resolved.where.length} threshold${resolved.where.length > 1 ? "s" : ""}`
           : ""}
         {resolved.top !== null ? ` · top ${resolved.top}` : ""}
-        {columns.some((c) => !c.higherIsBetter) ? " · ↓ lower is better" : ""} · metric layer
-        v{run.version}
+        · metric layer v{run.version}
       </p>
 
       {shownRows.length === 0 ? (

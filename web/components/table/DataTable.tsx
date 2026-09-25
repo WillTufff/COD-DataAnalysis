@@ -18,6 +18,8 @@ export type Column<T> = {
   // can hang a per-column menu off its header without it stealing the click
   // that sorts. It receives the table's sort so the menu can set it.
   headerMenu?: (api: HeaderApi) => ReactNode;
+  // Chrome rendered after the sort button, such as a remove control.
+  headerEnd?: ReactNode;
   cellClassName?: string;
   // A sortable column supplies the value the sort reads and the direction it
   // starts in. Omit for a static column (links, sparklines, bars).
@@ -114,7 +116,9 @@ export function DataTable<T>({
         unit={unit}
       />
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        {/* Positioned, so every cell's offsetLeft is measured from the table
+            whether or not the cell itself is positioned. */}
+        <table className="relative w-full text-left text-sm">
           <thead>
             <tr
               className={`border-b border-hairline text-xs text-ink-muted ${headerRowClassName ?? ""}`}
@@ -149,12 +153,13 @@ export function DataTable<T>({
                           : "none"
                       }
                     >
-                      {c.headerMenu ? (
+                      {c.headerMenu || c.headerEnd ? (
                         // One inline-flex line, so the menu button can never
-                        // wrap below the label in a narrow cell.
+                        // wrap away from the label in a narrow cell.
                         <span className="inline-flex items-center whitespace-nowrap">
+                          {c.headerMenu?.({ sort: state.sort, setSort: state.setSort })}
                           {sortButton}
-                          {c.headerMenu({ sort: state.sort, setSort: state.setSort })}
+                          {c.headerEnd}
                         </span>
                       ) : (
                         sortButton
@@ -197,6 +202,7 @@ export function DataTable<T>({
                   {columns.map((c) => (
                     <td
                       key={c.id}
+                      data-col-id={c.id}
                       className={`py-1.5 pr-4 ${c.align === "right" ? "text-right" : ""} ${c.cellClassName ?? ""}`}
                     >
                       {c.render(row, absIndex)}
