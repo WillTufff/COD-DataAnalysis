@@ -8,6 +8,16 @@ import type {
   ScopeTeam,
   ScopeViewPlayer,
 } from "@/lib/analytics";
+import type { MapOption } from "@/lib/reports/aggregate";
+import {
+  type ContentFilters,
+  type EventTier,
+  dateRangeLabel,
+  hasContent,
+  mapsLabel,
+  parseDay,
+  tierLabel,
+} from "@/lib/reports/content";
 import { fuzzyRank } from "@/lib/reports/fuzzy";
 import type { ReportEntity } from "@/lib/reports/resolve";
 import { type Threshold, parseView, serializeWhere } from "@/lib/reports/rows";
@@ -79,7 +89,7 @@ function SearchMenu({
   options: SearchOption[];
   picked: string[];
   pickedNames: Map<string, string>;
-  noun: "players" | "teams";
+  noun: string;
   commit: (next: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -178,12 +188,12 @@ function OptionContext({ text }: { text?: string }) {
 }
 
 /** The "+ filter" button and its list of filters not yet on the band. */
-function AddFilter({
+function AddFilter<Id extends string>({
   options,
   onPick,
 }: {
-  options: { id: RowFilter; label: string }[];
-  onPick: (id: RowFilter) => void;
+  options: { id: Id; label: string }[];
+  onPick: (id: Id) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -229,6 +239,106 @@ function AddFilter({
 }
 
 type RowFilter = "season" | "players" | "teams" | "minmaps" | "where" | "top";
+type MapsFilter = "tier" | "map" | "dates";
+
+const TIERS: { tier: EventTier; note: string }[] = [
+  { tier: "1", note: "Premier events: championships, the CWL Pro League, the CDL" },
+  { tier: "2", note: "Majors below them, and the CWL opens" },
+];
+
+/** The event tier menu: one tier at a time, as the title rule reads it. */
+function TierMenu({
+  tier,
+  pick,
+}: {
+  tier: EventTier | null;
+  pick: (next: EventTier) => void;
+}) {
+  return (
+    <div className="w-72 max-w-full py-1">
+      {TIERS.map((t) => (
+        <button
+          key={t.tier}
+          type="button"
+          role="menuitemradio"
+          aria-checked={tier === t.tier}
+          onClick={() => pick(t.tier)}
+          className={`${MENU_ROW} items-start`}
+        >
+          <Check on={tier === t.tier} />
+          <span className="flex flex-col">
+            <span className={tier === t.tier ? "text-ink" : ""}>{tierLabel(t.tier)}</span>
+            <span className="text-[0.66rem] leading-snug text-ink-muted">{t.note}</span>
+          </span>
+        </button>
+      ))}
+      <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
+        Events with no tier (qualifiers and minors before 2017) are in neither.
+      </p>
+    </div>
+  );
+}
+
+const DATE_INPUT =
+  "w-full border border-hairline bg-background px-2 py-1 font-mono text-xs tabular-nums text-ink outline-none focus:border-accent";
+
+/** Two days, either left open. The range is inclusive, on the series date. */
+function DateMenu({
+  from,
+  to,
+  commit,
+}: {
+  from: string | null;
+  to: string | null;
+  commit: (from: string | null, to: string | null) => void;
+}) {
+  const [draftFrom, setDraftFrom] = useState(from ?? "");
+  const [draftTo, setDraftTo] = useState(to ?? "");
+  const f = parseDay(draftFrom);
+  const t = parseDay(draftTo);
+  const valid =
+    (draftFrom === "" || f !== null) &&
+    (draftTo === "" || t !== null) &&
+    (f !== null || t !== null);
+  return (
+    <form
+      className="flex w-64 max-w-full flex-col gap-2 p-2.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid) commit(f, t);
+      }}
+    >
+      <label className="flex items-center gap-2 text-xs text-ink-muted">
+        <span className="w-10 shrink-0">From</span>
+        <input
+          type="date"
+          value={draftFrom}
+          onChange={(e) => setDraftFrom(e.target.value)}
+          className={DATE_INPUT}
+        />
+      </label>
+      <label className="flex items-center gap-2 text-xs text-ink-muted">
+        <span className="w-10 shrink-0">To</span>
+        <input
+          type="date"
+          value={draftTo}
+          onChange={(e) => setDraftTo(e.target.value)}
+          className={DATE_INPUT}
+        />
+      </label>
+      <p className="text-[0.66rem] leading-snug text-ink-muted">
+        Both ends included. Leave one empty to leave it open.
+      </p>
+      <button
+        type="submit"
+        disabled={!valid}
+        className="self-end border border-accent px-2.5 py-1 text-xs text-accent hover:bg-accent hover:text-background disabled:pointer-events-none disabled:opacity-40"
+      >
+        Set
+      </button>
+    </form>
+  );
+}
 
 /** Top N quick picks. */
 const TOP_PICKS = [10, 25, 50, 100];
@@ -353,6 +463,8 @@ export function FilterBands({
   modeSlug,
   modeMix,
   span,
+  content,
+  mapOptions,
   players,
   pickedPlayers,
   playerNames,
@@ -376,6 +488,10 @@ export function FilterBands({
   modeMix: string[];
   /** Rows are one combined span, so seasons pick maps rather than rows. */
   span: boolean;
+  /** Tier, map and date filters on the maps. */
+  content: ContentFilters;
+  /** The map names in view, busiest first. */
+  mapOptions: MapOption[];
   /** The players with rows in view, with their rosters. */
   players: ScopeViewPlayer[];
   pickedPlayers: string[];
@@ -457,7 +573,8 @@ export function FilterBands({
   const rowFilterCount =
     [seasonRowFilter, playersOn, teamsOn, minMapsSet, topOn].filter(Boolean).length +
     where.length;
-  const shown = (id: RowFilter, on: boolean) => on || openChip === id;
+  const shown = (id: RowFilter | MapsFilter, on: boolean) =>
+    on || openChip === id;
 
   const addable: { id: RowFilter; label: string }[] = [];
   if (!span && !seasonOn && seasons.length > 1) {
@@ -476,10 +593,38 @@ export function FilterBands({
       ? modeMix.map((m) => modeLabel(modeCatalog, m)).join(" + ")
       : modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL);
   const modeClearable = modePicked.length > 0 && allModes;
+  const mapOptionsForMenu = useMemo(
+    () =>
+      mapOptions.map((m) => ({
+        slug: m.slug,
+        label: m.name,
+        context: `${m.titles.join(", ")} · ${m.maps}`,
+      })),
+    [mapOptions],
+  );
+  const mapNameBySlug = useMemo(
+    () => new Map(mapOptions.map((m) => [m.slug, m.name])),
+    [mapOptions],
+  );
+  const tierOn = content.tier !== null;
+  const mapOn = content.maps.length > 0;
+  const datesOn = content.from !== null || content.to !== null;
+  const contentOn = hasContent(content);
+  const addableMaps: { id: MapsFilter; label: string }[] = [];
+  if (!tierOn) addableMaps.push({ id: "tier", label: "Event tier" });
+  if (!mapOn && mapOptions.length > 0) addableMaps.push({ id: "map", label: "Map" });
+  if (!datesOn) addableMaps.push({ id: "dates", label: "Date range" });
+
+  const filterCount =
+    rowFilterCount + [tierOn, mapOn, datesOn].filter(Boolean).length;
+
   const summary = [
     modeText,
     seasonLabel(seasons, years),
     ...(span ? ["combined span"] : []),
+    ...(tierOn ? [tierLabel(content.tier!)] : []),
+    ...(mapOn ? [mapsLabel(content.maps, mapNameBySlug)] : []),
+    ...(datesOn ? [dateRangeLabel(content.from, content.to)] : []),
   ].join(" · ");
 
   function pickModes(next: string[], close: boolean) {
@@ -549,7 +694,7 @@ export function FilterBands({
       >
         <span className="truncate text-ink-secondary">{summary}</span>
         <span className="shrink-0 pl-3 text-ink-muted">
-          Filters{rowFilterCount > 0 ? ` (${rowFilterCount})` : ""}{" "}
+          Filters{filterCount > 0 ? ` (${filterCount})` : ""}{" "}
           <span aria-hidden="true">{mobileOpen ? "▴" : "▾"}</span>
         </span>
       </button>
@@ -577,6 +722,73 @@ export function FilterBands({
             </Chip>
           ) : null}
           {span && seasonChip}
+
+          {shown("tier", tierOn) && (
+            <Chip
+              label="Event tier"
+              value={content.tier ? tierLabel(content.tier) : "any"}
+              open={openChip === "tier"}
+              setOpen={opener("tier")}
+              onClear={tierOn ? () => push({ tier: null }) : undefined}
+            >
+              <TierMenu
+                tier={content.tier}
+                pick={(next) => {
+                  push({ tier: next });
+                  setOpenChip(null);
+                }}
+              />
+            </Chip>
+          )}
+
+          {shown("map", mapOn) && (
+            <Chip
+              label="Map"
+              value={mapsLabel(content.maps, mapNameBySlug)}
+              open={openChip === "map"}
+              setOpen={opener("map")}
+              onClear={mapOn ? () => push({ map: null }) : undefined}
+            >
+              <SearchMenu
+                options={mapOptionsForMenu}
+                picked={content.maps}
+                pickedNames={mapNameBySlug}
+                noun="maps"
+                commit={(next) => push({ map: next.length > 0 ? next.join(",") : null })}
+              />
+            </Chip>
+          )}
+
+          {shown("dates", datesOn) && (
+            <Chip
+              label="Dates"
+              value={dateRangeLabel(content.from, content.to)}
+              open={openChip === "dates"}
+              setOpen={opener("dates")}
+              onClear={datesOn ? () => push({ from: null, to: null }) : undefined}
+            >
+              <DateMenu
+                from={content.from}
+                to={content.to}
+                commit={(from, to) => {
+                  push({ from, to });
+                  setOpenChip(null);
+                }}
+              />
+            </Chip>
+          )}
+
+          <AddFilter options={addableMaps} onPick={(id) => setOpenChip(id)} />
+
+          {contentOn && (
+            <button
+              type="button"
+              onClick={() => push({ tier: null, map: null, from: null, to: null })}
+              className="px-1 text-xs text-ink-muted underline-offset-2 hover:text-accent hover:underline"
+            >
+              Clear
+            </button>
+          )}
         </Band>
 
         <Band label="Show rows" note="Hides rows, numbers stay">

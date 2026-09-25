@@ -1178,6 +1178,54 @@ def aggregation_payloads(conn: psycopg.Connection[Any]) -> tuple[dict[str, Any],
     return catalog, total
 
 
+CONTENT_COVERAGE_SQL = """
+WITH m AS (
+    SELECT DISTINCT g.id, e.tier, e.is_lan, s.round_label, se.year
+    FROM game_player_stats gps
+    JOIN games g    ON g.id = gps.game_id
+    JOIN series s   ON s.id = g.series_id
+    JOIN events e   ON e.id = s.event_id
+    JOIN seasons se ON se.id = e.season_id
+)
+SELECT CASE WHEN year <= 2016 THEN '2013-2016'
+            WHEN year <= 2019 THEN '2017-2019'
+            ELSE '2020-2026' END AS era,
+       count(*),
+       count(*) FILTER (WHERE tier = '1'),
+       count(*) FILTER (WHERE tier = '2'),
+       count(*) FILTER (WHERE is_lan IS NOT NULL),
+       count(*) FILTER (WHERE NULLIF(btrim(round_label), '') IS NOT NULL)
+FROM m GROUP BY 1
+"""
+
+
+def content_coverage(conn: psycopg.Connection[Any]) -> dict[str, dict[str, int]]:
+    """Per era, the maps with box scores and what each content filter reads."""
+    fields = ("maps", "tier_1", "tier_2", "venue", "round")
+    return {
+        str(row[0]): dict(zip(fields, (int(v) for v in row[1:]), strict=True))
+        for row in conn.execute(CONTENT_COVERAGE_SQL).fetchall()
+    }
+
+
+def content_coverage_failures(measured: dict[str, dict[str, int]]) -> list[str]:
+    """The methodology page prints, per era, how many maps each stats-page
+    content filter can reach and how thin the two held-back ones are. A reload
+    moves every one of those counts, so each is held against the database."""
+    pinned = evalspec.PUBLISHED_FIGURES.get("content_filter_coverage") or {}
+    bad: list[str] = []
+    for era in sorted(set(pinned) | set(measured)):
+        want = pinned.get(era) or {}
+        got = measured.get(era) or {}
+        for field in sorted(set(want) | set(got)):
+            if want.get(field) != got.get(field):
+                bad.append(
+                    f"content filter coverage {era} {field}: "
+                    f"page says {want.get(field)}, database has {got.get(field)}"
+                )
+    return bad
+
+
 def face_validity_failures(payload: dict[str, Any]) -> list[str]:
     """The five tests the anchor pre-registration declares gating.
 
@@ -1494,6 +1542,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             "aggregation",
             aggregation_failures(*aggregation_payloads(conn)),
         ),
+        ("content filters", content_coverage_failures(content_coverage(conn))),
         (
             "page figures",
             page_figure_failures(

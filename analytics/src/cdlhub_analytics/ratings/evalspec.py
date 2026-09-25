@@ -609,6 +609,15 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # published cells its parity check reproduces. Pinned 2026-09-24, when the
     # page began re-aggregating a mix of modes or a span of seasons from maps.
     "aggregation_parity": {"player_summed": 91, "team_summed": 4, "cells": 129083},
+    # What the stats page's content filters can reach, per era: maps with box
+    # scores, how many sit at each event tier, and how many carry a venue and a
+    # round label, the two filters held back for thin coverage. Pinned
+    # 2026-09-24 with the tier, map and date filters.
+    "content_filter_coverage": {
+        "2013-2016": {"maps": 5079, "tier_1": 2549, "tier_2": 176, "venue": 0, "round": 0},
+        "2017-2019": {"maps": 6870, "tier_1": 3516, "tier_2": 3270, "venue": 6786, "round": 5091},
+        "2020-2026": {"maps": 6540, "tier_1": 6527, "tier_2": 13, "venue": 6467, "round": 6540},
+    },
     "forecast_brier": {
         "rapm": 0.24455,
         "rapm_prior": 0.24538,

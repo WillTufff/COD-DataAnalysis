@@ -11,10 +11,12 @@ import {
   type MetricCatalogEntry,
   type ReportColumn,
   type ReportRow,
+  type ScopeViewPlayer,
   reportColumn,
   teamMemberSeasons,
 } from "@/lib/analytics";
 import { playerSlug, teamSlug } from "@/lib/slug";
+import { type ContentFilters, NO_CONTENT } from "./content";
 import {
   type MapKeySource,
   type SeasonTotals,
@@ -31,6 +33,8 @@ export type AggregateQuery = {
   span: boolean;
   players?: string[];
   teams?: string[];
+  /** Tier, map and date filters on the maps summed; absent = none. */
+  content?: ContentFilters;
 };
 
 /** Why a column cannot be re-aggregated for this pick, or null when it can. */
@@ -87,8 +91,18 @@ function keyExpr(
   return parts.length === 1 ? parts[0] : sql`COALESCE(${sql.join(parts, sql`, `)})`;
 }
 
-/** The map filter both entities share: seasons and modes, whole games only. */
-function mapFilter(q: Pick<AggregateQuery, "years" | "modes">): SQL {
+/** A map name's slug in SQL, as `mapSlug` builds it in the page. */
+const MAP_SLUG = sql`regexp_replace(regexp_replace(lower(mp.name), '[^a-z0-9]+', '-', 'g'), '^-+|-+$', '', 'g')`;
+
+/** The series date as a UTC day, which is what `from` and `to` name. */
+const SERIES_DAY = sql`(s.played_at AT TIME ZONE 'UTC')::date`;
+
+/**
+ * The map filter every aggregate shares: seasons, modes, and the content
+ * filters. Each is one predicate over MAP_JOINS, so a filter narrows the maps
+ * and leaves the arithmetic alone.
+ */
+function mapFilter(q: Pick<AggregateQuery, "years" | "modes" | "content">): SQL {
   const conditions: SQL[] = [sql`TRUE`];
   if (q.years.length > 0) {
     conditions.push(sql`se.year IN (${sql.join(q.years.map((y) => sql`${y}`), sql`, `)})`);
@@ -96,6 +110,13 @@ function mapFilter(q: Pick<AggregateQuery, "years" | "modes">): SQL {
   if (q.modes.length > 0) {
     conditions.push(sql`gm.slug IN (${sql.join(q.modes.map((m) => sql`${m}`), sql`, `)})`);
   }
+  const c = q.content ?? NO_CONTENT;
+  if (c.tier) conditions.push(sql`ev.tier = ${c.tier}`);
+  if (c.maps.length > 0) {
+    conditions.push(sql`${MAP_SLUG} IN (${sql.join(c.maps.map((m) => sql`${m}`), sql`, `)})`);
+  }
+  if (c.from) conditions.push(sql`${SERIES_DAY} >= ${c.from}::date`);
+  if (c.to) conditions.push(sql`${SERIES_DAY} <= ${c.to}::date`);
   return sql.join(conditions, sql` AND `);
 }
 
@@ -107,6 +128,7 @@ const MAP_JOINS = sql`
   JOIN seasons se    ON se.id = ev.season_id
   JOIN titles t      ON t.id = se.title_id
   JOIN game_modes gm ON gm.id = g.mode_id
+  LEFT JOIN maps mp  ON mp.id = g.map_id
 `;
 
 /** Alias for a summed key in the result set. */
@@ -283,6 +305,18 @@ export async function queryAggregateReport(
   const aggregated = summedRows(seasons, summed, q.span);
   const names = await entityNames(entity, [...new Set(aggregated.map((r) => r.id))]);
 
+  // A column the filtered maps never feed says so, rather than sitting empty
+  // beside columns that have numbers.
+  if (q.content) {
+    const fed = new Set(aggregated.flatMap((r) => Object.keys(r.cells)));
+    for (const c of columns) {
+      if (!c.unavailable && !fed.has(c.key)) {
+        c.unavailable =
+          "None of the maps these filters keep come from a title that tracks it.";
+      }
+    }
+  }
+
   let rows: ReportRow[] = aggregated.map((r) => {
     const name = names.get(r.id) ?? String(r.id);
     const year = r.years[r.years.length - 1];
@@ -328,4 +362,103 @@ async function entityNames(
       : sql`SELECT id, handle AS name FROM players WHERE id IN (${list})`,
   )) as unknown as { id: number; name: string }[];
   return new Map(rows.map((r) => [Number(r.id), r.name]));
+}
+
+/** The view a lookup below describes: the maps the report sums over. */
+type MapView = Pick<AggregateQuery, "years" | "modes" | "content">;
+
+/** The seasons that have maps under these filters, with how many. */
+export async function contentSeasons(q: MapView): Promise<Map<number, number>> {
+  const rows = (await db.execute(sql`
+    SELECT se.year, count(DISTINCT g.id)::int AS maps
+    ${MAP_JOINS}
+    WHERE ${mapFilter(q)}
+    GROUP BY se.year
+  `)) as unknown as { year: number; maps: number }[];
+  return new Map(rows.map((r) => [Number(r.year), Number(r.maps)]));
+}
+
+export type MapOption = {
+  slug: string;
+  name: string;
+  /** Title codes the name was played in. */
+  titles: string[];
+  maps: number;
+};
+
+/**
+ * Every map name with maps in view, busiest first. The map pick itself is left
+ * out of the filter, so the menu can offer a second map beside the first.
+ */
+export async function contentMapOptions(q: MapView): Promise<MapOption[]> {
+  const rows = (await db.execute(sql`
+    SELECT mp.name, ${MAP_SLUG} AS slug,
+           array_agg(DISTINCT t.short_name) AS titles,
+           count(DISTINCT g.id)::int AS maps
+    ${MAP_JOINS}
+    WHERE mp.name IS NOT NULL
+      AND ${mapFilter({ ...q, content: { ...(q.content ?? NO_CONTENT), maps: [] } })}
+    GROUP BY mp.name
+    ORDER BY maps DESC, mp.name
+  `)) as unknown as {
+    name: string;
+    slug: string;
+    titles: string[];
+    maps: number;
+  }[];
+  // Two names folding to one slug share an entry, as the URL knows them.
+  const bySlug = new Map<string, MapOption>();
+  for (const r of rows) {
+    // A name with no letters or digits ("?") has no slug to pick it by.
+    if (!r.slug) continue;
+    const have = bySlug.get(r.slug);
+    if (have) {
+      have.maps += Number(r.maps);
+      have.titles = [...new Set([...have.titles, ...r.titles])];
+    } else {
+      bySlug.set(r.slug, {
+        slug: r.slug,
+        name: r.name,
+        titles: [...r.titles],
+        maps: Number(r.maps),
+      });
+    }
+  }
+  return [...bySlug.values()];
+}
+
+/**
+ * The players with maps under these filters, with the teams they played those
+ * maps for: `getReportViewPlayers` for a view the published rows do not hold.
+ */
+export async function contentViewPlayers(q: MapView): Promise<ScopeViewPlayer[]> {
+  const rows = (await db.execute(sql`
+    SELECT p.handle, se.year, tm.name AS team
+    ${MAP_JOINS}
+    JOIN players p ON p.id = gps.player_id
+    JOIN teams tm  ON tm.id = gps.team_id
+    WHERE ${mapFilter(q)}
+    GROUP BY p.handle, se.year, tm.name
+  `)) as unknown as { handle: string; year: number; team: string }[];
+  const bySlug = new Map<string, ScopeViewPlayer>();
+  for (const r of rows) {
+    const slug = playerSlug(r.handle);
+    let entry = bySlug.get(slug);
+    if (!entry) bySlug.set(slug, (entry = { handle: r.handle, slug, stints: [] }));
+    const year = Number(r.year);
+    const have = entry.stints.find((st) => st.team === r.team);
+    if (have) {
+      if (!have.years.includes(year)) have.years.push(year);
+    } else {
+      entry.stints.push({ team: r.team, years: [year] });
+    }
+  }
+  const latest = (years: number[]) => Math.max(...years);
+  for (const e of bySlug.values()) {
+    for (const st of e.stints) st.years.sort((a, b) => a - b);
+    e.stints.sort(
+      (a, b) => latest(b.years) - latest(a.years) || a.team.localeCompare(b.team),
+    );
+  }
+  return [...bySlug.values()].sort((a, b) => a.handle.localeCompare(b.handle));
 }

@@ -23,6 +23,12 @@ import {
   latestRun,
   getModeCatalog,
 } from "@/lib/analytics";
+import {
+  contentMapOptions,
+  contentSeasons,
+  contentViewPlayers,
+} from "@/lib/reports/aggregate";
+import { CONTENT_KEYS, contentParts, hasContent } from "@/lib/reports/content";
 import { loadReport } from "@/lib/reports/load";
 import { coversModes } from "@/lib/reports/summed";
 import { categoryLabel } from "@/lib/reports/labels";
@@ -59,8 +65,9 @@ function yearSpan(years: number[]): string {
   return lo === hi ? String(lo) : `${lo}–${hi}`;
 }
 
-/** The row filters a preset link keeps, so switching presets keeps the view. */
+/** The filters a preset link keeps, so switching presets keeps the view. */
 const CARRIED_PARAMS = [
+  ...CONTENT_KEYS,
   "years",
   "players",
   "teams",
@@ -117,13 +124,33 @@ export default async function StatsPage({
   const resolved = await resolveReportForUrl(run.id, sp, metrics);
   const { selected, activePreset, scope, rankedScope } =
     resolved;
-  const { years, playerSlugs, teamSlugs, modeSlug, modeMix } = resolved;
+  const { years, playerSlugs, teamSlugs, modeSlug, modeMix, content } = resolved;
+  const filtered = hasContent(content);
+
+  // The maps a content filter keeps decide which seasons are really in view:
+  // a map name belongs to a few titles, a date range to a few seasons.
+  const aggModes = resolved.aggregate?.modes ?? [];
+  const mapView = {
+    years: resolved.aggregate?.years ?? (years.length > 0 ? years : scope.years),
+    modes: resolved.aggregate ? aggModes : modeSlug ? [modeSlug] : [],
+    content,
+  };
+  const [keptSeasons, mapOptions] = await Promise.all([
+    filtered ? contentSeasons(mapView) : Promise.resolve(null),
+    contentMapOptions(mapView),
+  ]);
+  // What the "Maps from" chips claim, reused by the stamp and the footnote.
+  const contentText = contentParts(
+    content,
+    new Map(mapOptions.map((m) => [m.slug, m.name])),
+  );
 
   // A metric is in view when it has rows for at least one season on screen in
   // the mode on screen. An empty `years` is every covered season. A
   // re-aggregated view also needs the metric's arithmetic and all its modes.
-  const viewYears = years.length > 0 ? years : scope.years;
-  const aggModes = resolved.aggregate?.modes ?? [];
+  const viewYears = (years.length > 0 ? years : scope.years).filter(
+    (y) => keptSeasons === null || keptSeasons.has(y),
+  );
   const coverageYears = (key: string) =>
     [...new Set((coverage[key] ?? []).map((c) => Number(c.split(":")[0])))];
   const metricOptions: MetricOption[] = metrics.map((m) => {
@@ -189,10 +216,10 @@ export default async function StatsPage({
   const footnote = (
     <p className="mt-3 max-w-3xl text-xs text-ink-muted">
       {resolved.aggregated
-        ? `These numbers are summed from the picked maps and scored within the qualified ${entity} of this mix${resolved.span ? " over the whole span" : ", season by season"}. Metrics that are not sums over maps, such as the kill-feed ones, show as dashes; each column's ▾ says why. `
+        ? `These numbers are summed from the picked maps${filtered ? ` (${contentText.join(", ")})` : ""} and scored within the qualified ${entity} of this mix${resolved.span ? " over the whole span" : ", season by season"}. Metrics that are not sums over maps, such as the kill-feed ones, show as dashes; each column's ▾ says why. `
         : `Each cell is scored within the qualified ${entity} of its own season and mode. `}
-      A column can qualify a {entity === "teams" ? "team" : "player"} the next
-      column does not. Those cells are greyed, never dropped. Min maps hides
+      A column can qualify a {entity === "teams" ? "team" : "player"}{" "}
+      the next column does not. Those cells are greyed, never dropped. Min maps hides
       whole rows, and defaults to the published floor. Each
       column&apos;s ▾ gives its formula and floor; full definitions are on the{" "}
       <Link href="/methodology/metrics" className="underline">
@@ -222,9 +249,12 @@ export default async function StatsPage({
     await Promise.all([
       loadReport(run.id, resolved, catalog, (m) => modeLabel(modeCatalog, m)),
       // The player filter has no place on a team report: the rows are teams.
+      // Under a content filter, the players who played the maps it keeps.
       entity === "teams"
         ? Promise.resolve([])
-        : getReportViewPlayers(run.id, { years, modeSlug }),
+        : filtered
+          ? contentViewPlayers(mapView)
+          : getReportViewPlayers(run.id, { years, modeSlug }),
       // Names for picks outside the view, which the chip still has to show.
       entity === "teams" || playerSlugs.length === 0
         ? Promise.resolve([])
@@ -265,6 +295,8 @@ export default async function StatsPage({
           modeSlug={modeSlug}
           modeMix={modeMix}
           span={resolved.span}
+          content={content}
+          mapOptions={mapOptions}
           players={viewPlayers}
           pickedPlayers={playerSlugs}
           playerNames={playerNames}
@@ -292,7 +324,8 @@ export default async function StatsPage({
         {modeMix.length > 0
           ? modeMix.map((m) => modeLabel(modeCatalog, m)).join(" + ")
           : modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)}{" "}
-        ·{resolved.span ? " combined span ·" : ""}{" "}
+        ·{resolved.span ? " combined span ·" : ""}
+        {contentText.map((t) => ` ${t} ·`).join("")}{" "}
         {entity === "players" ? `${playersText.toLowerCase()} · ` : ""}
         {teamsText.toLowerCase()} ·{" "}
         {resolved.minMaps > 0 ? `min ${resolved.minMaps} maps` : "any maps"}
@@ -316,7 +349,9 @@ export default async function StatsPage({
                 .join(
                   " on ",
                 )} here. Try a different season or mode, or clear the row filters.`
-            : `No ${entity} match these filters. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or loosen the row filters.`}
+            : filtered && (keptSeasons?.size ?? 0) === 0
+              ? `No maps match the "Maps from" filters (${contentText.join(", ")}) in ${seasonLabel(scope.seasons, years).toLowerCase()}. Try a wider date range, another map or tier, or clear them.`
+              : `No ${entity} match these filters. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or loosen the row filters.`}
         </p>
       ) : (
         <ReportTable

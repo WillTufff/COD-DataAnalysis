@@ -4,6 +4,7 @@
 // always matches the table it came from.
 
 import { type ReportColumn, type ReportRow } from "@/lib/analytics";
+import { contentSlug } from "./content";
 import { type ResolvedReport } from "./resolve";
 import { type ReportView, serializeWhere } from "./rows";
 
@@ -38,6 +39,11 @@ export type ExportMeta = {
     aggregated: boolean;
     players: string[] | "all";
     teams: string[] | "all";
+    /** Content filters: which maps were summed, beyond season and mode. */
+    tier: "1" | "2" | "all";
+    maps: string[] | "all";
+    from: string | null;
+    to: string | null;
   };
   sort: string;
   dir: "asc" | "desc";
@@ -79,7 +85,8 @@ export function cohortSlug(resolved: ResolvedReport): string {
   const players = named(resolved.playerSlugs, "players");
   const teamsPart = named(resolved.teamSlugs, "teams");
   const span = resolved.span ? "-span" : "";
-  return `${entity}${mode}-${seasons}${span}${teamsPart}${players}`
+  const content = contentSlug(resolved.content);
+  return `${entity}${mode}-${seasons}${span}${content}${teamsPart}${players}`
     .replace(/[^a-z0-9-]+/gi, "-")
     .toLowerCase();
 }
@@ -145,6 +152,10 @@ export function buildExportMatrix(
         players:
           resolved.playerSlugs.length > 0 ? resolved.playerSlugs : "all",
         teams: resolved.teamSlugs.length > 0 ? resolved.teamSlugs : "all",
+        tier: resolved.content.tier ?? "all",
+        maps: resolved.content.maps.length > 0 ? resolved.content.maps : "all",
+        from: resolved.content.from,
+        to: resolved.content.to,
       },
       sort: resolved.sort,
       dir: resolved.dir,

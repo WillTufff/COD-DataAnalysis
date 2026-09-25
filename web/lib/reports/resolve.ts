@@ -12,6 +12,7 @@ import {
 } from "@/lib/analytics";
 import { type SearchParams, one } from "@/lib/paging";
 import type { AggregateQuery } from "./aggregate";
+import { type ContentFilters, hasContent, parseContent } from "./content";
 import {
   DEFAULT_PRESET,
   DEFAULT_TEAM_PRESET,
@@ -66,6 +67,8 @@ export type ResolvedReport = {
   modeMix: string[];
   /** One row per player over every picked season (`?rows=span`). */
   span: boolean;
+  /** Tier, map and date filters on the maps; any one forces aggregation. */
+  content: ContentFilters;
   /** Numbers re-aggregated from map rows rather than read from season rows. */
   aggregated: boolean;
   /** The published maps floor: the min maps a bare URL applies. */
@@ -236,6 +239,7 @@ export async function resolveReport(
   const top = parseTop(sp);
   const filters: ResultFilters = { minMaps, where, top };
   const span = parseSpan(sp);
+  const content = parseContent(sp);
 
   if (selected.length === 0) {
     return {
@@ -250,7 +254,8 @@ export async function resolveReport(
       teamSlugs,
       modeMix: [],
       span,
-      aggregated: span,
+      content,
+      aggregated: span || hasContent(content),
       mapsFloor,
       minMaps,
       where,
@@ -338,7 +343,9 @@ export async function resolveReport(
         : modeExplicitAll
           ? undefined
           : modeDefault;
-  const aggregated = span || modeMix.length > 0;
+  // A content filter narrows the maps under every row, which the published
+  // season rows cannot, so it always takes the re-aggregation path.
+  const aggregated = span || modeMix.length > 0 || hasContent(content);
 
   return {
     entity,
@@ -353,6 +360,7 @@ export async function resolveReport(
     modeSlug,
     modeMix,
     span,
+    content,
     aggregated,
     mapsFloor,
     minMaps,
@@ -382,6 +390,7 @@ export async function resolveReport(
           span,
           players: playerSlugs,
           teams: teamSlugs,
+          ...(hasContent(content) ? { content } : {}),
         }
       : undefined,
   };

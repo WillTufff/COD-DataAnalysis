@@ -18,6 +18,7 @@ function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
     modeSlug: undefined,
     modeMix: [],
     span: false,
+    content: { tier: null, maps: [], from: null, to: null },
     aggregated: false,
     mapsFloor: 8,
     minMaps: 8,
@@ -107,6 +108,10 @@ describe("buildExportMatrix", () => {
       aggregated: false,
       players: "all",
       teams: "all",
+      tier: "all",
+      maps: "all",
+      from: null,
+      to: null,
     });
     const picked = buildExportMatrix(
       resolved({ years: [2018], playerSlugs: ["scump"] }),
@@ -159,5 +164,25 @@ describe("cohortSlug", () => {
     expect(m.meta.cohort.aggregated).toBe(true);
     expect(m.rows[0][1]).toBe("2020–2023");
     expect(cohortSlug(r)).toBe("hardpoint-control-2020-2023-span");
+  });
+});
+
+describe("content filters in the export", () => {
+  it("records them in the meta and names them in the filename", () => {
+    const r = resolved({
+      modeSlug: "hardpoint",
+      years: [2018],
+      aggregated: true,
+      content: { tier: "1", maps: ["gibraltar"], from: "2018-01-01", to: null },
+    });
+    const m = buildExportMatrix(r, [kdColumn], [row()], RUN);
+    expect(m.meta.cohort).toMatchObject({
+      tier: "1",
+      maps: ["gibraltar"],
+      from: "2018-01-01",
+      to: null,
+      aggregated: true,
+    });
+    expect(cohortSlug(r)).toBe("hardpoint-2018-tier1-gibraltar-2018-01-01-to-end");
   });
 });

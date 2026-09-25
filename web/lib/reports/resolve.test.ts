@@ -311,3 +311,43 @@ describe("mode mix and combined span", () => {
     expect(r.aggregate).toMatchObject({ years: [2017, 2018, 2019], modes: [], span: true });
   });
 });
+
+describe("content filters", () => {
+  it("forces the aggregated path even with one mode and per-season rows", async () => {
+    const r = await resolveReport(
+      1,
+      { metrics: "kd", mode: "hardpoint", years: "2018", tier: "1" },
+      CATALOG,
+    );
+    expect(r.modeSlug).toBe("hardpoint");
+    expect(r.span).toBe(false);
+    expect(r.aggregated).toBe(true);
+    expect(r.aggregate).toMatchObject({
+      modes: ["hardpoint"],
+      years: [2018],
+      span: false,
+      content: { tier: "1", maps: [], from: null, to: null },
+    });
+  });
+
+  it("leaves a report with no content filter on the published rows", async () => {
+    const r = await resolveReport(1, { metrics: "kd", mode: "hardpoint", tier: "3" }, CATALOG);
+    expect(r.content.tier).toBeNull();
+    expect(r.aggregated).toBe(false);
+  });
+
+  it("carries a map pick and a date range", async () => {
+    const r = await resolveReport(
+      1,
+      { metrics: "kd", map: "Raid,raid,Standoff", from: "2018-06-01", to: "2018-01-01" },
+      CATALOG,
+    );
+    expect(r.content).toEqual({
+      tier: null,
+      maps: ["raid", "standoff"],
+      from: "2018-01-01",
+      to: "2018-06-01",
+    });
+    expect(r.aggregated).toBe(true);
+  });
+});

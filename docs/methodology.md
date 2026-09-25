@@ -440,6 +440,41 @@ path, then compares all 129,083 published cells that carry arithmetic: value,
 denominator, z-score, percentile, qualification, and which cells exist at all. They must
 agree to the precision the published cells are stored at.
 
+#### Content filters
+
+The stats page can also narrow the maps under a number by event tier, by map, and by
+date. Each filter is one more condition on which map rows are summed, so a filtered
+number goes through the same arithmetic and the same scoring as a mix of modes, and it
+is compared only with the other rows under the same filters. Any one of them sends the
+page down the second path, even for a single mode shown season by season. A filter
+ships only if its field means the same thing in every era, and the counts below are
+maps with box scores, per era.
+
+| | 2013–2016 | 2017–2019 | 2020–2026 |
+|---|---|---|---|
+| Maps | 5,079 | 6,870 | 6,540 |
+| Tier 1 events | 2,549 | 3,516 | 6,527 |
+| Tier 2 events | 176 | 3,270 | 13 |
+| Venue known | 0 | 6,786 | 6,467 |
+| Round label | 0 | 5,091 | 6,540 |
+
+Event tier is the numeric tier the title rule reads, set from Liquipedia from 2017 on and
+from the CoD wiki's Premier and Major before it. Maps from events with no tier (the
+earlier qualifiers and minors) are kept by neither choice. Tier 1 does not isolate the
+pro league. The CDL era has almost nothing else to remove, and in 2019 the Pro League
+qualifier and the championship are tier 1, so the tier 1 field is the whole field. Map
+filters by name across titles, so a map remade in a later game counts both versions.
+Dates are whole days on the series date, both ends included, and every map carries one.
+
+Three filters are held back. Venue is unknown for every map before 2017, so a LAN
+filter would silently drop an era that was mostly played on LAN. The CoD wiki's
+tournament table records whether each event was online or offline, so the gap can be
+closed from data already held. Playoffs against regular play reads the round label,
+which the earlier wiki data never records. Opponent tier has no definition that
+travels. The opponent adjustment rates strength without cutting it into tiers, and a
+rank or rating cut means one thing in a twelve-team league and another in a hundred-team
+open.
+
 ## Tier 1c: Structured event tier (shipped)
 
 Underneath every box score for 2017 and 2018 sits a full event feed: every kill with its
