@@ -11,6 +11,7 @@ import {
   getTeamReportScope,
 } from "@/lib/analytics";
 import { type SearchParams, one } from "@/lib/paging";
+import type { AggregateQuery } from "./aggregate";
 import {
   DEFAULT_PRESET,
   DEFAULT_TEAM_PRESET,
@@ -61,6 +62,12 @@ export type ResolvedReport = {
   playerSlugs: string[]; // empty = everyone
   teamSlugs: string[]; // empty = every team
   modeSlug?: string;
+  /** Two or more modes combined into one row; empty otherwise. */
+  modeMix: string[];
+  /** One row per player over every picked season (`?rows=span`). */
+  span: boolean;
+  /** Numbers re-aggregated from map rows rather than read from season rows. */
+  aggregated: boolean;
   /** The published maps floor: the min maps a bare URL applies. */
   mapsFloor: number;
   minMaps: number;
@@ -73,6 +80,8 @@ export type ResolvedReport = {
   defaultSortKey: string;
   defaultDir: "asc" | "desc";
   query: ReportQuery;
+  /** Set when the numbers are re-aggregated from map rows. */
+  aggregate?: AggregateQuery;
 };
 
 /**
@@ -116,6 +125,11 @@ function parseSlugCsv(sp: SearchParams, key: string): string[] {
     }
   }
   return out;
+}
+
+/** `?rows=span`: one combined row per player over the picked seasons. */
+export function parseSpan(sp: SearchParams): boolean {
+  return one(sp, "rows") === "span";
 }
 
 /** The player filter: `?players=` as a CSV of player slugs. */
@@ -221,6 +235,7 @@ export async function resolveReport(
   const where = parseWhere(sp, selected);
   const top = parseTop(sp);
   const filters: ResultFilters = { minMaps, where, top };
+  const span = parseSpan(sp);
 
   if (selected.length === 0) {
     return {
@@ -233,6 +248,9 @@ export async function resolveReport(
       years: [],
       playerSlugs,
       teamSlugs,
+      modeMix: [],
+      span,
+      aggregated: span,
       mapsFloor,
       minMaps,
       where,
@@ -294,24 +312,33 @@ export async function resolveReport(
         : [];
   const years = pickedYears.length === scope.years.length ? [] : pickedYears;
 
-  // The cohort fixes a single mode — modes are compared, not combined. An
+  // `?mode=` is a CSV. One mode reads that mode's published rows; two or more
+  // are a mix, re-aggregated from their maps into one row. With no pick, an
   // active preset seeds its mode; otherwise "all modes combined" is the default
   // only when the ranked column has all-modes rows, else that column's first
   // real mode. An explicitly empty `?mode=` is a deliberate pick of "combined"
   // and outranks the preset's seed.
-  const modeRaw = one(sp, "mode");
-  const modeExplicitAll = "mode" in sp && modeRaw === "" && rankedScope.allModes;
+  const modePicks = parseSlugCsv(sp, "mode").filter((m) => scope.modes.includes(m));
+  const modeMix =
+    modePicks.length > 1 ? scope.modes.filter((m) => modePicks.includes(m)) : [];
+  const modeRaw = modePicks.length === 1 ? modePicks[0] : "";
+  const modeExplicitAll =
+    "mode" in sp && one(sp, "mode") === "" && rankedScope.allModes;
   const presetMode =
     preset?.defaultMode && scope.modes.includes(preset.defaultMode)
       ? preset.defaultMode
       : undefined;
   const modeDefault =
     presetMode ?? (rankedScope.allModes ? undefined : rankedScope.modes[0]);
-  const modeSlug = scope.modes.includes(modeRaw)
-    ? modeRaw
-    : modeExplicitAll
+  const modeSlug =
+    modeMix.length > 0
       ? undefined
-      : modeDefault;
+      : scope.modes.includes(modeRaw)
+        ? modeRaw
+        : modeExplicitAll
+          ? undefined
+          : modeDefault;
+  const aggregated = span || modeMix.length > 0;
 
   return {
     entity,
@@ -324,6 +351,9 @@ export async function resolveReport(
     playerSlugs,
     teamSlugs,
     modeSlug,
+    modeMix,
+    span,
+    aggregated,
     mapsFloor,
     minMaps,
     where,
@@ -342,5 +372,17 @@ export async function resolveReport(
       players: playerSlugs,
       teams: teamSlugs,
     },
+    aggregate: aggregated
+      ? {
+          metrics: selected,
+          // Every covered season, named: the map rows reach back further than
+          // the columns do, and a season no column covers has nothing to add.
+          years: years.length > 0 ? years : scope.years,
+          modes: modeMix.length > 0 ? modeMix : modeSlug ? [modeSlug] : [],
+          span,
+          players: playerSlugs,
+          teams: teamSlugs,
+        }
+      : undefined,
   };
 }

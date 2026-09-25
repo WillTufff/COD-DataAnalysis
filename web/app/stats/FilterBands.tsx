@@ -261,11 +261,87 @@ function Band({
 }
 
 /**
+ * The mode menu. The name picks that mode alone; the box beside it adds or
+ * drops it from a mix, which combines the ticked modes into one row.
+ */
+function ModeMenu({
+  modes,
+  picked,
+  allModes,
+  modeCatalog,
+  pick,
+}: {
+  modes: string[];
+  picked: string[];
+  allModes: boolean;
+  modeCatalog: ModeCatalog;
+  pick: (next: string[], close: boolean) => void;
+}) {
+  return (
+    <div className="w-64 max-w-full py-1">
+      {allModes && (
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={picked.length === 0}
+          onClick={() => pick([], true)}
+          className={MENU_ROW}
+        >
+          <Check on={picked.length === 0} />
+          {ALL_MODES_LABEL}
+        </button>
+      )}
+      <p className="px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
+        Tick two or more to combine them into one row.
+      </p>
+      {modes.map((m) => {
+        const on = picked.includes(m);
+        const next = on ? picked.filter((p) => p !== m) : [...picked, m];
+        return (
+          <div key={m} className="flex items-center">
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={on}
+              aria-label={`${on ? "Drop" : "Add"} ${modeLabel(modeCatalog, m)} ${on ? "from" : "to"} the mix`}
+              onClick={() => pick(next, false)}
+              className="group/box py-1.5 pl-2.5 pr-1.5"
+            >
+              <span
+                aria-hidden="true"
+                className={`flex h-3.5 w-3.5 items-center justify-center border text-[0.6rem] leading-none ${
+                  on
+                    ? "border-accent text-accent"
+                    : "border-hairline text-transparent group-hover/box:border-accent-dim"
+                }`}
+              >
+                ✓
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => pick([m], true)}
+              className={`${MENU_ROW} pl-1`}
+            >
+              <span className={on ? "text-ink" : ""}>{modeLabel(modeCatalog, m)}</span>
+              {picked.length !== 1 || !on ? (
+                <span className="ml-auto pl-2 text-[0.66rem] text-ink-muted">only</span>
+              ) : null}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The filters, in two bands. "Maps from" holds the filters that change which
- * maps feed a number, so every value moves with them; today that is the mode.
+ * maps feed a number, so every value moves with them: the mode (one, or a mix
+ * combined into one row), and the seasons when rows are a combined span.
  * "Show rows" holds the filters that only hide rows of the finished table:
- * season, player, team, min maps, value thresholds and top N. Each change
- * rewrites the URL.
+ * season (per-season rows), player, team, min maps, value thresholds and top N.
+ * Each change rewrites the URL.
  */
 export function FilterBands({
   entity,
@@ -275,6 +351,8 @@ export function FilterBands({
   modeCatalog,
   allModes,
   modeSlug,
+  modeMix,
+  span,
   players,
   pickedPlayers,
   playerNames,
@@ -294,6 +372,10 @@ export function FilterBands({
   modeCatalog: ModeCatalog;
   allModes: boolean;
   modeSlug?: string;
+  /** Modes combined into one row; empty unless two or more are picked. */
+  modeMix: string[];
+  /** Rows are one combined span, so seasons pick maps rather than rows. */
+  span: boolean;
   /** The players with rows in view, with their rosters. */
   players: ScopeViewPlayer[];
   pickedPlayers: string[];
@@ -368,16 +450,19 @@ export function FilterBands({
   }
 
   const seasonOn = years.length > 0;
+  const seasonRowFilter = seasonOn && !span;
   const playersOn = entity === "players" && pickedPlayers.length > 0;
   const teamsOn = pickedTeams.length > 0;
   const topOn = top !== null;
   const rowFilterCount =
-    [seasonOn, playersOn, teamsOn, minMapsSet, topOn].filter(Boolean).length +
+    [seasonRowFilter, playersOn, teamsOn, minMapsSet, topOn].filter(Boolean).length +
     where.length;
   const shown = (id: RowFilter, on: boolean) => on || openChip === id;
 
   const addable: { id: RowFilter; label: string }[] = [];
-  if (!seasonOn && seasons.length > 1) addable.push({ id: "season", label: "Season" });
+  if (!span && !seasonOn && seasons.length > 1) {
+    addable.push({ id: "season", label: "Season" });
+  }
   if (entity === "players" && !playersOn && players.length > 0) {
     addable.push({ id: "players", label: "Player" });
   }
@@ -385,11 +470,64 @@ export function FilterBands({
   if (columns.length > 0) addable.push({ id: "where", label: "Value threshold" });
   if (!topOn) addable.push({ id: "top", label: "Top N" });
 
-  const modeClearable = modeSlug !== undefined && allModes;
+  const modePicked = modeMix.length > 0 ? modeMix : modeSlug ? [modeSlug] : [];
+  const modeText =
+    modeMix.length > 0
+      ? modeMix.map((m) => modeLabel(modeCatalog, m)).join(" + ")
+      : modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL);
+  const modeClearable = modePicked.length > 0 && allModes;
   const summary = [
-    modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL),
+    modeText,
     seasonLabel(seasons, years),
+    ...(span ? ["combined span"] : []),
   ].join(" · ");
+
+  function pickModes(next: string[], close: boolean) {
+    // Empty, not absent: an explicit "combined" has to outrank a preset's
+    // seeded mode. An empty mix with no all-modes rows keeps the last pick.
+    if (next.length === 0 && !allModes) return;
+    push({ mode: next.join(",") });
+    if (close) setOpenChip(null);
+  }
+
+  const seasonChip = (
+    <Chip
+      label="Season"
+      value={seasonLabel(seasons, years)}
+      open={openChip === "season"}
+      setOpen={opener("season")}
+      onClear={seasonOn ? () => push({ years: "all", year: null }) : undefined}
+    >
+      <div className="max-h-80 w-56 max-w-full overflow-y-auto py-1">
+        <button
+          type="button"
+          onClick={() => commitYears([])}
+          className={MENU_ROW}
+        >
+          <Check on={!seasonOn} />
+          All seasons
+        </button>
+        <div className="my-1 border-t border-hairline" />
+        {[...seasons].reverse().map((s) => {
+          const on = active.includes(s.year);
+          return (
+            <button
+              key={s.year}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={on}
+              onClick={() => toggleYear(s.year)}
+              className={MENU_ROW}
+            >
+              <Check on={on} />
+              <span className="font-mono tabular-nums">{s.year}</span>
+              <span className={on ? "text-ink" : ""}>{s.code}</span>
+            </button>
+          );
+        })}
+      </div>
+    </Chip>
+  );
 
   const minMapsPicks = [
     { n: 0, label: "Any" },
@@ -424,89 +562,25 @@ export function FilterBands({
           {modes.length > 0 || allModes ? (
             <Chip
               label="Mode"
-              value={modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)}
+              value={modeText}
               open={openChip === "mode"}
               setOpen={opener("mode")}
               onClear={modeClearable ? () => push({ mode: "" }) : undefined}
             >
-              <div className="w-56 max-w-full py-1">
-                {allModes && (
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={modeSlug === undefined}
-                    onClick={() => {
-                      // Empty, not absent: an explicit "combined" has to
-                      // outrank a preset's seeded mode.
-                      push({ mode: "" });
-                      setOpenChip(null);
-                    }}
-                    className={MENU_ROW}
-                  >
-                    <Check on={modeSlug === undefined} />
-                    {ALL_MODES_LABEL}
-                  </button>
-                )}
-                {modes.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={modeSlug === m}
-                    onClick={() => {
-                      push({ mode: m });
-                      setOpenChip(null);
-                    }}
-                    className={MENU_ROW}
-                  >
-                    <Check on={modeSlug === m} />
-                    {modeLabel(modeCatalog, m)}
-                  </button>
-                ))}
-              </div>
+              <ModeMenu
+                modes={modes}
+                picked={modePicked}
+                allModes={allModes}
+                modeCatalog={modeCatalog}
+                pick={pickModes}
+              />
             </Chip>
           ) : null}
+          {span && seasonChip}
         </Band>
 
         <Band label="Show rows" note="Hides rows, numbers stay">
-          {shown("season", seasonOn) && (
-            <Chip
-              label="Season"
-              value={seasonLabel(seasons, years)}
-              open={openChip === "season"}
-              setOpen={opener("season")}
-              onClear={seasonOn ? () => push({ years: "all", year: null }) : undefined}
-            >
-              <div className="max-h-80 w-56 max-w-full overflow-y-auto py-1">
-                <button
-                  type="button"
-                  onClick={() => commitYears([])}
-                  className={MENU_ROW}
-                >
-                  <Check on={!seasonOn} />
-                  All seasons
-                </button>
-                <div className="my-1 border-t border-hairline" />
-                {[...seasons].reverse().map((s) => {
-                  const on = active.includes(s.year);
-                  return (
-                    <button
-                      key={s.year}
-                      type="button"
-                      role="menuitemcheckbox"
-                      aria-checked={on}
-                      onClick={() => toggleYear(s.year)}
-                      className={MENU_ROW}
-                    >
-                      <Check on={on} />
-                      <span className="font-mono tabular-nums">{s.year}</span>
-                      <span className={on ? "text-ink" : ""}>{s.code}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </Chip>
-          )}
+          {!span && shown("season", seasonOn) && seasonChip}
 
           {entity === "players" && shown("players", playersOn) && (
             <Chip
@@ -641,8 +715,7 @@ export function FilterBands({
               type="button"
               onClick={() =>
                 push({
-                  years: "all",
-                  year: null,
+                  ...(span ? {} : { years: "all", year: null }),
                   players: null,
                   teams: null,
                   minmaps: null,

@@ -82,6 +82,8 @@ export function ReportTable({
   rows,
   catalog,
   filters,
+  aggregated,
+  span,
   initialView,
   initialPer,
   initialPage,
@@ -93,6 +95,9 @@ export function ReportTable({
   rows: ReportRow[];
   catalog: MetricOption[];
   filters: ResultFilters;
+  /** The numbers were re-aggregated from maps and scored within this pick. */
+  aggregated: boolean;
+  span: boolean;
   initialView: ReportView;
   initialPer: Per;
   initialPage: number;
@@ -339,14 +344,17 @@ export function ReportTable({
         id: "season",
         header: "Season",
         cellClassName: "whitespace-nowrap text-ink-secondary",
-        render: (r) => (
-          <>
-            <span className="sm:hidden">{r.title}</span>
-            <span className="max-sm:hidden">
-              {r.year} {r.title}
-            </span>
-          </>
-        ),
+        render: (r) =>
+          r.seasonLabel ? (
+            <span className="font-mono tabular-nums">{r.seasonLabel}</span>
+          ) : (
+            <>
+              <span className="sm:hidden">{r.title}</span>
+              <span className="max-sm:hidden">
+                {r.year} {r.title}
+              </span>
+            </>
+          ),
       },
     ];
     for (const key of order) {
@@ -357,7 +365,10 @@ export function ReportTable({
       cols.push({
         id: col.key,
         header: (
-          <span title={definitionLine(col)}>
+          <span
+            title={definitionLine(col)}
+            className={col.unavailable ? "text-ink-muted" : ""}
+          >
             {col.label}
             {col.higherIsBetter ? "" : (
               <span className="ml-0.5 text-ink-secondary" aria-hidden="true">
@@ -406,6 +417,9 @@ export function ReportTable({
         columnCount={columns.length}
         view={view}
         setView={setView}
+        aggregated={aggregated}
+        span={span}
+        setSpan={(on) => push({ rows: on ? "span" : null })}
       />
       <div onPointerDownCapture={onHeaderPointerDown}>
       <DataTable

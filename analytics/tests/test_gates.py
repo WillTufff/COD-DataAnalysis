@@ -1793,3 +1793,14 @@ def test_an_anchor_set_that_no_longer_matches_its_digest_fails() -> None:
 
 def test_a_run_with_no_report_card_fails_the_face_validity_gate() -> None:
     assert gates.face_validity_failures({}) == ["the run wrote no face-validity report card"]
+
+
+def test_aggregation_figures_fail_when_the_catalog_moves() -> None:
+    pinned = evalspec.PUBLISHED_FIGURES["aggregation_parity"]
+    players: list[dict[str, Any]] = [{"agg": {"num": []}}] * pinned["player_summed"]
+    players.append({"agg": None})
+    catalog = {"metrics": players, "team_metrics": [{"agg": {"num": []}}] * pinned["team_summed"]}
+    assert gates.aggregation_failures(catalog, pinned["cells"]) == []
+    players.append({"agg": {"num": []}})
+    moved = gates.aggregation_failures(catalog, pinned["cells"] + 1)
+    assert len(moved) == 2

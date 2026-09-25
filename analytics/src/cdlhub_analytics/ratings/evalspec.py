@@ -605,6 +605,10 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # drifted to 215 transitions and r = 0.4232 while the run returned 216 and
     # 0.4002.
     "prior_target": {"n": 216, "skill": 0.3807, "composite": 0.2821, "kd_z": 0.2534},
+    # How far the stats page's request-time aggregation reaches, and how many
+    # published cells its parity check reproduces. Pinned 2026-09-24, when the
+    # page began re-aggregating a mix of modes or a span of seasons from maps.
+    "aggregation_parity": {"player_summed": 91, "team_summed": 4, "cells": 129083},
     "forecast_brier": {
         "rapm": 0.24455,
         "rapm_prior": 0.24538,

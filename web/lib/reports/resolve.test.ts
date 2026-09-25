@@ -270,3 +270,44 @@ describe("resolveReportForUrl", () => {
     expect(r.selected).toEqual(["kd"]);
   });
 });
+
+describe("mode mix and combined span", () => {
+  it("keeps a single mode on the published rows", async () => {
+    const r = await resolveReport(1, { metrics: "kd", mode: "hardpoint" }, CATALOG);
+    expect(r.modeSlug).toBe("hardpoint");
+    expect(r.modeMix).toEqual([]);
+    expect(r.aggregated).toBe(false);
+    expect(r.aggregate).toBeUndefined();
+  });
+
+  it("reads a CSV of two modes as one re-aggregated mix, in scope order", async () => {
+    const r = await resolveReport(
+      1,
+      { metrics: "kd", mode: "search-and-destroy,hardpoint", years: "2018" },
+      CATALOG,
+    );
+    expect(r.modeSlug).toBeUndefined();
+    expect(r.modeMix).toEqual(["hardpoint", "search-and-destroy"]);
+    expect(r.aggregate).toMatchObject({
+      modes: ["hardpoint", "search-and-destroy"],
+      years: [2018],
+      span: false,
+    });
+  });
+
+  it("drops unknown modes from a mix, and one survivor is a single mode", async () => {
+    const r = await resolveReport(1, { metrics: "kd", mode: "hardpoint,bogus" }, CATALOG);
+    expect(r.modeSlug).toBe("hardpoint");
+    expect(r.aggregated).toBe(false);
+  });
+
+  it("re-aggregates a span over every covered season when none is picked", async () => {
+    const r = await resolveReport(
+      1,
+      { metrics: "kd", mode: "", rows: "span", years: "all" },
+      CATALOG,
+    );
+    expect(r.span).toBe(true);
+    expect(r.aggregate).toMatchObject({ years: [2017, 2018, 2019], modes: [], span: true });
+  });
+});

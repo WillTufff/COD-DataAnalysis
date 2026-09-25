@@ -136,6 +136,20 @@ TYPED_ALIASES: dict[str, str] = {
     "multikill_4": "4_piece",
 }
 
+# Typed keys stored under a different column name. MAP_SQL selects typed
+# columns by position, so this is what each position actually reads.
+TYPED_STORAGE: dict[str, str] = {
+    "ctrl_captures": "ctl_zone_captures",
+}
+
+# Keys filled from other keys when neither the column nor extras carries them,
+# as the sum of whichever of these are present. The archive reports SnD first
+# deaths in extras; the CDL source reports the same quantity in a column.
+KEY_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "ctrl_rounds": ("ctl_attack_rounds", "ctl_defense_rounds"),
+    "snd_firstdeaths": ("first_deaths",),
+}
+
 # The player's primary weapon on the map: a label, not a count, so it travels
 # beside `values` rather than in it. Observed on 2017-2019 only, and the only
 # role ground truth in the record.
@@ -376,6 +390,21 @@ def extras_number(extras: dict[str, Any], key: str) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def key_sources() -> dict[str, dict[str, Any]]:
+    """How each measured key is read from a game_player_stats row: the typed
+    column first, then the extras key, then the sum of any fallback keys."""
+    out: dict[str, dict[str, Any]] = {}
+    for name in TYPED_COLUMNS:
+        key = TYPED_ALIASES.get(name, name)
+        out[key] = {"column": TYPED_STORAGE.get(name, name), "extra": None, "fallback": []}
+    for name in (*NUMERIC_EXTRAS, KILL_DIST):
+        entry = out.setdefault(name, {"column": None, "extra": None, "fallback": []})
+        entry["extra"] = name
+    for name, parts in KEY_FALLBACKS.items():
+        out[name]["fallback"] = list(parts)
+    return out
+
+
 @dataclass
 class Loaded:
     rows: list[MapRow] = field(default_factory=list)
@@ -400,14 +429,11 @@ def load_map_rows(conn: psycopg.Connection[tuple[object, ...]]) -> Loaded:
         for name in (*NUMERIC_EXTRAS, KILL_DIST):
             if merged.get(name) is None:
                 merged[name] = extras_number(extras, name)
-        if merged.get("ctrl_rounds") is None:
-            attack, defense = merged.get("ctl_attack_rounds"), merged.get("ctl_defense_rounds")
-            if attack is not None or defense is not None:
-                merged["ctrl_rounds"] = (attack or 0.0) + (defense or 0.0)
-        # The archive reports first deaths in extras and only for SnD; the CDL
-        # source reports the same quantity in a column. One key, either way.
-        if merged.get("snd_firstdeaths") is None:
-            merged["snd_firstdeaths"] = merged.get("first_deaths")
+        for name, parts in KEY_FALLBACKS.items():
+            if merged.get(name) is None:
+                present = [v for v in (merged.get(p) for p in parts) if v is not None]
+                if present:
+                    merged[name] = sum(present)
 
         values: dict[str, float] = {}
         for name, value in merged.items():

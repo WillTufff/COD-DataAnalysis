@@ -61,7 +61,7 @@ export function toXml(matrix: ExportMatrix): string {
         : meta.cohort.seasons,
     )}" mode="${xmlEscape(
       meta.cohort.mode,
-    )}" players="${xmlEscape(
+    )}" rows="${meta.cohort.rows}" aggregated="${meta.cohort.aggregated}" players="${xmlEscape(
       Array.isArray(meta.cohort.players)
         ? meta.cohort.players.join(",")
         : meta.cohort.players,

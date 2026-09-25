@@ -10,6 +10,7 @@ import {
   sumPrizeBySeason,
 } from "@/lib/earnings";
 import type { SeasonEra } from "@/lib/eras";
+import type { AggSpec, MapKeySource } from "@/lib/reports/summed";
 import type { ModeCatalog } from "@/lib/modes";
 import { playerSlug, teamSlug } from "@/lib/slug";
 import {
@@ -1787,6 +1788,8 @@ export type MetricCatalogEntry = {
   titles: string[];
   modes: string[];
   note: string | null;
+  /** The metric as sums over map rows, where it is one; see lib/reports/summed. */
+  agg?: AggSpec | null;
 };
 
 export type UntrackedColumn = {
@@ -1812,6 +1815,8 @@ export type MetricCatalog = {
   team_metrics?: Omit<MetricCatalogEntry, "sources" | "titles">[];
   untracked_columns: UntrackedColumn[];
   kill_feed_constants?: KillFeedConstants;
+  /** How each summed key is read off a map row. */
+  map_keys?: Record<string, MapKeySource>;
 };
 
 export type ReconciliationTitle = {
@@ -2037,6 +2042,8 @@ export type ReportColumn = {
   minDenom: number;
   formula: string;
   note: string | null;
+  /** Why this column has no cells in a re-aggregated view; absent otherwise. */
+  unavailable?: string | null;
 };
 
 /** One player in the cohort, with a sparse map of metric → cell. */
@@ -2050,6 +2057,9 @@ export type ReportRow = {
   /** Maps played in this season and mode, whichever columns are on screen. */
   maps: number | null;
   cells: Record<string, ReportCell>;
+  /** A combined-span row: the seasons it sums, and how the season column reads. */
+  years?: number[];
+  seasonLabel?: string;
 };
 
 export type ReportQuery = {
@@ -2061,7 +2071,7 @@ export type ReportQuery = {
   teams?: string[]; // team slugs; empty/undefined = every team
 };
 
-function reportColumn(m: MetricCatalogEntry): ReportColumn {
+export function reportColumn(m: MetricCatalogEntry): ReportColumn {
   return {
     key: m.key,
     label: m.label,
@@ -2468,7 +2478,7 @@ export async function getReportTeams(): Promise<ScopeTeam[]> {
  * mid-season mover therefore counts for both teams, which is the honest answer
  * to "show me this team's players".
  */
-async function teamMemberSeasons(teamSlugs: string[]): Promise<Set<string>> {
+export async function teamMemberSeasons(teamSlugs: string[]): Promise<Set<string>> {
   const wanted = new Set(teamSlugs);
   const allTeams = await db
     .select({ id: teams.id, name: teams.name })

@@ -302,6 +302,7 @@ JOBS: list[dict[str, Any]] = [
             "web lint",
             "web types",
             "web tests",
+            "web parity",
             "web e2e",
         ],
         "destructive": False,

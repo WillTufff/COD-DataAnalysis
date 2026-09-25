@@ -32,6 +32,10 @@ export type ExportMeta = {
   cohort: {
     seasons: number[] | "all";
     mode: string;
+    /** "season": one row per season; "span": one row over every season. */
+    rows: "season" | "span";
+    /** Whether the numbers were re-aggregated from map rows and scored within this pick. */
+    aggregated: boolean;
     players: string[] | "all";
     teams: string[] | "all";
   };
@@ -59,7 +63,10 @@ export type ExportMatrix = {
 /** A filesystem-safe cohort tag for the download filename, e.g. `hardpoint-2018`. */
 export function cohortSlug(resolved: ResolvedReport): string {
   const entity = resolved.entity === "teams" ? "teams-" : "";
-  const mode = resolved.modeSlug ?? "all-modes";
+  const mode =
+    resolved.modeMix.length > 0
+      ? resolved.modeMix.join("-")
+      : (resolved.modeSlug ?? "all-modes");
   const seasons =
     resolved.years.length > 0 ? resolved.years.join("-") : "all-seasons";
   // A filter names itself when it fits; past three picks it's just a count.
@@ -71,7 +78,8 @@ export function cohortSlug(resolved: ResolvedReport): string {
         : `-${slugs.length}-${noun}`;
   const players = named(resolved.playerSlugs, "players");
   const teamsPart = named(resolved.teamSlugs, "teams");
-  return `${entity}${mode}-${seasons}${teamsPart}${players}`
+  const span = resolved.span ? "-span" : "";
+  return `${entity}${mode}-${seasons}${span}${teamsPart}${players}`
     .replace(/[^a-z0-9-]+/gi, "-")
     .toLowerCase();
 }
@@ -79,8 +87,8 @@ export function cohortSlug(resolved: ResolvedReport): string {
 /**
  * Flatten the report into headers + numeric rows + metadata. With `detail`, each
  * metric contributes its percentile and z-score columns alongside the value.
- * The fixed left columns mirror the on-screen table: player and season. The
- * cohort holds one mode, which the metadata names.
+ * The fixed left columns mirror the on-screen table: player and season (or the
+ * span a combined row covers). The metadata names the modes.
  */
 export function buildExportMatrix(
   resolved: ResolvedReport,
@@ -103,7 +111,10 @@ export function buildExportMatrix(
   const used = truncated ? rows.slice(0, MAX_EXPORT_ROWS) : rows;
 
   const matrixRows: (string | number | null)[][] = used.map((r) => {
-    const out: (string | number | null)[] = [r.handle, `${r.year} ${r.title}`];
+    const out: (string | number | null)[] = [
+      r.handle,
+      r.seasonLabel ?? `${r.year} ${r.title}`,
+    ];
     for (const c of columns) {
       const cell = r.cells[c.key];
       out.push(cell ? cell.value : null);
@@ -125,7 +136,12 @@ export function buildExportMatrix(
       run,
       cohort: {
         seasons: resolved.years.length > 0 ? resolved.years : "all",
-        mode: resolved.modeSlug ?? "all",
+        mode:
+          resolved.modeMix.length > 0
+            ? resolved.modeMix.join(",")
+            : (resolved.modeSlug ?? "all"),
+        rows: resolved.span ? "span" : "season",
+        aggregated: resolved.aggregated,
         players:
           resolved.playerSlugs.length > 0 ? resolved.playerSlugs : "all",
         teams: resolved.teamSlugs.length > 0 ? resolved.teamSlugs : "all",

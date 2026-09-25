@@ -4,11 +4,12 @@
 
 import {
   getMetricCatalog,
+  getModeCatalog,
   getTeamMetricCatalog,
   latestRun,
-  queryReport,
-  queryTeamReport,
 } from "@/lib/analytics";
+import { modeLabel } from "@/lib/reports/labels";
+import { loadReport } from "@/lib/reports/load";
 import { buildExportMatrix, cohortSlug } from "@/lib/reports/export";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import { applyResultFilters } from "@/lib/reports/rows";
@@ -79,10 +80,10 @@ export async function GET(request: Request) {
     });
   }
 
-  const { columns, rows: cohort } =
-    resolved.entity === "teams"
-      ? await queryTeamReport(run.id, resolved.query, resolved.selectedEntries)
-      : await queryReport(run.id, resolved.query, resolved.selectedEntries);
+  const modeCatalog = await getModeCatalog();
+  const { columns, rows: cohort } = await loadReport(run.id, resolved, catalog, (m) =>
+    modeLabel(modeCatalog, m),
+  );
   const rows = applyResultFilters(
     cohort,
     resolved.filters,

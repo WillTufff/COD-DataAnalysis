@@ -1141,6 +1141,43 @@ def page_figure_failures(
     return bad
 
 
+def aggregation_failures(catalog: dict[str, Any], cells: int) -> list[str]:
+    """The methodology page states how many metrics the stats page can
+    re-aggregate from map rows and how many published cells the parity check
+    reproduces. Both move with the catalog and the data, so both are held
+    against the newest metric run."""
+    pinned = evalspec.PUBLISHED_FIGURES.get("aggregation_parity") or {}
+    measured = {
+        "player_summed": sum(1 for m in catalog.get("metrics", []) if m.get("agg")),
+        "team_summed": sum(1 for m in catalog.get("team_metrics", []) if m.get("agg")),
+        "cells": cells,
+    }
+    return [
+        f"aggregation {key}: page says {pinned.get(key)}, run has {got}"
+        for key, got in measured.items()
+        if pinned.get(key) != got
+    ]
+
+
+def aggregation_payloads(conn: psycopg.Connection[Any]) -> tuple[dict[str, Any], int]:
+    """The newest metric catalog, and its published cells whose metric carries
+    arithmetic."""
+    catalog = artifact(conn, metrics.MODEL, "metric_catalog")
+    run_id = latest_run_id(conn, metrics.MODEL)
+    total = 0
+    for table, entries in (
+        ("player_metric_season", catalog.get("metrics", [])),
+        ("team_metric_season", catalog.get("team_metrics", [])),
+    ):
+        keys = [m["key"] for m in entries if m.get("agg")]
+        row = conn.execute(
+            f"SELECT count(*) FROM {table} WHERE run_id = %s AND metric = ANY(%s)",
+            (run_id, keys),
+        ).fetchone()
+        total += int(row[0]) if row else 0
+    return catalog, total
+
+
 def face_validity_failures(payload: dict[str, Any]) -> list[str]:
     """The five tests the anchor pre-registration declares gating.
 
@@ -1452,6 +1489,10 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             face_validity_failures(
                 optional_artifact(conn, career_rank.MODEL, career_facevalidity.ARTIFACT_NAME)
             ),
+        ),
+        (
+            "aggregation",
+            aggregation_failures(*aggregation_payloads(conn)),
         ),
         (
             "page figures",

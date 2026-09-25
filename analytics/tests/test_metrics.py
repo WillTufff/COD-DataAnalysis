@@ -576,3 +576,90 @@ def test_every_title_with_maps_is_named_in_the_title_order(archive_conn: Any) ->
     if not rows:
         pytest.skip("no box scores loaded")
     assert {str(r[0]) for r in rows} <= set(maprows.TITLE_ORDER)
+
+
+# ---------- published arithmetic ----------
+
+
+def test_every_box_score_metric_publishes_its_arithmetic() -> None:
+    payload = metrics.catalog_payload(full_coverage())
+    for entry in payload["metrics"]:
+        reads_feed = any(src.startswith("kf_") for src in entry["sources"])
+        assert (entry["agg"] is None) == reads_feed, entry["key"]
+
+
+def test_agg_spec_only_names_known_keys() -> None:
+    known = set(maprows.MEASURED_KEYS) - {maprows.KILL_DIST}
+    for m in CATALOG:
+        if not isinstance(m.compute, metrics.Summed):
+            continue
+        spec = m.compute.spec()
+        terms = [*spec["num"], *(spec["den"] or []), *spec["denom"]]
+        for key, _ in terms:
+            assert key.startswith("@") or key in known, (m.key, key)
+
+
+def test_complement_flips_a_summed_metric() -> None:
+    agg = make_agg(kills=200.0, kills_stayed_alive=150.0)
+    clean = compute("clean_kill_rate", agg)
+    traded = compute("traded_back_rate", agg)
+    assert traded[0] == pytest.approx(1.0 - clean[0])
+    summed = metric_by_key("traded_back_rate").compute
+    assert isinstance(summed, metrics.Summed)
+    assert summed.complement
+
+
+def test_key_sources_match_the_typed_select() -> None:
+    select = maprows.MAP_SQL.split("gps.extras")[0]
+    typed = [
+        c.strip().removeprefix("gps.")
+        for c in select.split("g.winner_team_id,")[1].replace("\n", " ").split(",")
+        if c.strip()
+    ]
+    sources = maprows.key_sources()
+    expected = [sources[maprows.TYPED_ALIASES.get(n, n)]["column"] for n in maprows.TYPED_COLUMNS]
+    assert typed == expected
+
+
+def _team_agg(maps: list[metrics.TeamMap]) -> Aggregate:
+    agg = make_agg(maps=len(maps))
+    for tm in maps:
+        for key, value in metrics.team_map_values(tm).items():
+            agg.add(key, value)
+    return agg
+
+
+@pytest.mark.parametrize(
+    "maps",
+    [
+        [
+            make_team_map(won=True, score=250, opp_score=180, kills={1: 30, 2: 20}, opp_kills=41),
+            make_team_map(won=False, score=6, opp_score=4, kills={1: 10}, opp_kills=12),
+            make_team_map(won=None, score=None, opp_score=None, kills={1: 5}),
+            make_team_map(won=False, score=3, opp_score=None, kills={1: 9}, opp_kills=9),
+        ],
+        [make_team_map(won=None)],
+    ],
+)
+def test_team_agg_matches_team_metric_value(maps: list[metrics.TeamMap]) -> None:
+    agg = _team_agg(maps)
+    for m in metrics.TEAM_CATALOG:
+        if m.agg is None:
+            continue
+        expected = metrics._team_metric_value(m.key, maps)
+        result = m.agg(agg)
+        if expected is None:
+            assert result is None, m.key
+            continue
+        assert result is not None, m.key
+        assert result[0] == pytest.approx(expected), m.key
+        assert result[1] == metrics._team_metric_denom(m.key, maps), m.key
+
+
+def test_team_agg_only_names_team_map_keys() -> None:
+    for m in metrics.TEAM_CATALOG:
+        if m.agg is None:
+            continue
+        spec = m.agg.spec()
+        for key, _ in [*spec["num"], *(spec["den"] or []), *spec["denom"]]:
+            assert key.startswith("@") or key in metrics.TEAM_MAP_KEYS, (m.key, key)

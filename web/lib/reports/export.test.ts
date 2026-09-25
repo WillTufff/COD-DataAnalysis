@@ -16,6 +16,9 @@ function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
     playerSlugs: [],
     teamSlugs: [],
     modeSlug: undefined,
+    modeMix: [],
+    span: false,
+    aggregated: false,
     mapsFloor: 8,
     minMaps: 8,
     where: [],
@@ -100,6 +103,8 @@ describe("buildExportMatrix", () => {
     expect(m.meta.cohort).toEqual({
       seasons: "all",
       mode: "all",
+      rows: "season",
+      aggregated: false,
       players: "all",
       teams: "all",
     });
@@ -134,5 +139,25 @@ describe("cohortSlug", () => {
     );
     expect(slug).toBe("teams-all-modes-all-seasons-rise-nation-");
     expect(slug).toMatch(/^[a-z0-9-]+$/);
+  });
+
+  it("names a mode mix and a combined span, with the span in the season column", () => {
+    const r = resolved({
+      modeMix: ["hardpoint", "control"],
+      span: true,
+      aggregated: true,
+      years: [2020, 2023],
+    });
+    const m = buildExportMatrix(
+      r,
+      [kdColumn],
+      [row({ years: [2020, 2023], seasonLabel: "2020–2023" })],
+      RUN,
+    );
+    expect(m.meta.cohort.mode).toBe("hardpoint,control");
+    expect(m.meta.cohort.rows).toBe("span");
+    expect(m.meta.cohort.aggregated).toBe(true);
+    expect(m.rows[0][1]).toBe("2020–2023");
+    expect(cohortSlug(r)).toBe("hardpoint-control-2020-2023-span");
   });
 });

@@ -398,6 +398,48 @@ across the four players, the Herfindahl index of first bloods, and the spread of
 shares. Those describe style, not quality. A roster that shares hill duty evenly is not
 thereby better than one that assigns a specialist.
 
+### A second computation path: re-aggregating from maps on request
+
+The season rows above cover one season and one mode, or one season across all modes.
+The stats page can also combine maps the season rows do not. It can show two or more modes as one
+row (Hardpoint and Control together, apart from Search and Destroy), or several seasons
+as one combined span per player. Those numbers are computed from the map rows when the
+page is requested, which makes this the site's second computation path. Three rules
+keep it identical to the first.
+
+The arithmetic comes from the catalog. Every metric that is a set of weighted
+sums over map rows with at most one division carries that arithmetic in the catalog, as
+data: the numerator's columns and weights, the divisor's, the per-time scale, the sample
+the qualification floor counts, and the K/D floor of one death. The pipeline computes its
+own season rows from that same definition, so the two paths cannot read a metric
+differently. The catalog also records how each column is read from a map row. The typed
+column comes first, then the archive's extras field, then any fallback, such as Control rounds
+summed from attack and defence rounds where the total is missing. 91 player metrics and
+4 team metrics (map win rate, kill differential, Hardpoint margin and Search and Destroy
+round win rate) qualify. The kill-feed metrics, the objective-versus-slaying lean (a
+difference of z-scores), and the series and roster-shape team metrics do not. On a
+combined view they show as absent, and the column says why.
+
+Coverage and modes follow the season rules. A metric sums only the maps from titles
+that track every column it reads, so a span that crosses a title without, say, damage
+leaves that title's maps out of the damage columns. A mode-specific metric appears on a
+mix only when every picked mode is one of its own. Hill time is defined for Hardpoint
+alone, so it is absent from a Hardpoint and Control row, exactly as it is absent from the
+published all-modes rows.
+
+Percentiles and z-scores are rescored within the combined view, with the published
+floors and the same scoring rule. Qualified rows set the distribution, below-floor rows
+are scored against it, and z needs 15 qualified rows. A combined number is therefore compared
+with the other rows of the same mix, and the page labels it that way. Placing a
+Hardpoint and Control rate against a Hardpoint-only field would compare two different
+quantities.
+
+A release check holds the two paths together. It re-aggregates every season
+and mode the metric layer scored, and each season's all-modes rows, through the second
+path, then compares all 129,083 published cells that carry arithmetic: value,
+denominator, z-score, percentile, qualification, and which cells exist at all. They must
+agree to the precision the published cells are stored at.
+
 ## Tier 1c: Structured event tier (shipped)
 
 Underneath every box score for 2017 and 2018 sits a full event feed: every kill with its

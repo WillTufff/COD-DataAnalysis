@@ -18,7 +18,7 @@ import json
 import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 import psycopg
@@ -40,6 +40,7 @@ from .maprows import (
     TITLE_ORDER,
     Coverage,
     MapRow,
+    key_sources,
     load_map_rows,
     record_coverage,
     titles_tracking,
@@ -222,6 +223,7 @@ class Metric:
             "titles": list(self.titles(coverage)),
             "modes": list(self.modes),
             "note": self.note,
+            "agg": self.compute.spec() if isinstance(self.compute, Summed) else None,
         }
 
 
@@ -235,18 +237,24 @@ def _ratio(numerator: float, denominator: float) -> Computed:
     return value, denominator
 
 
-def _per10(agg: Aggregate, numerator: float) -> Computed:
-    if agg.per10_denom <= 0:
-        return None
-    value = numerator / agg.per10_denom
-    if not math.isfinite(value):
-        return None
-    return value, float(agg.maps)
-
-
 # ---------- metric builders ----------
 
 Terms = tuple[tuple[str, float], ...]
+
+MAPS: Terms = (("@maps", 1.0),)
+DURATION: Terms = (("@duration_s", 1.0),)
+
+# Keys starting with @ read an Aggregate total that is not a summed column.
+_PSEUDO: dict[str, Callable[[Aggregate], float]] = {
+    "@maps": lambda agg: float(agg.maps),
+    "@duration_s": lambda agg: agg.duration_s,
+    "@damage_duration_s": lambda agg: agg.damage_duration_s,
+    "@damage_maps": lambda agg: float(agg.present_maps.get("damage", 0)),
+    "@team_kills": lambda agg: agg.team_kills,
+    "@team_hill_time": lambda agg: agg.team_hill_time,
+    "@kill_dist_weighted": lambda agg: agg.kill_dist_weighted,
+    "@kill_dist_kills": lambda agg: agg.kill_dist_kills,
+}
 
 
 def _terms(*keys: str) -> Terms:
@@ -254,95 +262,99 @@ def _terms(*keys: str) -> Terms:
 
 
 def _weighted(agg: Aggregate, terms: Terms) -> float:
-    return sum(agg.total(key) * weight for key, weight in terms)
+    return sum(
+        (_PSEUDO[key](agg) if key in _PSEUDO else agg.total(key)) * weight for key, weight in terms
+    )
 
 
-def _p10(*keys: str) -> Callable[[Aggregate], Computed]:
-    """Per 10 minutes of map time, qualified by maps played."""
-    terms = _terms(*keys)
+@dataclass(frozen=True)
+class Summed:
+    """A metric that is weighted sums over maps and at most one division.
 
-    def compute(agg: Aggregate) -> Computed:
-        return _per10(agg, _weighted(agg, terms))
+    value = num / (den / per), or num alone when there is no den; the sample
+    size is the denom sum. Because the arithmetic is data, the catalog
+    publishes it and any subset of maps can be re-aggregated from it.
+    """
 
-    return compute
+    num: Terms
+    den: Terms | None
+    denom: Terms = MAPS
+    per: float = 1.0
+    den_floor: float = 0.0
+    complement: bool = False
 
-
-def _weighted_p10(terms: Terms) -> Callable[[Aggregate], Computed]:
-    def compute(agg: Aggregate) -> Computed:
-        return _per10(agg, _weighted(agg, terms))
-
-    return compute
-
-
-def _pm(*keys: str) -> Callable[[Aggregate], Computed]:
-    """Per map, qualified by maps played."""
-    terms = _terms(*keys)
-
-    def compute(agg: Aggregate) -> Computed:
-        return _ratio(_weighted(agg, terms), float(agg.maps))
-
-    return compute
-
-
-def _weighted_pm(terms: Terms) -> Callable[[Aggregate], Computed]:
-    def compute(agg: Aggregate) -> Computed:
-        return _ratio(_weighted(agg, terms), float(agg.maps))
-
-    return compute
-
-
-def _damage_pm(agg: Aggregate) -> Computed:
-    """Per map over only the maps that reported damage."""
-    maps_with_damage = float(agg.present_maps.get("damage", 0))
-    return _ratio(agg.total("damage"), maps_with_damage)
-
-
-def _total(*keys: str) -> Callable[[Aggregate], Computed]:
-    """Raw count over the slice, qualified by maps played."""
-    terms = _terms(*keys)
-
-    def compute(agg: Aggregate) -> Computed:
-        if agg.maps <= 0:
-            return None
-        return _weighted(agg, terms), float(agg.maps)
-
-    return compute
-
-
-def _rate(numerator: Terms, denominator: str) -> Callable[[Aggregate], Computed]:
-    """Ratio whose qualification denominator is the divisor itself."""
-
-    def compute(agg: Aggregate) -> Computed:
-        return _ratio(_weighted(agg, numerator), agg.total(denominator))
-
-    return compute
-
-
-def _rate_over_maps(numerator: Terms, denominator: Terms) -> Callable[[Aggregate], Computed]:
-    """Ratio of two totals, but qualified by maps played."""
-
-    def compute(agg: Aggregate) -> Computed:
-        result = _ratio(_weighted(agg, numerator), _weighted(agg, denominator))
-        if result is None:
-            return None
-        return result[0], float(agg.maps)
-
-    return compute
-
-
-def _count_over(key: str, denominator: str) -> Callable[[Aggregate], Computed]:
-    """A raw count, qualified by a different total (e.g. rounds played)."""
-
-    def compute(agg: Aggregate) -> Computed:
-        denom = agg.total(denominator)
+    def __call__(self, agg: Aggregate) -> Computed:
+        divisor = 1.0
+        if self.den is not None:
+            divisor = _weighted(agg, self.den) / self.per
+            if self.den_floor:
+                divisor = max(divisor, self.den_floor)
+            if divisor <= 0:
+                return None
+        denom = _weighted(agg, self.denom)
         if denom <= 0:
             return None
-        return agg.total(key), denom
+        numerator = _weighted(agg, self.num)
+        value = numerator / divisor if self.den is not None else numerator
+        if self.complement:
+            value = 1.0 - value
+        if not math.isfinite(value):
+            return None
+        return value, denom
 
-    return compute
+    def spec(self) -> dict[str, Any]:
+        return {
+            "num": [list(t) for t in self.num],
+            "den": None if self.den is None else [list(t) for t in self.den],
+            "denom": [list(t) for t in self.denom],
+            "per": self.per,
+            "den_floor": self.den_floor,
+            "complement": self.complement,
+        }
+
+
+def _p10(*keys: str) -> Summed:
+    """Per 10 minutes of map time, qualified by maps played."""
+    return Summed(_terms(*keys), DURATION, per=600.0)
+
+
+def _weighted_p10(terms: Terms) -> Summed:
+    return Summed(terms, DURATION, per=600.0)
+
+
+def _pm(*keys: str) -> Summed:
+    """Per map, qualified by maps played."""
+    return Summed(_terms(*keys), MAPS)
+
+
+def _weighted_pm(terms: Terms) -> Summed:
+    return Summed(terms, MAPS)
+
+
+def _total(*keys: str) -> Summed:
+    """Raw count over the slice, qualified by maps played."""
+    return Summed(_terms(*keys), None)
+
+
+def _rate(numerator: Terms, denominator: str) -> Summed:
+    """Ratio whose qualification denominator is the divisor itself."""
+    return Summed(numerator, _terms(denominator), _terms(denominator))
+
+
+def _rate_over_maps(numerator: Terms, denominator: Terms) -> Summed:
+    """Ratio of two totals, but qualified by maps played."""
+    return Summed(numerator, denominator)
+
+
+def _count_over(key: str, denominator: str) -> Summed:
+    """A raw count, qualified by a different total (e.g. rounds played)."""
+    return Summed(_terms(key), None, _terms(denominator))
 
 
 def _complement(inner: Callable[[Aggregate], Computed]) -> Callable[[Aggregate], Computed]:
+    if isinstance(inner, Summed):
+        return replace(inner, complement=not inner.complement)
+
     def compute(agg: Aggregate) -> Computed:
         result = inner(agg)
         if result is None:
@@ -359,60 +371,35 @@ SND_ROUND_KILL_KEYS = (
     "snd_4_kill_round",
 )
 
+_kd = Summed(_terms("kills"), _terms("deaths"), den_floor=1.0)
 
-def _kd(agg: Aggregate) -> Computed:
-    if agg.maps <= 0:
-        return None
-    value = agg.total("kills") / max(agg.total("deaths"), 1.0)
-    return value, float(agg.maps)
+# Rate over only the maps that reported damage.
+_damage_p10 = Summed(
+    _terms("damage"), (("@damage_duration_s", 1.0),), (("@damage_maps", 1.0),), per=600.0
+)
 
+# Per map over only the maps that reported damage.
+_damage_pm = Summed(_terms("damage"), (("@damage_maps", 1.0),), (("@damage_maps", 1.0),))
 
-def _damage_p10(agg: Aggregate) -> Computed:
-    """Rate over only the maps that reported damage."""
-    maps_with_damage = float(agg.present_maps.get("damage", 0))
-    if agg.damage_duration_s <= 0 or maps_with_damage <= 0:
-        return None
-    value = agg.total("damage") / (agg.damage_duration_s / 600.0)
-    if not math.isfinite(value):
-        return None
-    return value, maps_with_damage
+_kill_share = Summed(_terms("kills"), (("@team_kills", 1.0),))
 
+_hill_time_share = Summed(_terms("hill_time"), (("@team_hill_time", 1.0),))
 
-def _kill_share(agg: Aggregate) -> Computed:
-    result = _ratio(agg.total("kills"), agg.team_kills)
-    if result is None:
-        return None
-    return result[0], float(agg.maps)
+_avg_kill_dist = Summed(
+    (("@kill_dist_weighted", 1.0),),
+    (("@kill_dist_kills", 1.0),),
+    (("@kill_dist_kills", 1.0),),
+)
+
+_score_per_minute = Summed(_terms("player_score"), DURATION, per=60.0)
 
 
-def _hill_time_share(agg: Aggregate) -> Computed:
-    result = _ratio(agg.total("hill_time"), agg.team_hill_time)
-    if result is None:
-        return None
-    return result[0], float(agg.maps)
-
-
-def _avg_kill_dist(agg: Aggregate) -> Computed:
-    return _ratio(agg.kill_dist_weighted, agg.kill_dist_kills)
-
-
-def _snd_round_share(kills_in_round: int) -> Callable[[Aggregate], Computed]:
+def _snd_round_share(kills_in_round: int) -> Summed:
     """Share of SnD rounds in which the player got exactly N kills."""
     if kills_in_round == 0:
-
-        def zero(agg: Aggregate) -> Computed:
-            rounds = agg.total("snd_rounds")
-            scored = _weighted(agg, _terms(*SND_ROUND_KILL_KEYS))
-            return _ratio(rounds - scored, rounds)
-
-        return zero
-
-    key = f"snd_{kills_in_round}_kill_round"
-
-    def compute(agg: Aggregate) -> Computed:
-        return _ratio(agg.total(key), agg.total("snd_rounds"))
-
-    return compute
+        scored = tuple((key, -1.0) for key in SND_ROUND_KILL_KEYS)
+        return _rate((("snd_rounds", 1.0), *scored), "snd_rounds")
+    return _rate(_terms(f"snd_{kills_in_round}_kill_round"), "snd_rounds")
 
 
 # ---------- kill-feed compute helpers ----------
@@ -1557,9 +1544,7 @@ _SCORESTREAKS: tuple[Metric, ...] = (
         min_denom=float(MIN_MAPS),
         sources=("player_score", DURATION_KEY),
         modes=(ALL_MODES,),
-        compute=lambda agg: (
-            None if agg.minutes <= 0 else (agg.total("player_score") / agg.minutes, float(agg.maps))
-        ),
+        compute=_score_per_minute,
     ),
 )
 
@@ -2011,6 +1996,7 @@ def catalog_payload(coverage: Coverage, catalog: Iterable[Metric] = CATALOG) -> 
         "min_nonzero_rows": MIN_NONZERO_ROWS,
         "metrics": [m.catalog_entry(coverage) for m in catalog],
         "untracked_columns": coverage_report(coverage),
+        "map_keys": key_sources(),
         "kill_feed_constants": KILL_FEED_CONSTANTS,
     }
 
@@ -2558,6 +2544,7 @@ def compute_and_write(conn: psycopg.Connection[tuple[object, ...]], run_id: int)
     catalog = catalog_payload(loaded.coverage)
     catalog["metrics"].append(SPLIT_METRIC.catalog_entry(loaded.coverage))
     catalog["team_metrics"] = [m.catalog_entry(loaded.coverage) for m in TEAM_CATALOG]
+    catalog["team_map_keys"] = TEAM_MAP_KEYS
     conn.execute(
         "INSERT INTO model_artifacts (run_id, name, payload) VALUES (%s, %s, %s)",
         (run_id, "metric_catalog", json.dumps(catalog)),
@@ -2736,6 +2723,9 @@ class TeamMetric:
     # series outcomes only makes sense on the all-modes slice — computing it
     # inside one mode would count each series once per mode it touched.
     series_level: bool = False
+    # The metric as sums over TEAM_MAP_KEYS, where it is one; the series and
+    # roster-shape metrics are not.
+    agg: Summed | None = None
 
     def catalog_entry(self, _coverage: Coverage) -> dict[str, Any]:
         return {
@@ -2750,7 +2740,39 @@ class TeamMetric:
             "min_denom": self.min_denom,
             "modes": list(self.modes),
             "note": self.note,
+            "agg": self.agg.spec() if self.agg is not None else None,
         }
+
+
+# One team's map as summable quantities, for the team metrics that are sums.
+# A key is absent where the map does not report it, as with MapRow.values.
+TEAM_MAP_KEYS: dict[str, str] = {
+    "won": "1 when the team won the map, 0 when it lost; absent when undecided",
+    "decided": "1 when the map has a winner",
+    "kill_diff": "team kills minus opponent kills, where both sides have rows",
+    "kill_diff_maps": "1 when both sides have rows",
+    "margin": "team score minus opponent score, where both scores exist",
+    "margin_maps": "1 when both scores exist",
+    "rounds_won": "the team's map score, where it exists",
+    "rounds_played": "both map scores summed, where both exist",
+}
+
+
+def team_map_values(tm: TeamMap) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if tm.won is not None:
+        out["won"] = 1.0 if tm.won else 0.0
+        out["decided"] = 1.0
+    if tm.opp_kills is not None:
+        out["kill_diff"] = sum(tm.kills_by_player.values()) - tm.opp_kills
+        out["kill_diff_maps"] = 1.0
+    if tm.score is not None:
+        out["rounds_won"] = float(tm.score)
+    if tm.score is not None and tm.opp_score is not None:
+        out["margin"] = float(tm.score - tm.opp_score)
+        out["margin_maps"] = 1.0
+        out["rounds_played"] = float(tm.score + tm.opp_score)
+    return out
 
 
 # Ordered all-modes first: the report builder's default team cohort is "all
@@ -2764,6 +2786,7 @@ TEAM_CATALOG: tuple[TeamMetric, ...] = (
         higher_is_better=True,
         formula="maps won / maps played",
         modes=(ALL_MODES,),
+        agg=Summed(_terms("won"), _terms("decided")),
     ),
     TeamMetric(
         key="series_win_rate",
@@ -2798,6 +2821,7 @@ TEAM_CATALOG: tuple[TeamMetric, ...] = (
         higher_is_better=True,
         formula="mean(team kills - opponent kills) over maps",
         modes=(ALL_MODES,),
+        agg=Summed(_terms("kill_diff"), _terms("kill_diff_maps")),
     ),
     TeamMetric(
         key="slay_balance",
@@ -2816,6 +2840,7 @@ TEAM_CATALOG: tuple[TeamMetric, ...] = (
         higher_is_better=True,
         formula="mean(team score - opponent score) on Hardpoint maps",
         modes=(MODE_HARDPOINT,),
+        agg=Summed(_terms("margin"), _terms("margin_maps")),
     ),
     TeamMetric(
         key="snd_round_win_rate",
@@ -2825,6 +2850,7 @@ TEAM_CATALOG: tuple[TeamMetric, ...] = (
         higher_is_better=True,
         formula="sum(team rounds won) / sum(all rounds) on SnD maps",
         modes=(MODE_SND,),
+        agg=Summed(_terms("rounds_won"), _terms("rounds_played")),
     ),
     TeamMetric(
         key="hill_time_gini",

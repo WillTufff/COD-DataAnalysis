@@ -16,6 +16,7 @@ function floorText(col: ReportColumn): string {
 /** A column's definition on one line, for the header tooltip. */
 export function definitionLine(col: ReportColumn): string {
   return [
+    ...(col.unavailable ? [`Not in this view: ${col.unavailable}`] : []),
     `${col.label} = ${col.formula}`,
     `Scored from ${floorText(col)}`,
     col.higherIsBetter ? "Higher is better" : "Lower is better",
@@ -107,6 +108,11 @@ export function ColumnMenu({
               </dd>
             </dl>
             {col.note && <p className="mt-1.5">{col.note}</p>}
+            {col.unavailable && (
+              <p className="mt-1.5 border-l-2 border-accent-dim pl-2 text-ink-secondary">
+                Not in this view. {col.unavailable}
+              </p>
+            )}
           </div>
           <div className="my-1 border-t border-hairline" />
           <button

@@ -21,10 +21,10 @@ import {
   getReportViewPlayers,
   getTeamMetricCatalog,
   latestRun,
-  queryReport,
-  queryTeamReport,
   getModeCatalog,
 } from "@/lib/analytics";
+import { loadReport } from "@/lib/reports/load";
+import { coversModes } from "@/lib/reports/summed";
 import { categoryLabel } from "@/lib/reports/labels";
 import { applyResultFilters } from "@/lib/reports/rows";
 import { presetsFor } from "@/lib/reports/presets";
@@ -69,6 +69,7 @@ const CARRIED_PARAMS = [
   "where",
   "top",
   "view",
+  "rows",
 ];
 
 export default async function StatsPage({
@@ -114,23 +115,30 @@ export default async function StatsPage({
   // One resolution, shared with the export route so a download always matches
   // the table it came from.
   const resolved = await resolveReportForUrl(run.id, sp, metrics);
-  const { selected, selectedEntries, activePreset, scope, rankedScope } =
+  const { selected, activePreset, scope, rankedScope } =
     resolved;
-  const { years, playerSlugs, teamSlugs, modeSlug } = resolved;
+  const { years, playerSlugs, teamSlugs, modeSlug, modeMix } = resolved;
 
   // A metric is in view when it has rows for at least one season on screen in
-  // the mode on screen. An empty `years` is every covered season.
+  // the mode on screen. An empty `years` is every covered season. A
+  // re-aggregated view also needs the metric's arithmetic and all its modes.
   const viewYears = years.length > 0 ? years : scope.years;
+  const aggModes = resolved.aggregate?.modes ?? [];
   const coverageYears = (key: string) =>
     [...new Set((coverage[key] ?? []).map((c) => Number(c.split(":")[0])))];
   const metricOptions: MetricOption[] = metrics.map((m) => {
     const cells = new Set(coverage[m.key] ?? []);
+    const covered = resolved.aggregated
+      ? Boolean(m.agg) &&
+        coversModes(m.modes, aggModes) &&
+        viewYears.some((y) => (aggModes.length > 0 ? aggModes : [""]).some((md) => cells.has(`${y}:${md}`)))
+      : viewYears.some((y) => cells.has(`${y}:${modeSlug ?? ""}`));
     return {
       key: m.key,
       label: m.label,
       category: categoryLabel(m.category),
       gold: m.tier.startsWith("gold"),
-      inView: viewYears.some((y) => cells.has(`${y}:${modeSlug ?? ""}`)),
+      inView: covered,
       span: yearSpan(coverageYears(m.key)),
     };
   });
@@ -166,7 +174,8 @@ export default async function StatsPage({
       <p className="mt-2 max-w-2xl text-sm text-ink-secondary">
         {metrics.length} {entity === "teams" ? "team" : "player"} metrics,
         season by season. Each number is scored against the qualified field of
-        its own season and mode.
+        its own season and mode, or, for a mix of modes or a combined span,
+        against the other rows in that mix.
       </p>
       <div className="mt-6">
         <EntityTabs entity={entity} />
@@ -179,10 +188,12 @@ export default async function StatsPage({
 
   const footnote = (
     <p className="mt-3 max-w-3xl text-xs text-ink-muted">
-      Each cell is scored within the qualified {entity} of its own season and
-      mode, so a column can qualify a {entity === "teams" ? "team" : "player"}{" "}
-      the next column does not. Those cells are greyed, never dropped. Min
-      maps hides whole rows, and defaults to the published floor. Each
+      {resolved.aggregated
+        ? `These numbers are summed from the picked maps and scored within the qualified ${entity} of this mix${resolved.span ? " over the whole span" : ", season by season"}. Metrics that are not sums over maps, such as the kill-feed ones, show as dashes; each column's ▾ says why. `
+        : `Each cell is scored within the qualified ${entity} of its own season and mode. `}
+      A column can qualify a {entity === "teams" ? "team" : "player"} the next
+      column does not. Those cells are greyed, never dropped. Min maps hides
+      whole rows, and defaults to the published floor. Each
       column&apos;s ▾ gives its formula and floor; full definitions are on the{" "}
       <Link href="/methodology/metrics" className="underline">
         methodology
@@ -209,9 +220,7 @@ export default async function StatsPage({
   // own sort, since top N follows whichever column a header click sorts on.
   const [{ columns, rows }, viewPlayers, allPlayers, scopeTeams] =
     await Promise.all([
-      entity === "teams"
-        ? queryTeamReport(run.id, resolved.query, selectedEntries)
-        : queryReport(run.id, resolved.query, selectedEntries),
+      loadReport(run.id, resolved, catalog, (m) => modeLabel(modeCatalog, m)),
       // The player filter has no place on a team report: the rows are teams.
       entity === "teams"
         ? Promise.resolve([])
@@ -254,6 +263,8 @@ export default async function StatsPage({
           modeCatalog={modeCatalog}
           allModes={rankedScope.allModes}
           modeSlug={modeSlug}
+          modeMix={modeMix}
+          span={resolved.span}
           players={viewPlayers}
           pickedPlayers={playerSlugs}
           playerNames={playerNames}
@@ -278,7 +289,10 @@ export default async function StatsPage({
         {activePreset ? `${activePreset.name} · ` : ""}
         {entity === "teams" ? "teams · " : ""}
         {seasonLabel(scope.seasons, years)} ·{" "}
-        {modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)} ·{" "}
+        {modeMix.length > 0
+          ? modeMix.map((m) => modeLabel(modeCatalog, m)).join(" + ")
+          : modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)}{" "}
+        ·{resolved.span ? " combined span ·" : ""}{" "}
         {entity === "players" ? `${playersText.toLowerCase()} · ` : ""}
         {teamsText.toLowerCase()} ·{" "}
         {resolved.minMaps > 0 ? `min ${resolved.minMaps} maps` : "any maps"}
@@ -311,6 +325,8 @@ export default async function StatsPage({
           rows={rows}
           catalog={metricOptions}
           filters={filters}
+          aggregated={resolved.aggregated}
+          span={resolved.span}
           initialView={view}
           initialPer={parsePer(sp)}
           initialPage={parsePage(sp)}

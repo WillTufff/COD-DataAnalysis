@@ -16,7 +16,7 @@ root="$PWD"
 
 PYTHON_PROJECTS=(analytics pipeline)
 PYTHON_CHECKS=(lint format types tests)
-WEB_CHECKS=(lint types tests e2e)
+WEB_CHECKS=(lint types tests parity e2e)
 
 # Release gates over the newest run of each model: a title with no declared
 # rotation, a rating cohort whose variance collapsed, a style basis that moved
@@ -105,6 +105,10 @@ web_check() {
     # Renders the site against the local database and asserts a rating surface
     # per era. Needs a fitted model, so it reports a skip rather than a pass
     # when there is none — an empty page is the failure it exists to catch.
+    # The stats page's request-time aggregation must reproduce every published
+    # cell it can re-aggregate. Reads the newest metric run, so it skips
+    # rather than passes when there is none.
+    parity) run_gate "web $check" web "$npm_bin" run parity ;;
     e2e)   run_gate "web $check" web "$npm_bin" run e2e ;;
   esac
 }

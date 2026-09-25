@@ -101,6 +101,42 @@ function CopyLink() {
   );
 }
 
+/** A labelled row of mutually exclusive buttons. */
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1.5" role="group" aria-label={label}>
+      <span className="text-ink-muted">{label}</span>
+      <div className="inline-flex border border-hairline">
+        {options.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            aria-pressed={value === m.id}
+            onClick={() => onChange(m.id)}
+            className={`px-2.5 py-1 ${
+              value === m.id
+                ? "bg-surface-raised text-ink"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * The report's toolbar, directly above the table: its size, how cells read,
  * and the ways out of the page.
@@ -110,37 +146,49 @@ export function ReportToolbar({
   columnCount,
   view,
   setView,
+  aggregated,
+  span,
+  setSpan,
 }: {
   rowCount: number;
   columnCount: number;
   view: ReportView;
   setView: (view: ReportView) => void;
+  aggregated: boolean;
+  span: boolean;
+  setSpan: (on: boolean) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 py-2 text-xs print:hidden">
       <span className="font-mono tabular-nums text-ink-muted">
         {rowCount.toLocaleString()} row{rowCount === 1 ? "" : "s"} ·{" "}
         {columnCount} column{columnCount === 1 ? "" : "s"}
+        {aggregated && (
+          <span
+            className="ml-2 border border-accent-dim px-1.5 py-0.5 font-sans text-[0.66rem] text-accent"
+            title="Re-aggregated from the picked maps. Percentiles and z-scores compare each row with the other rows in this pick, not with the published season."
+          >
+            Scored within this mix
+          </span>
+        )}
       </span>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex border border-hairline">
-          {REPORT_VIEWS.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              aria-pressed={view === m.id}
-              onClick={() => setView(m.id)}
-              className={`px-2.5 py-1 ${
-                view === m.id
-                  ? "bg-surface-raised text-ink"
-                  : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Rows"
+          options={[
+            { id: "season", label: "Per season" },
+            { id: "span", label: "Combined span" },
+          ]}
+          value={span ? "span" : "season"}
+          onChange={(id) => setSpan(id === "span")}
+        />
+        <Segmented
+          label="View"
+          options={REPORT_VIEWS}
+          value={view}
+          onChange={setView}
+        />
         <ExportMenu />
         <CopyLink />
       </div>

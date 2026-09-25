@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:check": "tsx scripts/db-check.ts",
+    "parity": "tsx scripts/aggregate-parity.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "tsx scripts/e2e-precheck.ts && playwright test",
