@@ -609,6 +609,21 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # published cells its parity check reproduces. Pinned 2026-09-24, when the
     # page began re-aggregating a mix of modes or a span of seasons from maps.
     "aggregation_parity": {"player_summed": 91, "team_summed": 4, "cells": 129083},
+    # Players at the maps floor per season, over every event and over league
+    # play alone. The 2017-2019 field holds CWL open brackets; league play is
+    # the filter that narrows it to the pro league. Pinned 2026-09-25.
+    "league_field": {
+        "2017": {"all": 173, "league": 72},
+        "2018": {"all": 156, "league": 75},
+        "2019": {"all": 202, "league": 102},
+        "2020": {"all": 76, "league": 75},
+        "2021": {"all": 62, "league": 61},
+        "2022": {"all": 58, "league": 58},
+        "2023": {"all": 63, "league": 62},
+        "2024": {"all": 65, "league": 65},
+        "2025": {"all": 62, "league": 62},
+        "2026": {"all": 69, "league": 60},
+    },
     # What the stats page's content filters can reach, per era: maps with box
     # scores, how many sit at each event tier, on LAN and online, and at each
     # series stage. Pinned 2026-09-24 with the tier, map, date and venue

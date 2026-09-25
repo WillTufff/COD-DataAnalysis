@@ -1240,6 +1240,52 @@ def content_coverage_failures(measured: dict[str, dict[str, int]]) -> list[str]:
     return bad
 
 
+LEAGUE_FIELD_SQL = """
+WITH pm AS (
+    SELECT se.year, gps.player_id,
+           count(DISTINCT g.id) AS maps,
+           count(DISTINCT g.id) FILTER (WHERE s.stage = 'league') AS league
+    FROM game_player_stats gps
+    JOIN games g    ON g.id = gps.game_id
+    JOIN series s   ON s.id = g.series_id
+    JOIN events e   ON e.id = s.event_id
+    JOIN seasons se ON se.id = e.season_id
+    WHERE se.year >= 2017
+    GROUP BY 1, 2
+)
+SELECT year,
+       count(*) FILTER (WHERE maps >= %(floor)s),
+       count(*) FILTER (WHERE league >= %(floor)s)
+FROM pm GROUP BY 1
+"""
+
+
+def league_field(conn: psycopg.Connection[Any]) -> dict[str, dict[str, int]]:
+    """Per season from 2017, the players at the maps floor over every event and
+    over league play alone."""
+    return {
+        str(row[0]): {"all": int(row[1]), "league": int(row[2])}
+        for row in conn.execute(LEAGUE_FIELD_SQL, {"floor": MIN_MAPS}).fetchall()
+    }
+
+
+def league_field_failures(measured: dict[str, dict[str, int]]) -> list[str]:
+    """The methodology page gives the 2017-2019 field under league play beside
+    the whole field and a CDL season's, so each season's pair is held."""
+    pinned = evalspec.PUBLISHED_FIGURES.get("league_field") or {}
+    bad: list[str] = []
+    for year in sorted(set(pinned) | set(measured)):
+        want = pinned.get(year) or {}
+        got = measured.get(year) or {}
+        for field in sorted(set(want) | set(got)):
+            if want.get(field) != got.get(field):
+                bad.append(
+                    f"league field {year} {field}: "
+                    f"page says {want.get(field)}, database has {got.get(field)}"
+                )
+    return bad
+
+
 def face_validity_failures(payload: dict[str, Any]) -> list[str]:
     """The five tests the anchor pre-registration declares gating.
 
@@ -1557,6 +1603,7 @@ def run_gates(conn: psycopg.Connection[Any]) -> list[tuple[str, list[str]]]:
             aggregation_failures(*aggregation_payloads(conn)),
         ),
         ("content filters", content_coverage_failures(content_coverage(conn))),
+        ("league field", league_field_failures(league_field(conn))),
         (
             "page figures",
             page_figure_failures(

@@ -213,8 +213,15 @@ export default async function StatsPage({
     </>
   );
 
+  // 2017–2019 seasons score against every event's field, open brackets
+  // included; league play is the filter that narrows it to the pro league.
+  const mixedField =
+    content.stage !== "league" && viewYears.some((y) => y >= 2017 && y <= 2019);
+
   const footnote = (
     <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+      {mixedField &&
+        "In 2017–2019 the field is every event's, CWL open brackets included, so it runs two to three times a CDL season's. Stage: League play scores the pro league alone. "}
       {resolved.aggregated
         ? `These numbers are summed from the picked maps${filtered ? ` (${contentText.join(", ")})` : ""} and scored within the qualified ${entity} of this mix${resolved.span ? " over the whole span" : ", season by season"}. Metrics that are not sums over maps, such as the kill-feed ones, show as dashes; each column's ▾ says why. `
         : `Each cell is scored within the qualified ${entity} of its own season and mode. `}
@@ -332,7 +339,8 @@ export default async function StatsPage({
         {resolved.where.length > 0
           ? ` · ${resolved.where.length} threshold${resolved.where.length > 1 ? "s" : ""}`
           : ""}
-        {resolved.top !== null ? ` · top ${resolved.top}` : ""} · metric layer
+        {resolved.top !== null ? ` · top ${resolved.top}` : ""}
+        {columns.some((c) => !c.higherIsBetter) ? " · ↓ lower is better" : ""} · metric layer
         v{run.version}
       </p>
 

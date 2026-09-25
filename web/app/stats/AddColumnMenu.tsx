@@ -33,7 +33,7 @@ function OptionRow({
         {m.label}
         {m.gold && (
           <span
-            aria-label="headline metric"
+            aria-label="headline metric, listed first"
             className="ml-1.5 inline-block h-1 w-1 translate-y-[-0.15em] bg-accent align-middle"
           />
         )}
@@ -172,7 +172,7 @@ export function AddColumnMenu({
               aria-hidden="true"
               className="mr-1.5 inline-block h-1 w-1 translate-y-[-0.15em] bg-accent align-middle"
             />
-            headline metric
+            headline metric, listed first
           </p>
         </div>
       )}

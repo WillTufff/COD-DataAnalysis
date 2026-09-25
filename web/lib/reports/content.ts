@@ -149,15 +149,18 @@ export function mapsLabel(slugs: string[], nameBySlug: Map<string, string>): str
   return names.length <= 3 ? names.join(" + ") : `${names.length} maps`;
 }
 
+// Lower-cases a label for running text, leaving acronyms such as LAN alone.
+const inline = (label: string) => label.replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase());
+
 /** Each active filter as it names what it keeps, for the print stamp. */
 export function contentParts(
   c: ContentFilters,
   mapNames: Map<string, string>,
 ): string[] {
   const out: string[] = [];
-  if (c.tier) out.push(tierLabel(c.tier).toLowerCase());
-  if (c.venue) out.push(venueLabel(c.venue).toLowerCase());
-  if (c.stage) out.push(stageLabel(c.stage).toLowerCase());
+  if (c.tier) out.push(inline(tierLabel(c.tier)));
+  if (c.venue) out.push(inline(venueLabel(c.venue)));
+  if (c.stage) out.push(inline(stageLabel(c.stage)));
   if (c.maps.length > 0) out.push(mapsLabel(c.maps, mapNames));
   if (c.from || c.to) out.push(dateRangeLabel(c.from, c.to));
   return out;

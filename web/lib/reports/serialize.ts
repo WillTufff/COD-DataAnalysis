@@ -73,7 +73,7 @@ export function toXml(matrix: ExportMatrix): string {
       Array.isArray(meta.cohort.maps)
         ? meta.cohort.maps.join(",")
         : meta.cohort.maps,
-    )}"${meta.cohort.from ? ` from="${meta.cohort.from}"` : ""}${meta.cohort.to ? ` to="${meta.cohort.to}"` : ""} sort="${xmlEscape(meta.sort)}" dir="${meta.dir}" minMaps="${meta.minMaps}"${meta.where ? ` where="${xmlEscape(meta.where)}"` : ""}${meta.top !== null ? ` top="${meta.top}"` : ""} rowCount="${meta.rowCount}"${meta.truncated ? ' truncated="true"' : ""}/>`,
+    )}"${meta.cohort.from ? ` from="${meta.cohort.from}"` : ""}${meta.cohort.to ? ` to="${meta.cohort.to}"` : ""} sort="${xmlEscape(meta.sort)}" dir="${meta.dir}" view="${meta.view}" minMaps="${meta.minMaps}"${meta.where ? ` where="${xmlEscape(meta.where)}"` : ""}${meta.top !== null ? ` top="${meta.top}"` : ""} rowCount="${meta.rowCount}"${meta.truncated ? ' truncated="true"' : ""}/>`,
     "  <attribution>",
     `    <note>${xmlEscape(meta.attribution.derived)}</note>`,
     ...meta.attribution.sources.map((s) => `    <source>${xmlEscape(s)}</source>`),

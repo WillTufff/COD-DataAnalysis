@@ -79,6 +79,12 @@ describe("buildExportMatrix", () => {
     expect(one.meta.cohort.mode).toBe("hardpoint");
   });
 
+  it("marks a lower-is-better column in its header", () => {
+    const deaths = { ...kdColumn, key: "deaths_pm", label: "Deaths per map", higherIsBetter: false };
+    const m = buildExportMatrix(resolved(), [kdColumn, deaths], [row()], RUN);
+    expect(m.headers).toEqual(["Player", "Season", "K/D", "Deaths per map (lower is better)"]);
+  });
+
   it("writes a missing cell as null", () => {
     const m = buildExportMatrix(
       resolved(),

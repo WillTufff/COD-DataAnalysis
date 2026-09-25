@@ -75,7 +75,7 @@ describe("labels", () => {
     };
     expect(contentParts(c, new Map([["raid", "Raid"]]))).toEqual([
       "tier 1 events",
-      "lan only",
+      "LAN only",
       "brackets",
       "Raid",
       "from 2024-01-05",

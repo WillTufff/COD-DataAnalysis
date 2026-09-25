@@ -420,6 +420,7 @@ export function ReportTable({
         aggregated={aggregated}
         span={span}
         setSpan={(on) => push({ rows: on ? "span" : null })}
+        lowerIsBetter={columns.some((c) => !c.higherIsBetter)}
       />
       <div onPointerDownCapture={onHeaderPointerDown}>
       <DataTable

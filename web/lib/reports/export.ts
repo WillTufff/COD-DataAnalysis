@@ -112,7 +112,7 @@ export function buildExportMatrix(
     "Season",
   ];
   for (const c of columns) {
-    headers.push(c.label);
+    headers.push(c.higherIsBetter ? c.label : `${c.label} (lower is better)`);
     if (detail) headers.push(`${c.label} (pctl)`, `${c.label} (z)`);
   }
 

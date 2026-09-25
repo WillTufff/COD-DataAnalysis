@@ -105,6 +105,7 @@ describe("toXml", () => {
     const plain = toXml(matrix());
     expect(plain).toContain('tier="all" venue="all" stage="all" maps="all"');
     expect(plain).not.toContain("from=");
+    expect(plain).toMatch(/dir="desc" view="\w+" minMaps=/);
     const m = matrix();
     m.meta.cohort = {
       ...m.meta.cohort,

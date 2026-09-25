@@ -149,6 +149,7 @@ export function ReportToolbar({
   aggregated,
   span,
   setSpan,
+  lowerIsBetter,
 }: {
   rowCount: number;
   columnCount: number;
@@ -157,6 +158,8 @@ export function ReportToolbar({
   aggregated: boolean;
   span: boolean;
   setSpan: (on: boolean) => void;
+  /** Whether any column in view ranks lower values first. */
+  lowerIsBetter: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 py-2 text-xs print:hidden">
@@ -169,6 +172,11 @@ export function ReportToolbar({
             title="Re-aggregated from the picked maps. Percentiles and z-scores compare each row with the other rows in this pick, not with the published season."
           >
             Scored within this mix
+          </span>
+        )}
+        {lowerIsBetter && (
+          <span className="ml-2 whitespace-nowrap font-sans">
+            <span className="text-ink-secondary">↓</span> lower is better
           </span>
         )}
       </span>

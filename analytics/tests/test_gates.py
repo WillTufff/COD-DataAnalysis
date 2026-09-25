@@ -1815,3 +1815,14 @@ def test_content_filter_coverage_fails_when_a_count_moves() -> None:
     moved = gates.content_coverage_failures(measured)
     assert any("2013-2016 lan" in m for m in moved)
     assert sum("2020-2026" in m for m in moved) == len(pinned["2020-2026"])
+
+
+def test_league_field_fails_when_a_season_moves() -> None:
+    pinned = evalspec.PUBLISHED_FIGURES["league_field"]
+    measured = {year: dict(counts) for year, counts in pinned.items()}
+    assert gates.league_field_failures(measured) == []
+    measured["2018"]["league"] = 74
+    del measured["2019"]
+    moved = gates.league_field_failures(measured)
+    assert any("2018 league" in m for m in moved)
+    assert sum("2019" in m for m in moved) == 2

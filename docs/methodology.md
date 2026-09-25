@@ -493,6 +493,13 @@ play to keep, so that choice shows dashes. The table leaves out 39 maps with no 
 from series with no round in any source. Twenty are 2021 Major rounds that Cito records as
 unknown, and the rest are wiki series whose schedule row is missing.
 
+League play is also how the page separates the pro league from the open brackets of 2017
+to 2019. Those seasons score each player against every event's field, and at the 8-map floor
+that field is 173 players in 2017, 156 in 2018 and 202 in 2019, against 58 to 76 in a CDL
+season. Under league play it is 72, 75 and 102, the rosters of the leagues those years ran.
+Event tier cannot do this, as above. The page notes the mixed field under any 2017 to 2019
+view that is not already league play.
+
 One filter is held back. Opponent tier has no definition that
 travels. The opponent adjustment rates strength without cutting it into tiers, and a
 rank or rating cut means one thing in a twelve-team league and another in a hundred-team
