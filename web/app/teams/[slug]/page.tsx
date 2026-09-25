@@ -9,12 +9,15 @@ import {
 import { PlacementTimeline } from "@/components/charts/PlacementTimeline";
 import { StintTimeline } from "@/components/charts/StintTimeline";
 import { PctlBar } from "@/components/PctlBar";
+import { Tabs } from "@/components/Tabs";
 import {
   formatLeagueSpans,
   getAllTeamSlugs,
   getEloTimelines,
   getEraSpans,
   getEventMarkers,
+  getSeasonEras,
+  getSeasonStandings,
   getSeriesRecords,
   getTeamBySlug,
   getTeamH2H,
@@ -22,6 +25,7 @@ import {
   getTeamModeStrength,
   getTeamPlacements,
   getTeamPrizeBySeason,
+  getTeamRecentSeries,
   getTeamSpans,
   getTeamStints,
   getTeamStandings,
@@ -35,6 +39,7 @@ import {
 } from "@/lib/analytics";
 import { formatMoney, formatMoneyExact } from "@/lib/earnings";
 import { modeLabel } from "@/lib/modes";
+import { rosterGroup } from "@/lib/roster";
 
 type StyleRow = {
   key: string;
@@ -144,12 +149,14 @@ export default async function TeamPage({
     metricCatalog,
     modeCatalog,
     prizeBySeason,
+    recent,
+    seasons,
   ] = await Promise.all([
       getTeamStandings(eloRun.id, glickoRun?.id ?? eloRun.id),
       getSeriesRecords(),
       getEloTimelines(eloRun.id, [team.id]),
       getEraSpans(),
-      getEventMarkers(),
+      getEventMarkers(team.id),
       getTeamPlacements(team.id),
       getTeamSpans(team.id),
       getTeamStints(team.id),
@@ -160,6 +167,8 @@ export default async function TeamPage({
       metricRun ? getMetricCatalog(metricRun.id) : Promise.resolve(null),
       getModeCatalog(),
       getTeamPrizeBySeason(team.id),
+      getTeamRecentSeries(eloRun.id, team.id),
+      getSeasonEras(),
     ]);
   // The same team under Glicko-2, so the trajectory chart can shade its RD.
   const glickoTimelines = glickoRun
@@ -175,6 +184,24 @@ export default async function TeamPage({
       mode: modeLabel(modeCatalog, r.mode),
     })),
   };
+
+  // A team that played this season is ranked against this season's field;
+  // anyone else keeps its all-time rank.
+  const current = seasons[seasons.length - 1];
+  const seasonTable = current
+    ? await getSeasonStandings(eloRun.id, glickoRun?.id ?? eloRun.id, current.year)
+    : null;
+  const seasonRank = seasonTable
+    ? seasonTable.teams.findIndex((t) => t.teamId === team.id) + 1
+    : 0;
+  const active = seasonRank > 0;
+  // Open stints on an active team are its roster today.
+  const today = active ? stints.filter((st) => st.endDate === null) : [];
+  const todayPlayers = today.filter((st) => rosterGroup(st.role) === "player");
+  const todayOthers = today.filter((st) => rosterGroup(st.role) !== "player");
+  const styleYears = [...new Set(styleRows.map((r) => r.year))];
+  const seasonTitle = (year: number) =>
+    seasons.find((se) => se.year === year)?.title ?? "";
 
   const standing = standings.find((s) => s.teamId === team.id);
   const rank = standings.findIndex((s) => s.teamId === team.id) + 1;
@@ -213,7 +240,13 @@ export default async function TeamPage({
             {standing ? standing.finalElo.toFixed(0) : "—"}
           </div>
           <div className="mt-0.5 text-xs text-ink-muted">
-            Final Elo{rank > 0 && <> (#{rank} of {standings.length})</>}
+            {active && seasonTable && current ? (
+              <>
+                Elo (#{seasonRank} of {seasonTable.teams.length} in {current.year})
+              </>
+            ) : (
+              <>Final Elo{rank > 0 && <> (#{rank} of {standings.length})</>}</>
+            )}
           </div>
         </div>
         <div>
@@ -246,6 +279,39 @@ export default async function TeamPage({
         </div>
       </section>
 
+      {todayPlayers.length > 0 && (
+        <section className="mt-4 text-sm">
+          <span className="eyebrow mr-3 text-ink-muted">Roster</span>
+          {todayPlayers.map((st, i) => (
+            <span key={st.playerId}>
+              {i > 0 && <span className="text-ink-muted"> · </span>}
+              <Link
+                href={`/players/${st.slug}`}
+                className="font-medium hover:text-accent hover:underline"
+              >
+                {st.handle}
+              </Link>
+            </span>
+          ))}
+          {todayOthers.length > 0 && (
+            <span className="mt-1 block text-xs text-ink-muted sm:ml-4 sm:mt-0 sm:inline">
+              {todayOthers.map((st, i) => (
+                <span key={`${st.playerId}-${st.role}`}>
+                  {i > 0 && " · "}
+                  {st.role}{" "}
+                  <Link
+                    href={`/players/${st.slug}`}
+                    className="text-ink-secondary hover:text-accent hover:underline"
+                  >
+                    {st.handle}
+                  </Link>
+                </span>
+              ))}
+            </span>
+          )}
+        </section>
+      )}
+
       <section className="mt-12">
         <h2 className="lower-third">
           Rating trajectory
@@ -261,6 +327,62 @@ export default async function TeamPage({
           />
         </div>
       </section>
+
+      {recent.length > 0 && (
+        <section className="mt-12">
+          <h2 className="lower-third">
+            Recent results
+            <span className="lt-note">
+              {active ? "last" : "final"} {recent.length} decided series
+            </span>
+          </h2>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-ink-muted">
+                  <th className="py-2 pr-4 font-normal">Date</th>
+                  <th className="py-2 pr-4 font-normal">Opponent</th>
+                  <th className="py-2 pr-4 text-right font-normal">Score</th>
+                  <th className="py-2 pr-4 text-right font-normal">Elo ±</th>
+                  <th className="hidden py-2 font-normal sm:table-cell">Event</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((r) => {
+                  const won = r.score > r.oppScore;
+                  return (
+                    <tr key={r.seriesId} className="border-b border-hairline/60">
+                      <td className="whitespace-nowrap py-1.5 pr-4 font-mono text-xs tabular-nums text-ink-muted">
+                        {r.playedAt.slice(0, 10)}
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        <Link
+                          href={`/teams/${r.opponentSlug}`}
+                          className="hover:text-accent hover:underline"
+                        >
+                          {r.opponent}
+                        </Link>
+                      </td>
+                      <td className="whitespace-nowrap py-1.5 pr-4 text-right font-mono tabular-nums">
+                        <span className={won ? "text-accent" : "text-ink-muted"}>
+                          {won ? "W" : "L"}
+                        </span>{" "}
+                        {r.score}–{r.oppScore}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                        {r.eloDelta === null
+                          ? "—"
+                          : `${r.eloDelta >= 0 ? "+" : "−"}${Math.abs(r.eloDelta).toFixed(0)}`}
+                      </td>
+                      <td className="hidden py-1.5 text-ink-secondary sm:table-cell">{r.event}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {placements.length > 0 && (
         <section className="mt-12">
@@ -408,41 +530,48 @@ export default async function TeamPage({
             Style
             <span className="lt-note">percentile among qualified teams that season</span>
           </h2>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-hairline text-xs text-ink-muted">
-                  <th className="py-2 pr-4 font-normal">Season</th>
-                  <th className="py-2 pr-4 font-normal">Measure</th>
-                  <th className="py-2 pr-4 font-normal">Mode</th>
-                  <th className="py-2 pr-4 text-right font-normal">Value</th>
-                  <th className="py-2 pr-4 font-normal">Percentile</th>
-                  <th className="py-2 text-right font-normal">Maps</th>
-                </tr>
-              </thead>
-              <tbody>
-                {styleRows.map((r) => (
-                  <tr key={r.key} className="border-b border-hairline/60">
-                    <td className="py-1.5 pr-4 text-ink-secondary">{r.year}</td>
-                    <td className="py-1.5 pr-4" title={r.note ?? undefined}>
-                      {r.label}
-                    </td>
-                    <td className="py-1.5 pr-4 text-ink-secondary">
-                      {modeLabel(modeCatalog, r.mode, "All")}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                      {r.value}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      {r.pctl !== null ? <PctlBar pctl={r.pctl} /> : "—"}
-                    </td>
-                    <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
-                      {r.maps}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-4">
+            <Tabs
+              tabs={styleYears.map((year) => ({
+                label: `${year} ${seasonTitle(year)}`,
+                content: (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-hairline text-xs text-ink-muted">
+                      <th className="py-2 pr-4 font-normal">Measure</th>
+                      <th className="py-2 pr-4 font-normal">Mode</th>
+                      <th className="py-2 pr-4 text-right font-normal">Value</th>
+                      <th className="py-2 pr-4 font-normal">Percentile</th>
+                      <th className="py-2 text-right font-normal">Maps</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {styleRows.filter((r) => r.year === year).map((r) => (
+                      <tr key={r.key} className="border-b border-hairline/60">
+                        <td className="py-1.5 pr-4" title={r.note ?? undefined}>
+                          {r.label}
+                        </td>
+                        <td className="py-1.5 pr-4 text-ink-secondary">
+                          {modeLabel(modeCatalog, r.mode, "All")}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
+                          {r.value}
+                        </td>
+                        <td className="py-1.5 pr-4">
+                          {r.pctl !== null ? <PctlBar pctl={r.pctl} /> : "—"}
+                        </td>
+                        <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
+                          {r.maps}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+                ),
+              }))}
+            />
           </div>
           <p className="mt-3 text-xs text-ink-muted">
             Hill duty concentration and opening concentration describe how a roster

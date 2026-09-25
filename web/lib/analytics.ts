@@ -470,27 +470,40 @@ export async function getEraSpans(): Promise<EraSpan[]> {
 // phases, qualifiers and relegation are context-only (unlabeled, hover for
 // the name).
 export type EventMarker = {
+  id: number;
   name: string;
   from: string; // ISO timestamps of first/last archived series
   to: string;
   major: boolean;
 };
 
-export async function getEventMarkers(): Promise<EventMarker[]> {
+// Every event with an archived series, or only the ones one team played in.
+// Qualifiers are never major: they are online weeks leading into the major.
+export async function getEventMarkers(teamId?: number): Promise<EventMarker[]> {
+  const played =
+    teamId === undefined
+      ? sql``
+      : sql`AND (s.team1_id = ${teamId} OR s.team2_id = ${teamId})`;
   const rows = await db.execute(sql`
-    SELECT e.name, e.tier, min(s.played_at) AS from_t, max(s.played_at) AS to_t
+    SELECT e.id, e.name, e.tier, min(s.played_at) AS from_t, max(s.played_at) AS to_t
     FROM series s
     JOIN events e ON e.id = s.event_id
-    WHERE s.played_at IS NOT NULL
+    WHERE s.played_at IS NOT NULL ${played}
     GROUP BY e.id, e.name, e.tier
     ORDER BY min(s.played_at)
   `);
-  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
-    name: String(r.name),
-    from: new Date(String(r.from_t)).toISOString(),
-    to: new Date(String(r.to_t)).toISOString(),
-    major: String(r.tier) === "S" || !/pro league/i.test(String(r.name)),
-  }));
+  return (rows as unknown as Record<string, unknown>[]).map((r) => {
+    const name = String(r.name);
+    return {
+      id: Number(r.id),
+      name,
+      from: new Date(String(r.from_t)).toISOString(),
+      to: new Date(String(r.to_t)).toISOString(),
+      major:
+        !/qualif/i.test(name) &&
+        (String(r.tier) === "S" || !/pro league/i.test(name)),
+    };
+  });
 }
 
 // League engagement pace per season×mode — the "raw stats are not comparable"
@@ -941,6 +954,104 @@ export async function getTeamStandings(
     nSeries: Number(r.n_series),
     lastPlayed: r.last_played ? new Date(String(r.last_played)) : null,
   }));
+}
+
+export type SeasonStanding = {
+  teamId: number;
+  team: string;
+  startElo: number;
+  endElo: number;
+  peakElo: number;
+  glicko: number | null;
+  glickoRd: number | null;
+  wins: number;
+  losses: number;
+  nSeries: number;
+  lastPlayed: Date | null;
+  spark: number[];
+};
+
+export type SeasonStandings = { minSeries: number; teams: SeasonStanding[] };
+
+// One season's table: each team's Elo entering its first series of the season,
+// after its last, and its path between. Teams with fewer than a quarter of the
+// busiest team's series are dropped, which removes one-off open-bracket entries.
+export async function getSeasonStandings(
+  eloRunId: number,
+  glickoRunId: number,
+  year: number,
+): Promise<SeasonStandings> {
+  const rows = (await db.execute(sql`
+    SELECT tr.run_id, tr.team_id, t.name AS team, s.played_at,
+           tr.rating_pre, tr.rating_post, tr.rating_sd,
+           CASE WHEN s.team1_score IS NULL OR s.team2_score IS NULL
+                  OR s.team1_score = s.team2_score THEN NULL
+                WHEN (s.team1_id = tr.team_id) = (s.team1_score > s.team2_score)
+                THEN 1 ELSE 0 END AS won
+    FROM team_ratings tr
+    JOIN series s ON s.id = tr.series_id
+    JOIN events e ON e.id = s.event_id
+    JOIN seasons se ON se.id = e.season_id
+    JOIN teams t ON t.id = tr.team_id
+    WHERE tr.run_id IN (${eloRunId}, ${glickoRunId}) AND se.year = ${year}
+    ORDER BY s.played_at, s.id
+  `)) as unknown as Record<string, unknown>[];
+
+  const by = new Map<number, SeasonStanding>();
+  const glicko = new Map<number, { r: number; rd: number | null }>();
+  for (const r of rows) {
+    const id = Number(r.team_id);
+    const post = Number(r.rating_post);
+    if (Number(r.run_id) !== eloRunId) {
+      glicko.set(id, { r: post, rd: r.rating_sd === null ? null : Number(r.rating_sd) });
+      continue;
+    }
+    let tm = by.get(id);
+    if (!tm) {
+      const pre = Number(r.rating_pre);
+      tm = {
+        teamId: id,
+        team: String(r.team),
+        startElo: pre,
+        endElo: pre,
+        peakElo: pre,
+        glicko: null,
+        glickoRd: null,
+        wins: 0,
+        losses: 0,
+        nSeries: 0,
+        lastPlayed: null,
+        spark: [pre],
+      };
+      by.set(id, tm);
+    }
+    tm.endElo = post;
+    tm.peakElo = Math.max(tm.peakElo, post);
+    tm.nSeries++;
+    tm.spark.push(post);
+    if (r.won !== null) {
+      if (Number(r.won)) tm.wins++;
+      else tm.losses++;
+    }
+    if (r.played_at) tm.lastPlayed = new Date(String(r.played_at));
+  }
+  if (glickoRunId !== eloRunId) {
+    for (const tm of by.values()) {
+      const g = glicko.get(tm.teamId);
+      if (g) {
+        tm.glicko = g.r;
+        tm.glickoRd = g.rd;
+      }
+    }
+  }
+  const teams = [...by.values()];
+  const minSeries = Math.ceil(0.25 * Math.max(0, ...teams.map((t) => t.nSeries)));
+  return {
+    minSeries,
+    teams: teams
+      .filter((t) => t.nSeries >= minSeries)
+      .sort((a, b) => b.endElo - a.endElo),
+  };
 }
 
 // `rd` is the rating deviation stored alongside the rating: Glicko-2 writes it,
@@ -1541,6 +1652,52 @@ export async function getTeamStints(teamId: number): Promise<TeamStint[]> {
   return rows.map((r) => ({ ...r, slug: playerSlug(r.handle) }));
 }
 
+export type RecentSeries = {
+  seriesId: number;
+  playedAt: string;
+  event: string;
+  opponent: string;
+  opponentSlug: string;
+  score: number;
+  oppScore: number;
+  eloDelta: number | null;
+};
+
+// A team's latest decided series, newest first, with the Elo each one moved.
+export async function getTeamRecentSeries(
+  eloRunId: number,
+  teamId: number,
+  limit = 10,
+): Promise<RecentSeries[]> {
+  const rows = await db.execute(sql`
+    SELECT s.id, s.played_at, e.name AS event, o.name AS opponent,
+           CASE WHEN s.team1_id = ${teamId} THEN s.team1_score ELSE s.team2_score END AS score,
+           CASE WHEN s.team1_id = ${teamId} THEN s.team2_score ELSE s.team1_score END AS opp_score,
+           tr.rating_post - tr.rating_pre AS delta
+    FROM series s
+    JOIN events e ON e.id = s.event_id
+    JOIN teams o ON o.id = CASE WHEN s.team1_id = ${teamId} THEN s.team2_id ELSE s.team1_id END
+    LEFT JOIN team_ratings tr
+      ON tr.series_id = s.id AND tr.team_id = ${teamId} AND tr.run_id = ${eloRunId}
+    WHERE (s.team1_id = ${teamId} OR s.team2_id = ${teamId})
+      AND s.played_at IS NOT NULL
+      AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
+      AND s.team1_score <> s.team2_score
+    ORDER BY s.played_at DESC, s.id DESC
+    LIMIT ${limit}
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    seriesId: Number(r.id),
+    playedAt: new Date(String(r.played_at)).toISOString(),
+    event: String(r.event),
+    opponent: String(r.opponent),
+    opponentSlug: teamSlug(String(r.opponent)),
+    score: Number(r.score),
+    oppScore: Number(r.opp_score),
+    eloDelta: r.delta === null ? null : Number(r.delta),
+  }));
+}
+
 export type ModeSplit = { mode: string; maps: number; wins: number };
 
 // Map win rate per mode for one team, decided maps only.
@@ -1679,9 +1836,16 @@ export async function getTeamH2H(teamId: number, limit = 12): Promise<H2HRow[]> 
 
 export type H2HCell = { rowId: number; colId: number; wins: number; losses: number };
 
-// Pairwise decided-series records among a set of teams.
-export async function getH2HMatrix(teamIds: number[]): Promise<H2HCell[]> {
+// Pairwise decided-series records among a set of teams, optionally within one
+// season.
+export async function getH2HMatrix(teamIds: number[], year?: number): Promise<H2HCell[]> {
   if (teamIds.length < 2) return [];
+  const inSeason =
+    year === undefined
+      ? sql``
+      : sql`AND s.event_id IN (
+          SELECT e.id FROM events e JOIN seasons se ON se.id = e.season_id
+          WHERE se.year = ${year})`;
   const rows = await db.execute(sql`
     SELECT a AS row_id, b AS col_id, sum(win) AS wins, count(*) - sum(win) AS losses
     FROM (
@@ -1692,6 +1856,7 @@ export async function getH2HMatrix(teamIds: number[]): Promise<H2HCell[]> {
         AND s.team2_id IN ${sql.raw(`(${teamIds.join(",")})`)}
         AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
         AND s.team1_score <> s.team2_score
+        ${inSeason}
       UNION ALL
       SELECT s.team2_id, s.team1_id, (s.team2_score > s.team1_score)::int
       FROM series s
@@ -1699,6 +1864,7 @@ export async function getH2HMatrix(teamIds: number[]): Promise<H2HCell[]> {
         AND s.team2_id IN ${sql.raw(`(${teamIds.join(",")})`)}
         AND s.team1_score IS NOT NULL AND s.team2_score IS NOT NULL
         AND s.team1_score <> s.team2_score
+        ${inSeason}
     ) x GROUP BY a, b
   `);
   return (rows as unknown as Record<string, unknown>[]).map((r) => ({

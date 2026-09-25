@@ -108,7 +108,7 @@ export function PlacementTimeline({ placements }: { placements: PlacementRow[] }
           </span>
         ) : (
           <>
-            One dot per event, first place at the top. Amber dots are event wins.
+            One dot per event, first place at the top. Filled dots are event wins.
             Hover a dot for the event name and prize.
           </>
         )}

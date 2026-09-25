@@ -34,6 +34,8 @@ const CITY_CODES: Record<string, string> = {
 
 function shortLabel(name: string): string {
   if (/championship/i.test(name)) return "CHAMPS";
+  const major = name.match(/major\s*(\d+)|stage\s*(\d+)\s*major/i);
+  if (major) return `M${major[1] ?? major[2]}`;
   const city = name.replace(/^CWL\s+/, "").replace(/\s+\d{4}$/, "");
   return CITY_CODES[city] ?? city.toUpperCase().slice(0, 4);
 }
@@ -342,7 +344,7 @@ export function EloExplorer({
                 }
                 return (
                   <g
-                    key={ev.name}
+                    key={ev.id}
                     onMouseEnter={() => setEventHover(ev)}
                     onMouseLeave={() => setEventHover(null)}
                   >

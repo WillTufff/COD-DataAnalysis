@@ -1,8 +1,15 @@
 import Link from "next/link";
 import type { TeamStint } from "@/lib/analytics";
+import { type RosterGroup, rosterGroup } from "@/lib/roster";
 
-// Roster history as horizontal spans, one row per player, ordered by first
-// arrival. Identity lives in the row label, so all bars share one neutral fill.
+type RowGroup = "player" | "staff";
+const GROUP_ORDER: RowGroup[] = ["player", "staff"];
+const GROUP_LABEL: Record<RowGroup, string> = { player: "Players", staff: "Staff" };
+const rowGroup = (g: RosterGroup): RowGroup => (g === "staff" ? "staff" : "player");
+
+// Roster history as horizontal spans, one row per person, players ordered by
+// first arrival and then staff. Identity lives in the row label, so bars share
+// one neutral fill; time on the bench is a dashed outline on the player's row.
 export function StintTimeline({
   stints,
   rangeEnd,
@@ -27,24 +34,41 @@ export function StintTimeline({
     ...stints.map((s) => (s.endDate ? parse(s.endDate) : 0)),
   );
 
-  // one row per player, stints merged onto it
-  const players = new Map<number, { handle: string; slug: string; spans: TeamStint[] }>();
+  // one row per person per group, stints merged onto it
+  type Row = { handle: string; slug: string; group: RowGroup; spans: TeamStint[] };
+  const byKey = new Map<string, Row>();
   for (const s of stints) {
-    let p = players.get(s.playerId);
+    const group = rowGroup(rosterGroup(s.role));
+    const key = `${s.playerId}-${group}`;
+    let p = byKey.get(key);
     if (!p) {
-      p = { handle: s.handle, slug: s.slug, spans: [] };
-      players.set(s.playerId, p);
+      p = { handle: s.handle, slug: s.slug, group, spans: [] };
+      byKey.set(key, p);
     }
     p.spans.push(s);
   }
-  const rows = [...players.values()];
+  const grouped = GROUP_ORDER.map((g) => ({
+    group: g,
+    rows: [...byKey.values()].filter((p) => p.group === g),
+  })).filter((g) => g.rows.length > 0);
+  // Headings only appear once there is more than one group to tell apart.
+  const headed = grouped.length > 1;
+  type Line = { kind: "head"; group: RowGroup } | { kind: "row"; row: Row };
+  const lines: Line[] = grouped.flatMap((g) => [
+    ...(headed ? [{ kind: "head" as const, group: g.group }] : []),
+    ...g.rows.map((row) => ({ kind: "row" as const, row })),
+  ]);
+  const staffRole = (p: Row) => {
+    const roles = [...new Set(p.spans.map((s) => s.role).filter(Boolean))];
+    return roles.join(", ");
+  };
 
   const W = 720;
   const LABEL = 110;
   const ROW = 20;
   const BAR = 10;
   const M = { top: 4, right: 12, bottom: 22 };
-  const H = M.top + rows.length * ROW + M.bottom;
+  const H = M.top + lines.length * ROW + M.bottom;
   const iw = W - LABEL - M.right;
   const x = (t: number) => LABEL + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * iw;
 
@@ -59,7 +83,7 @@ export function StintTimeline({
           viewBox={`0 0 ${W} ${H}`}
           className="w-full"
           role="img"
-          aria-label="Roster stints over time, one row per player"
+          aria-label="Roster stints over time, one row per person"
         >
           {years.map((yr) => {
             const tt = Date.UTC(yr, 0, 1);
@@ -79,33 +103,72 @@ export function StintTimeline({
               </g>
             );
           })}
-          {rows.map((p, i) => {
+          {lines.map((line, i) => {
+            const yMid = M.top + i * ROW + ROW / 2;
+            if (line.kind === "head") {
+              return (
+                <text
+                  key={`head-${line.group}`}
+                  x={0}
+                  y={yMid + 4}
+                  fontSize={9}
+                  fill="var(--ink-muted)"
+                  className="font-mono"
+                  style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}
+                >
+                  {GROUP_LABEL[line.group]}
+                </text>
+              );
+            }
+            const p = line.row;
             const yTop = M.top + i * ROW + (ROW - BAR) / 2;
             return (
-              <g key={p.slug}>
-                <text
-                  x={LABEL - 10}
-                  y={M.top + i * ROW + ROW / 2 + 3.5}
-                  textAnchor="end"
-                  fontSize={11}
-                  fill="var(--ink-secondary)"
-                >
-                  {p.handle}
-                </text>
+              <g key={`${p.slug}-${p.group}`}>
+                <Link href={`/players/${p.slug}`}>
+                  <text
+                    x={LABEL - 10}
+                    y={yMid + 3.5}
+                    textAnchor="end"
+                    fontSize={11}
+                    fill="var(--ink-secondary)"
+                    className="hover:fill-[var(--accent)]"
+                  >
+                    {p.handle}
+                    {p.group === "staff" && <title>{staffRole(p)}</title>}
+                  </text>
+                </Link>
                 {p.spans.map((s, j) => {
                   const a = parse(s.startDate);
                   const b = s.endDate ? parse(s.endDate) : t1;
+                  const w = Math.max(2, x(b) - x(a));
+                  const kind = rosterGroup(s.role);
                   return (
-                    <rect
-                      key={j}
-                      x={x(a)}
-                      y={yTop}
-                      width={Math.max(2, x(b) - x(a))}
-                      height={BAR}
-                      fill="var(--surface-raised)"
-                      stroke="var(--baseline)"
-                      strokeWidth={1}
-                    />
+                    <g key={j}>
+                      <rect
+                        x={x(a)}
+                        y={yTop}
+                        width={w}
+                        height={BAR}
+                        fill={kind === "player" ? "var(--surface-raised)" : "transparent"}
+                        stroke="var(--baseline)"
+                        strokeWidth={1}
+                        strokeDasharray={kind === "bench" ? "3 2" : undefined}
+                      >
+                        <title>
+                          {`${p.handle}${s.role ? ` · ${s.role}` : ""} · ${s.startDate.slice(0, 10)} – ${s.endDate ? s.endDate.slice(0, 10) : "present"}`}
+                        </title>
+                      </rect>
+                      {kind === "staff" && w > 60 && s.role !== p.spans[j - 1]?.role && (
+                        <text
+                          x={x(a) + 5}
+                          y={yTop + BAR - 2}
+                          fontSize={8}
+                          fill="var(--ink-muted)"
+                        >
+                          {s.role}
+                        </text>
+                      )}
+                    </g>
                   );
                 })}
               </g>
@@ -113,15 +176,12 @@ export function StintTimeline({
           })}
         </svg>
       </div>
-      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        {rows.map((p) => (
-          <li key={p.slug}>
-            <Link href={`/players/${p.slug}`} className="text-accent underline underline-offset-2 hover:text-ink">
-              {p.handle}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {stints.some((s) => rosterGroup(s.role) === "bench") && (
+        <p className="mt-2 text-xs text-ink-muted">
+          Dashed spans are time as a substitute, on loan, or inactive. Hover a
+          span for its role and dates.
+        </p>
+      )}
     </div>
   );
 }

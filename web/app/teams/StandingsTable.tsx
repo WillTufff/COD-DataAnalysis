@@ -12,6 +12,8 @@ export type StandingRow = {
   slug: string;
   finalElo: number;
   peakElo: number;
+  // Elo gained over the season; absent on the all-time table.
+  delta?: number;
   glicko: number | null;
   glickoRd: number | null;
   rec: { wins: number; losses: number } | null;
@@ -22,11 +24,13 @@ export type StandingRow = {
 export function StandingsTable({
   rows,
   sparkDomain,
+  season,
   initialPer,
   initialPage,
 }: {
   rows: StandingRow[];
   sparkDomain: [number, number];
+  season: boolean;
   initialPer: Per;
   initialPage: number;
 }) {
@@ -64,9 +68,23 @@ export function StandingsTable({
         cellClassName: "font-mono tabular-nums",
         render: (t) => t.finalElo.toFixed(0),
       },
+      ...(season
+        ? [
+            {
+              id: "delta",
+              header: "Season ±",
+              align: "right",
+              cellClassName: "font-mono tabular-nums",
+              render: (t) =>
+                t.delta === undefined
+                  ? "—"
+                  : `${t.delta >= 0 ? "+" : "−"}${Math.abs(t.delta).toFixed(0)}`,
+            } satisfies Column<StandingRow>,
+          ]
+        : []),
       {
         id: "peak",
-        header: "Peak",
+        header: season ? "Season peak" : "Peak",
         align: "right",
         cellClassName: "font-mono tabular-nums text-ink-secondary",
         render: (t) => t.peakElo.toFixed(0),
@@ -101,7 +119,7 @@ export function StandingsTable({
         render: (t) => (t.lastPlayedIso ? t.lastPlayedIso.slice(0, 10) : "—"),
       },
     ],
-    [sparkDomain],
+    [sparkDomain, season],
   );
 
   return (
