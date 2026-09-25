@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { REPORT_VIEWS, type ReportView } from "@/lib/reports/rows";
-import { useReportUrl } from "./reportUrl";
 
 // Each format links to the export route carrying the live URL state, so the
 // file always matches the on-screen report.
@@ -83,43 +82,46 @@ function ExportMenu() {
   );
 }
 
+/** Copies the page URL, which is the whole report. */
+function CopyLink() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard?.writeText(window.location.href).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="border border-hairline px-2.5 py-1 text-ink-secondary transition-colors hover:border-accent-dim hover:text-accent motion-reduce:transition-none"
+    >
+      {copied ? "Copied" : "Copy link"}
+    </button>
+  );
+}
+
 /**
- * The report's toolbar, above the table with the other controls: what the
- * report contains, the two switches that change how it reads, and the way out
- * of the page.
+ * The report's toolbar, directly above the table: its size, how cells read,
+ * and the ways out of the page.
  */
 export function ReportToolbar({
   rowCount,
   columnCount,
-  qualifiedOnly,
   view,
   setView,
 }: {
   rowCount: number;
   columnCount: number;
-  qualifiedOnly: boolean;
   view: ReportView;
   setView: (view: ReportView) => void;
 }) {
-  const push = useReportUrl();
-
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 border border-hairline px-3 py-2 text-xs print:hidden">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="font-mono tabular-nums text-ink-muted">
-          {rowCount.toLocaleString()} row{rowCount === 1 ? "" : "s"} ·{" "}
-          {columnCount} column{columnCount === 1 ? "" : "s"}
-        </span>
-        <label className="flex cursor-pointer items-center gap-2 text-ink-muted hover:text-ink">
-          <input
-            type="checkbox"
-            checked={!qualifiedOnly}
-            onChange={(e) => push({ all: e.target.checked ? "1" : null })}
-            className="accent-[var(--accent)]"
-          />
-          Include small samples
-        </label>
-      </div>
+    <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 py-2 text-xs print:hidden">
+      <span className="font-mono tabular-nums text-ink-muted">
+        {rowCount.toLocaleString()} row{rowCount === 1 ? "" : "s"} ·{" "}
+        {columnCount} column{columnCount === 1 ? "" : "s"}
+      </span>
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex border border-hairline">
@@ -140,6 +142,7 @@ export function ReportToolbar({
           ))}
         </div>
         <ExportMenu />
+        <CopyLink />
       </div>
     </div>
   );

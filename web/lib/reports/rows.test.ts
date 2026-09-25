@@ -31,8 +31,9 @@ describe("parseView", () => {
   it("reads pctl and z, and treats anything else as the value", () => {
     expect(parseView({ view: "pctl" })).toBe("pctl");
     expect(parseView({ view: "z" })).toBe("z");
-    expect(parseView({ view: "nope" })).toBe("value");
-    expect(parseView({})).toBe("value");
+    expect(parseView({ view: "value" })).toBe("value");
+    expect(parseView({ view: "nope" })).toBe("pctl");
+    expect(parseView({})).toBe("pctl");
   });
 });
 

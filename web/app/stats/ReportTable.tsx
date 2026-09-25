@@ -10,11 +10,13 @@ import type { SortState } from "@/components/table/tableState";
 import type { ReportColumn, ReportRow } from "@/lib/analytics";
 import type { ReportEntity } from "@/lib/reports/resolve";
 import {
+  DEFAULT_VIEW,
   type ReportView,
   gateReportRows,
   sortReading,
 } from "@/lib/reports/rows";
 import { AddColumnMenu, type MetricOption } from "./AddColumnMenu";
+import { ColumnMenu } from "./ColumnMenu";
 import { ReportToolbar } from "./ReportToolbar";
 import { useReportUrl } from "./reportUrl";
 
@@ -66,27 +68,27 @@ function Cell({
   );
 }
 
+/** How far a mouse has to travel on a header before a press becomes a drag. */
+const DRAG_THRESHOLD = 6;
+
 /**
  * The report, with its own column editing built into the header row.
  *
- * The header row *is* the column manager — there is no separate strip repeating
- * what the headers already say. Each metric header carries three hit zones that
- * never overlap: a ✕ to drop the column, a ⠿ grip that is the only thing drag
- * listens to, and the label, which keeps its click-to-sort. Splitting drag onto
- * its own glyph is what lets sort and reorder share one control without either
- * stealing the other's gesture.
+ * A click on a metric header sorts it. A mouse press that travels past a few
+ * pixels drags the column instead, and the click that ends the drag is
+ * swallowed so it does not also sort. The ▾ beside each label opens the column
+ * menu, which holds the same edits for touch and keyboard.
  *
  * Add, remove and reorder all rewrite the ordered `metrics` CSV on the URL and
- * navigate, exactly as the old chips row did — the column set is server-queried,
- * so an edit is a new report, and the server re-validates (notably, falling the
- * sort back to a default when the sorted column has just been removed).
+ * navigate. The column set is server-queried, so an edit is a new report, and
+ * the server re-validates (notably, falling the sort back to a default when the
+ * sorted column has just been removed).
  */
 export function ReportTable({
   entity,
   columns,
   rows,
   catalog,
-  qualifiedOnly,
   gateActive,
   initialView,
   initialPer,
@@ -98,7 +100,6 @@ export function ReportTable({
   columns: ReportColumn[];
   rows: ReportRow[];
   catalog: MetricOption[];
-  qualifiedOnly: boolean;
   gateActive: boolean;
   initialView: ReportView;
   initialPer: Per;
@@ -117,7 +118,7 @@ export function ReportTable({
     (next: ReportView) => {
       setViewState(next);
       const params = new URLSearchParams(searchParams.toString());
-      if (next === "value") params.delete("view");
+      if (next === DEFAULT_VIEW) params.delete("view");
       else params.set("view", next);
       params.sort();
       const qs = params.toString();
@@ -153,6 +154,7 @@ export function ReportTable({
     order: string[];
   } | null>(null);
   const orderRef = useRef<string[] | null>(null);
+  const swallowRef = useRef<((e: MouseEvent) => void) | null>(null);
 
   const selected = useMemo(() => columns.map((c) => c.key), [columns]);
   const shownRows = useMemo(
@@ -218,6 +220,14 @@ export function ReportTable({
   const endDrag = useCallback(() => {
     const dropped = orderRef.current;
     setDragKey(null);
+    // The swallow is for the click this release produces, which fires before
+    // any timer; if the release lands off the header no click comes, and the
+    // listener must not linger to eat the next real one.
+    const swallow = swallowRef.current;
+    if (swallow) {
+      setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+      swallowRef.current = null;
+    }
     if (dropped && dropped.join(",") !== selected.join(",")) {
       // Commit, but leave the preview rendered: clearing it now would snap the
       // columns back to the old order until the navigation lands.
@@ -265,6 +275,41 @@ export function ReportTable({
     };
   }, [dragKey, selected, endDrag]);
 
+  // A mouse press on a metric header waits to see whether it is a click (sort)
+  // or a drag (reorder). Touch never drags here: a horizontal swipe on the
+  // header has to keep scrolling the table, and the column menu covers moves.
+  const onHeaderPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-col-menu]")) return;
+      const key = target.closest<HTMLElement>("th[data-col-id]")?.dataset.colId;
+      if (!key || !selected.includes(key)) return;
+      const x0 = e.clientX;
+      const y0 = e.clientY;
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", cleanup);
+      };
+      const onMove = (ev: PointerEvent) => {
+        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_THRESHOLD) return;
+        cleanup();
+        const swallow = (c: MouseEvent) => {
+          c.stopPropagation();
+          c.preventDefault();
+        };
+        swallowRef.current = swallow;
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        orderRef.current = order;
+        setPreview({ base: selected, order });
+        setDragKey(key);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", cleanup);
+    },
+    [order, selected],
+  );
+
   const tableColumns = useMemo<Column<ReportRow>[]>(() => {
     const cols: Column<ReportRow>[] = [
       {
@@ -273,13 +318,17 @@ export function ReportTable({
         // they said when they were copied.
         id: "player",
         header: entity === "teams" ? "Team" : "Player",
+        // Pinned, so the name stays beside its numbers when the table scrolls
+        // sideways on a narrow screen.
+        headerClassName: "sticky left-0 z-[1] bg-background",
+        cellClassName: "sticky left-0 z-[1] bg-background",
         sortable: true,
         sortDir: "asc",
         sortValue: (r) => r.handle,
         render: (r) => (
           <Link
             href={`/${entity === "teams" ? "teams" : "players"}/${r.slug}`}
-            className="font-medium hover:text-accent"
+            className="whitespace-nowrap font-medium hover:text-accent"
           >
             {r.handle}
           </Link>
@@ -289,7 +338,14 @@ export function ReportTable({
         id: "season",
         header: "Season",
         cellClassName: "whitespace-nowrap text-ink-secondary",
-        render: (r) => `${r.year} ${r.title}`,
+        render: (r) => (
+          <>
+            <span className="sm:hidden">{r.title}</span>
+            <span className="max-sm:hidden">
+              {r.year} {r.title}
+            </span>
+          </>
+        ),
       },
     ];
     for (const key of order) {
@@ -302,49 +358,27 @@ export function ReportTable({
         header: (
           <span title={col.higherIsBetter ? undefined : "Lower is better"}>
             {col.label}
-            {col.higherIsBetter ? "" : " ↓"}
+            {col.higherIsBetter ? "" : (
+              <span className="ml-0.5 text-ink-secondary" aria-hidden="true">
+                ↓
+              </span>
+            )}
           </span>
         ),
         align: "right",
         cellClassName: "font-mono tabular-nums",
-        headerClassName: `rh-col ${dragging ? "opacity-50" : ""}`,
-        headerPrefix: (
-          <span className="inline-flex items-center print:hidden">
-            <button
-              type="button"
-              aria-label={`Remove the ${col.label} column`}
-              title={`Remove the ${col.label} column`}
-              onClick={() => removeColumn(col.key)}
-              className="rh-x px-0.5 text-[0.68rem] leading-none"
-            >
-              ✕
-            </button>
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={`Reorder the ${col.label} column, position ${index + 1} of ${selected.length}. Use the arrow keys to move it.`}
-              data-dragging={dragging ? "true" : undefined}
-              onPointerDown={(e) => {
-                if (e.button !== 0) return;
-                e.preventDefault();
-                setDragKey(col.key);
-                orderRef.current = order;
-                setPreview({ base: selected, order });
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowLeft") {
-                  e.preventDefault();
-                  moveColumn(col.key, index - 1);
-                } else if (e.key === "ArrowRight") {
-                  e.preventDefault();
-                  moveColumn(col.key, index + 1);
-                }
-              }}
-              className="rh-grip inline-block w-4 touch-none select-none text-center text-[0.66rem] leading-none tracking-tighter"
-            >
-              ⠿
-            </span>
-          </span>
+        headerClassName: `group/th select-none ${dragging ? "opacity-50" : ""} ${
+          dragKey ? "cursor-grabbing" : ""
+        }`,
+        headerMenu: (api) => (
+          <ColumnMenu
+            col={col}
+            index={index}
+            count={order.length}
+            api={api}
+            onMove={(to) => moveColumn(col.key, to)}
+            onRemove={() => removeColumn(col.key)}
+          />
         ),
         sortable: true,
         // Best-first on first click: descending when higher is better.
@@ -358,7 +392,6 @@ export function ReportTable({
     byKey,
     entity,
     order,
-    selected,
     view,
     dragKey,
     moveColumn,
@@ -370,14 +403,10 @@ export function ReportTable({
       <ReportToolbar
         rowCount={shownRows.length}
         columnCount={columns.length}
-        qualifiedOnly={qualifiedOnly}
         view={view}
         setView={setView}
       />
-      <p className="mb-1 mt-2 text-right font-mono text-[0.66rem] text-ink-muted print:hidden">
-        <span className="tracking-tighter">⠿</span> drag to reorder · click to
-        sort · ✕ remove · + add metric
-      </p>
+      <div onPointerDownCapture={onHeaderPointerDown}>
       <DataTable
         // The table owns its sort as client state, seeded once from the URL. A
         // column edit is a navigation, and the server may have moved the sort
@@ -394,7 +423,6 @@ export function ReportTable({
         initialPage={initialPage}
         initialSort={initialSort}
         defaultSort={defaultSort}
-        headerRowClassName="rh-row"
         trailingHeaderClassName="relative w-9 text-center print:hidden"
         trailingHeader={
           <AddColumnMenu
@@ -404,6 +432,7 @@ export function ReportTable({
           />
         }
       />
+      </div>
     </div>
   );
 }

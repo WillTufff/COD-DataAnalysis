@@ -83,14 +83,9 @@ export function useTableState<T>({
     [writeUrl],
   );
 
-  const toggleSort = useCallback(
-    (id: string) => {
-      const spec = sortSpecs?.[id];
-      if (!spec) return;
-      const next: SortState =
-        sort && sort.id === id
-          ? { id, dir: sort.dir === "asc" ? "desc" : "asc" }
-          : { id, dir: spec.dir };
+  const setSort = useCallback(
+    (next: { id: string; dir: "asc" | "desc" }) => {
+      if (!sortSpecs?.[next.id]) return;
       setSortState(next);
       setPageState(1);
       onSortChange?.(next);
@@ -104,7 +99,20 @@ export function useTableState<T>({
         page: null,
       });
     },
-    [sort, sortSpecs, defaultSort, writeUrl, onSortChange],
+    [sortSpecs, defaultSort, writeUrl, onSortChange],
+  );
+
+  const toggleSort = useCallback(
+    (id: string) => {
+      const spec = sortSpecs?.[id];
+      if (!spec) return;
+      setSort(
+        sort && sort.id === id
+          ? { id, dir: sort.dir === "asc" ? "desc" : "asc" }
+          : { id, dir: spec.dir },
+      );
+    },
+    [sort, sortSpecs, setSort],
   );
 
   const sorted = useMemo(() => {
@@ -139,6 +147,7 @@ export function useTableState<T>({
     page: clampedPage,
     setPage,
     sort,
+    setSort,
     toggleSort,
     visible,
     offset,

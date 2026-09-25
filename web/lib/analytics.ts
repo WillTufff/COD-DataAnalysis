@@ -2488,6 +2488,33 @@ export async function getTeamReportScope(
   };
 }
 
+/**
+ * Which seasons and modes each metric has rows for, as `year:mode` keys with
+ * the all-modes slice written `year:`. The metric picker reads it to tell the
+ * columns that fill the current view from the ones that would be all dashes.
+ */
+export async function getMetricCoverage(
+  metricRunId: number,
+  entity: "players" | "teams",
+): Promise<Record<string, string[]>> {
+  const table = entity === "teams" ? teamMetricSeason : playerMetricSeason;
+  const rows = await db
+    .selectDistinct({
+      metric: table.metric,
+      year: seasons.year,
+      mode: gameModes.slug,
+    })
+    .from(table)
+    .innerJoin(seasons, eq(seasons.id, table.seasonId))
+    .leftJoin(gameModes, eq(gameModes.id, table.modeId))
+    .where(eq(table.runId, metricRunId));
+  const out: Record<string, string[]> = {};
+  for (const r of rows) {
+    (out[r.metric] ??= []).push(`${r.year}:${r.mode ?? ""}`);
+  }
+  return out;
+}
+
 export type MetaEntry = {
   name: string;
   share: number;

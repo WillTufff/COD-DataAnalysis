@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { MetricOption } from "./AddColumnMenu";
 import { AddFirstColumn } from "./AddFirstColumn";
-import { CohortTokens } from "./CohortTokens";
-import { PresetPicker, type PresetTile } from "./PresetPicker";
+import { EntityTabs } from "./EntityTabs";
+import { FilterBands } from "./FilterBands";
+import { PresetStrip, type PresetTile } from "./PresetStrip";
 import { ReportTable } from "./ReportTable";
 import {
   ALL_MODES_LABEL,
@@ -14,6 +15,7 @@ import {
 import {
   type MetricCatalogEntry,
   getMetricCatalog,
+  getMetricCoverage,
   getReportPlayers,
   getReportTeams,
   getTeamMetricCatalog,
@@ -24,7 +26,7 @@ import {
 } from "@/lib/analytics";
 import { categoryLabel } from "@/lib/reports/labels";
 import { gateReportRows } from "@/lib/reports/rows";
-import { REPORT_PRESETS } from "@/lib/reports/presets";
+import { presetsFor } from "@/lib/reports/presets";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import {
   type SearchParams,
@@ -34,7 +36,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Report builder" };
+export const metadata: Metadata = { title: "Stats" };
 
 const TIER_ORDER = ["gold", "gold-fun", "standard", "fun"];
 
@@ -47,6 +49,17 @@ function sortMetrics(metrics: MetricCatalogEntry[]): MetricCatalogEntry[] {
     return a.label.localeCompare(b.label);
   });
 }
+
+/** A set of years as a span: "2017–2019", or one year alone. */
+function yearSpan(years: number[]): string {
+  if (years.length === 0) return "";
+  const lo = Math.min(...years);
+  const hi = Math.max(...years);
+  return lo === hi ? String(lo) : `${lo}–${hi}`;
+}
+
+/** The row filters a preset link keeps, so switching presets keeps the view. */
+const CARRIED_PARAMS = ["years", "players", "teams", "all", "view"];
 
 export default async function StatsPage({
   searchParams,
@@ -64,7 +77,7 @@ export default async function StatsPage({
     return (
       <main className="mx-auto max-w-6xl px-6 py-12">
         <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
-          Report builder
+          Stats
         </h1>
         <p className="mt-4 text-sm text-ink-secondary">
           No metric run has been published yet.
@@ -78,111 +91,109 @@ export default async function StatsPage({
   // the absence. The team catalog is small and hand-ordered (map win rate
   // first), so it is used as published rather than re-sorted.
   const entity = parseEntity(sp);
-  const metrics =
+  const [metrics, coverage] = await Promise.all([
     entity === "teams"
-      ? await getTeamMetricCatalog(run.id)
-      : sortMetrics(catalog.metrics.filter((m) => m.titles.length > 0));
+      ? getTeamMetricCatalog(run.id)
+      : Promise.resolve(
+          sortMetrics(catalog.metrics.filter((m) => m.titles.length > 0)),
+        ),
+    getMetricCoverage(run.id, entity),
+  ]);
   const knownKeys = new Set(metrics.map((m) => m.key));
 
   // One resolution, shared with the export route so a download always matches
-  // the table it came from. A bare visit lands on a real report rather than an
-  // empty frame: this page fronts every published metric, so it should show
-  // what one looks like.
+  // the table it came from.
   const resolved = await resolveReportForUrl(run.id, sp, metrics);
   const { selected, selectedEntries, activePreset, scope, rankedScope } =
     resolved;
+  const { years, playerSlugs, teamSlugs, modeSlug, qualifiedOnly } = resolved;
 
-  const metricOptions: MetricOption[] = metrics.map((m) => ({
-    key: m.key,
-    label: m.label,
-    category: categoryLabel(m.category),
-    gold: m.tier.startsWith("gold"),
-  }));
+  // A metric is in view when it has rows for at least one season on screen in
+  // the mode on screen. An empty `years` is every covered season.
+  const viewYears = years.length > 0 ? years : scope.years;
+  const coverageYears = (key: string) =>
+    [...new Set((coverage[key] ?? []).map((c) => Number(c.split(":")[0])))];
+  const metricOptions: MetricOption[] = metrics.map((m) => {
+    const cells = new Set(coverage[m.key] ?? []);
+    return {
+      key: m.key,
+      label: m.label,
+      category: categoryLabel(m.category),
+      gold: m.tier.startsWith("gold"),
+      inView: viewYears.some((y) => cells.has(`${y}:${modeSlug ?? ""}`)),
+      span: yearSpan(coverageYears(m.key)),
+    };
+  });
 
-  // Every title the catalog publishes, in the order its metrics list them, so a
-  // preset's span is stamped against the archive rather than against a number
-  // written here.
-  const titleOrder: string[] = [];
-  for (const m of metrics) {
-    // The team catalog publishes no per-title coverage, so this comes out empty
-    // there — which is right: the team builder has no preset tiles to stamp.
-    for (const t of m.titles ?? []) if (!titleOrder.includes(t)) titleOrder.push(t);
+  // Preset links keep the row filters already set, so moving between presets
+  // changes the columns and mode and nothing else.
+  const carried = new URLSearchParams();
+  for (const k of CARRIED_PARAMS) {
+    const v = sp[k];
+    if (typeof v === "string") carried.set(k, v);
   }
-  const byMetricKey = new Map(metrics.map((m) => [m.key, m]));
-
-  // Preset tiles, each stamped with how many of its columns still resolve
-  // against the live catalog (a stale preset shows a smaller count, not a
-  // crash) and which titles those columns are published for.
-  const presetTiles: PresetTile[] = REPORT_PRESETS.map((p) => {
+  const presetTiles: PresetTile[] = presetsFor(entity).map((p) => {
     const kept = p.metrics.filter((k) => knownKeys.has(k));
-    const covered = new Set(kept.flatMap((k) => byMetricKey.get(k)?.titles ?? []));
+    const params = new URLSearchParams(carried);
+    if (entity === "teams") params.set("entity", "teams");
+    params.set("preset", p.id);
+    params.sort();
+    const span = yearSpan([...new Set(kept.flatMap(coverageYears))]);
     return {
       id: p.id,
       name: p.name,
       blurb: p.blurb,
-      category: p.category,
-      columns: kept.length,
-      titles: titleOrder.filter((t) => covered.has(t)),
+      href: `/stats?${params.toString()}`,
+      span,
     };
   });
 
   const header = (
     <>
-      <p className="font-mono text-xs text-ink-muted">
-        Build a report · pick a cohort, add metric columns · metric_layer v
-        {run.version}
-      </p>
-      <h1 className="mt-2 font-display text-5xl font-bold uppercase tracking-tight">
-        Report builder
+      <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
+        Stats
       </h1>
+      <p className="mt-2 max-w-2xl text-sm text-ink-secondary">
+        {metrics.length} {entity === "teams" ? "team" : "player"} metrics,
+        season by season. Each number is scored against the qualified field of
+        its own season and mode.
+      </p>
+      <div className="mt-6">
+        <EntityTabs entity={entity} />
+      </div>
+      <div className="mt-4">
+        <PresetStrip presets={presetTiles} activeId={activePreset?.id} />
+      </div>
     </>
   );
 
-  const presetSection = (
-    <PresetPicker
-      presets={presetTiles}
-      activeId={activePreset?.id}
-      allTitles={titleOrder}
-    />
+  const footnote = (
+    <p className="mt-3 max-w-3xl text-xs text-ink-muted">
+      Each cell is scored within the qualified {entity} of its own season and
+      mode, so a column can qualify a {entity === "teams" ? "team" : "player"}{" "}
+      the next column does not. Those cells are greyed, never dropped. Full
+      definitions are on the{" "}
+      <Link href="/methodology/metrics" className="underline">
+        methodology
+      </Link>{" "}
+      page. Metric layer v{run.version}.
+    </p>
   );
 
-  // No columns yet — lead with the presets rather than an empty table. The
-  // header row that normally hosts the add control does not exist here, so this
-  // is the one place it needs its own home. Presets are player reports, so the
-  // team builder's blank slate offers only the add control.
+  // No columns yet: the add control has no header row to live in.
   if (selected.length === 0) {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-12">
+      <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
         {header}
-        <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
-          {metrics.length} published {entity === "teams" ? "team " : ""}metrics,
-          each scored against its own season-and-mode cohort.{" "}
-          {entity === "teams"
-            ? "Add columns to build a report."
-            : "Start with a preset, or add columns to build your own."}
-        </p>
-        {entity === "players" && <div className="mt-8">{presetSection}</div>}
         <div className="mt-8 flex items-center gap-3 border-t border-hairline pt-4 text-sm text-ink-secondary print:hidden">
           <AddFirstColumn catalog={metricOptions} />
-          <span>or add a metric column to start from scratch.</span>
+          <span>Add a metric column, or pick a preset above.</span>
         </div>
       </main>
     );
   }
 
-  const {
-    years,
-    playerSlugs,
-    teamSlugs,
-    modeSlug,
-    qualifiedOnly,
-    gateActive,
-    view,
-    sort,
-    dir,
-    defaultSortKey,
-    defaultDir,
-  } = resolved;
+  const { gateActive, view, sort, dir, defaultSortKey, defaultDir } = resolved;
   // Rows come back ungated: the table applies the qualified gate to whichever
   // column it is sorted on, which a header click can change without a request.
   const ungated = { ...resolved.query, qualifiedOnly: false };
@@ -190,32 +201,22 @@ export default async function StatsPage({
     entity === "teams"
       ? queryTeamReport(run.id, ungated, selectedEntries)
       : queryReport(run.id, ungated, selectedEntries),
-    // The Players token has no place on a team report — the rows are teams.
+    // The player filter has no place on a team report: the rows are teams.
     entity === "teams" ? Promise.resolve([]) : getReportPlayers(run.id),
     getReportTeams(),
   ]);
   const handleBySlug = new Map(scopePlayers.map((p) => [p.slug, p.handle]));
   const teamNameBySlug = new Map(scopeTeams.map((t) => [t.slug, t.name]));
-  // What the filter tokens claim, reused by the print stamp and empty state.
+  // What the filter chips claim, reused by the print stamp and empty state.
   const playersText = pickLabel(playerSlugs, handleBySlug, "players");
   const teamsText = pickLabel(teamSlugs, teamNameBySlug, "teams");
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
+    <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       {header}
 
-      {entity === "players" && (
-        <details className="mt-6 group print:hidden" open={!!activePreset}>
-          <summary className="cursor-pointer list-none text-xs text-ink-muted hover:text-ink">
-            <span className="group-open:hidden">▸ Start from a preset</span>
-            <span className="hidden group-open:inline">▾ Presets</span>
-          </summary>
-          <div className="mt-3">{presetSection}</div>
-        </details>
-      )}
-
-      <div className="mt-6">
-        <CohortTokens
+      <div className="mt-4">
+        <FilterBands
           entity={entity}
           seasons={scope.seasons}
           years={years}
@@ -227,20 +228,21 @@ export default async function StatsPage({
           pickedPlayers={playerSlugs}
           teams={scopeTeams}
           pickedTeams={teamSlugs}
+          qualifiedOnly={qualifiedOnly}
         />
       </div>
 
-      {/* Print-only cohort stamp: the controls are hidden on paper, so the
-          printout names its own cohort. */}
+      {/* Print-only stamp: the controls are hidden on paper, so the printout
+          names its own filters. */}
       <p className="mt-4 hidden font-mono text-xs text-ink-secondary print:block">
         {activePreset ? `${activePreset.name} · ` : ""}
-        {entity === "teams" ? "team report · " : ""}
+        {entity === "teams" ? "teams · " : ""}
         {seasonLabel(scope.seasons, years)} ·{" "}
         {modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)} ·{" "}
         {entity === "players" ? `${playersText.toLowerCase()} · ` : ""}
         {teamsText.toLowerCase()} ·{" "}
-        {qualifiedOnly ? "qualified only" : "including small samples"} ·
-        metric_layer v{run.version}
+        {qualifiedOnly ? "qualified only" : "including small samples"} · metric
+        layer v{run.version}
       </p>
 
       {gateReportRows(rows, sort, resolved.selected, gateActive).length === 0 ? (
@@ -255,8 +257,8 @@ export default async function StatsPage({
                 .filter(Boolean)
                 .join(
                   " on ",
-                )} in this cohort. Try a different season or mode, or clear the player and team filters.`
-            : `No ${entity} match this cohort. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or widen the sample.`}
+                )} here. Try a different season or mode, or clear the row filters.`
+            : `No ${entity} match these filters. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or include small samples.`}
         </p>
       ) : (
         <ReportTable
@@ -264,7 +266,6 @@ export default async function StatsPage({
           columns={columns}
           rows={rows}
           catalog={metricOptions}
-          qualifiedOnly={qualifiedOnly}
           gateActive={gateActive}
           initialView={view}
           initialPer={parsePer(sp)}
@@ -274,17 +275,7 @@ export default async function StatsPage({
         />
       )}
 
-      <p className="mt-3 max-w-3xl text-xs text-ink-muted">
-        Each cell is scored within the qualified {entity} of its own season and
-        mode, so a column can qualify a {entity === "teams" ? "team" : "player"}{" "}
-        the next column does not — those cells are greyed, never dropped.
-        Percentile and z-score are within that cohort. Full definitions are on
-        the{" "}
-        <Link href="/methodology/metrics" className="underline">
-          methodology
-        </Link>{" "}
-        page.
-      </p>
+      {footnote}
     </main>
   );
 }

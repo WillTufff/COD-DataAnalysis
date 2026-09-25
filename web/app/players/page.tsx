@@ -307,7 +307,7 @@ export default async function PlayersPage({
         money total, including events before the archive starts; a dash means
         Liquipedia lists none. Per-season and per-metric leaderboards are on the{" "}
         <Link href="/stats" className="underline">
-          stat explorer
+          Stats page
         </Link>
         .
       </p>

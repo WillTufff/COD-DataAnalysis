@@ -13,8 +13,12 @@
 // of the default view 400s.
 export const DEFAULT_PRESET = "slaying-core";
 
+/** The team side's landing preset. */
+export const DEFAULT_TEAM_PRESET = "team-results";
+
 export type ReportPreset = {
   id: string;
+  entity?: "players" | "teams"; // omit for players
   name: string;
   blurb: string;
   category: string; // groups the preset picker
@@ -172,8 +176,62 @@ export const REPORT_PRESETS: ReportPreset[] = [
   },
 ];
 
-export function presetById(id: string): ReportPreset | undefined {
-  return REPORT_PRESETS.find((p) => p.id === id);
+// Team presets. Hill-time spread and first-blood concentration exist only in
+// their own mode, so each sits in that mode's preset rather than beside the
+// all-modes results, where it would be a column of dashes.
+export const TEAM_PRESETS: ReportPreset[] = [
+  {
+    id: "team-results",
+    entity: "teams",
+    name: "Results",
+    blurb: "Map, series and decider win rates, with the kill margin behind them.",
+    category: "Teams",
+    metrics: [
+      "map_win_rate",
+      "series_win_rate",
+      "decider_win_rate",
+      "kill_diff_per_map",
+      "slay_balance",
+    ],
+    defaultSort: "map_win_rate",
+  },
+  {
+    id: "team-hardpoint",
+    entity: "teams",
+    name: "Hardpoint",
+    blurb: "Hardpoint wins, scoring margin and how evenly hill time is shared.",
+    category: "Teams",
+    metrics: ["map_win_rate", "hp_avg_margin", "hill_time_gini", "slay_balance"],
+    defaultMode: "hardpoint",
+    defaultSort: "hp_avg_margin",
+  },
+  {
+    id: "team-snd",
+    entity: "teams",
+    name: "Search & Destroy",
+    blurb: "Round win rate and how much of the opening work one player carries.",
+    category: "Teams",
+    metrics: [
+      "map_win_rate",
+      "snd_round_win_rate",
+      "snd_fb_concentration",
+      "kill_diff_per_map",
+    ],
+    defaultMode: "search-and-destroy",
+    defaultSort: "snd_round_win_rate",
+  },
+];
+
+/** The presets offered for a row entity. */
+export function presetsFor(entity: "players" | "teams"): ReportPreset[] {
+  return entity === "teams" ? TEAM_PRESETS : REPORT_PRESETS;
+}
+
+export function presetById(
+  id: string,
+  entity: "players" | "teams" = "players",
+): ReportPreset | undefined {
+  return presetsFor(entity).find((p) => p.id === id);
 }
 
 /**

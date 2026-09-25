@@ -14,10 +14,10 @@ export type Column<T> = {
   header: ReactNode;
   align?: "left" | "right";
   headerClassName?: string;
-  // Chrome rendered inside the header cell but *outside* the sort button, so a
-  // table can hang per-column controls off its header without them stealing the
-  // click that sorts.
-  headerPrefix?: ReactNode;
+  // Chrome rendered inside the header cell after the sort button, so a table
+  // can hang a per-column menu off its header without it stealing the click
+  // that sorts. It receives the table's sort so the menu can set it.
+  headerMenu?: (api: HeaderApi) => ReactNode;
   cellClassName?: string;
   // A sortable column supplies the value the sort reads and the direction it
   // starts in. Omit for a static column (links, sparklines, bars).
@@ -25,6 +25,11 @@ export type Column<T> = {
   sortDir?: "asc" | "desc";
   sortValue?: (row: T) => number | string | null;
   render: (row: T, absoluteIndex: number) => ReactNode;
+};
+
+export type HeaderApi = {
+  sort: SortState;
+  setSort: (sort: { id: string; dir: "asc" | "desc" }) => void;
 };
 
 /**
@@ -144,12 +149,12 @@ export function DataTable<T>({
                           : "none"
                       }
                     >
-                      {c.headerPrefix ? (
-                        // One inline-flex line, so the prefix chrome can never
-                        // wrap above the label in a narrow cell.
+                      {c.headerMenu ? (
+                        // One inline-flex line, so the menu button can never
+                        // wrap below the label in a narrow cell.
                         <span className="inline-flex items-center whitespace-nowrap">
-                          {c.headerPrefix}
                           {sortButton}
+                          {c.headerMenu({ sort: state.sort, setSort: state.setSort })}
                         </span>
                       ) : (
                         sortButton
@@ -163,14 +168,7 @@ export function DataTable<T>({
                     data-col-id={c.id}
                     className={`py-2 pr-4 font-normal ${alignCls} ${c.headerClassName ?? ""}`}
                   >
-                    {c.headerPrefix ? (
-                      <span className="inline-flex items-center whitespace-nowrap">
-                        {c.headerPrefix}
-                        {c.header}
-                      </span>
-                    ) : (
-                      c.header
-                    )}
+                    {c.header}
                   </th>
                 );
               })}

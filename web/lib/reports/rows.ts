@@ -14,10 +14,13 @@ export const REPORT_VIEWS: { id: ReportView; label: string }[] = [
   { id: "z", label: "z-score" },
 ];
 
-/** `?view=pctl|z`; anything else, including absent, is the raw value. */
+/** The view a URL without `?view=` shows. */
+export const DEFAULT_VIEW: ReportView = "pctl";
+
+/** `?view=value|z`; anything else, including absent, is the percentile. */
 export function parseView(sp: SearchParams): ReportView {
   const raw = one(sp, "view");
-  return raw === "pctl" || raw === "z" ? raw : "value";
+  return raw === "value" || raw === "z" ? raw : DEFAULT_VIEW;
 }
 
 /** The number a row sorts on for a column in a view, or null when absent. */

@@ -13,6 +13,7 @@ import {
 import { type SearchParams, one } from "@/lib/paging";
 import {
   DEFAULT_PRESET,
+  DEFAULT_TEAM_PRESET,
   type ReportPreset,
   presetById,
   sanitizePresetMetrics,
@@ -48,7 +49,7 @@ export type ResolvedReport = {
   activePreset?: ReportPreset;
   scope: ReportScope; // union across columns — what the pickers offer
   rankedScope: ReportScope; // ranked column's own coverage — the default cohort
-  years: number[]; // empty = every covered season, combined
+  years: number[]; // empty = every covered season
   playerSlugs: string[]; // empty = everyone
   teamSlugs: string[]; // empty = every team
   modeSlug?: string;
@@ -64,10 +65,9 @@ export type ResolvedReport = {
 };
 
 /**
- * The season cohort: a CSV of years on `?years=`, tolerant of the legacy
- * single-season `?year=`. An absent or empty key means every covered season,
- * combined — seasons are additive, so "none picked" and "all picked" are the
- * same report and only one of them needs to ride the URL.
+ * The season filter: a CSV of years on `?years=`, tolerant of the legacy
+ * single-season `?year=`. Returns only the listed years; `?years=all` (or an
+ * empty key) is read by `seasonsAll`, and an absent key means the latest season.
  */
 export function parseYears(sp: SearchParams): number[] {
   const raw = one(sp, "years") || one(sp, "year");
@@ -78,6 +78,12 @@ export function parseYears(sp: SearchParams): number[] {
     if (Number.isInteger(n)) seen.add(n);
   }
   return [...seen].sort((a, b) => a - b);
+}
+
+/** `?years=all`, or the key present and empty: every covered season. */
+export function seasonsAll(sp: SearchParams): boolean {
+  const raw = one(sp, "years");
+  return raw === "all" || ("years" in sp && raw === "");
 }
 
 /**
@@ -139,8 +145,8 @@ export function resolveReportForUrl(
   metrics: MetricCatalogEntry[],
 ): Promise<ResolvedReport> {
   return resolveReport(runId, sp, metrics, {
-    // Presets are player reports; a bare team visit shows the whole catalog.
-    fallbackPreset: parseEntity(sp) === "players" ? DEFAULT_PRESET : undefined,
+    fallbackPreset:
+      parseEntity(sp) === "players" ? DEFAULT_PRESET : DEFAULT_TEAM_PRESET,
   });
 }
 
@@ -167,22 +173,16 @@ export async function resolveReport(
 
   // Explicit `metrics` (or the legacy single `metric`) always wins; a `preset`
   // only seeds columns when none were named, so editing a preset's columns —
-  // which writes explicit `metrics` and drops `preset` — is respected.
-  // Presets are player reports; the team catalog is six metrics, so its bare
-  // visit simply shows all of them.
+  // which writes explicit `metrics` and drops `preset` — is respected. A
+  // preset seeded by the fallback is the active preset, and the strip says so.
   const explicit = parseMetrics(sp).filter((k) => byKey.has(k));
   const untouched =
     !("metrics" in sp) && !("metric" in sp) && !("preset" in sp);
-  const namedPresetId = entity === "players" ? one(sp, "preset") : "";
   const presetId =
-    namedPresetId ||
-    (entity === "players" && untouched ? (opts.fallbackPreset ?? "") : "");
+    one(sp, "preset") || (untouched ? (opts.fallbackPreset ?? "") : "");
   const preset =
-    explicit.length === 0 && presetId ? presetById(presetId) : undefined;
-  // The fallback seeds a preset's columns, sort and mode, but only a preset
-  // named in the URL counts as *chosen* — a bare visit shows a default report,
-  // not a pre-selected tile.
-  const activePreset = namedPresetId ? preset : undefined;
+    explicit.length === 0 && presetId ? presetById(presetId, entity) : undefined;
+  const activePreset = preset;
   const selected =
     explicit.length > 0
       ? explicit
@@ -256,11 +256,21 @@ export async function resolveReport(
     scopeOf(runId, [rankedKey]),
   ]);
 
-  // Seasons combine: the cohort is the set of picked years, dropping any the
-  // chosen columns don't cover. Picking every offered season is the same report
-  // as picking none, so both normalise to the empty "all covered" set.
+  // The season filter keeps the picked years the chosen columns cover. With no
+  // pick it is the ranked column's latest season, since percentiles are scored
+  // within a season and one season is the view they read cleanly in. Picking
+  // every offered season is the same report as `all`, so both normalise to the
+  // empty set.
   const askedYears = parseYears(sp).filter((y) => scope.years.includes(y));
-  const years = askedYears.length === scope.years.length ? [] : askedYears;
+  const latest = rankedScope.years.at(-1) ?? scope.years.at(-1);
+  const pickedYears = seasonsAll(sp)
+    ? []
+    : askedYears.length > 0
+      ? askedYears
+      : latest !== undefined
+        ? [latest]
+        : [];
+  const years = pickedYears.length === scope.years.length ? [] : pickedYears;
 
   // The cohort fixes a single mode — modes are compared, not combined. An
   // active preset seeds its mode; otherwise "all modes combined" is the default

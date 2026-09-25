@@ -5432,7 +5432,7 @@ export async function getMethodologySections(): Promise<Record<string, ReactNode
           <p>
             Every published metric, generated from the same catalog the{" "}
             <Link href="/stats" className="underline">
-              stat explorer
+              Stats page
             </Link>{" "}
             reads, so a definition here and a number there can never disagree.
             Numerators and denominators are summed over a player&rsquo;s maps and

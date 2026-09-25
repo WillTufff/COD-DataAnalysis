@@ -88,14 +88,13 @@ describe("sanitizePresetMetrics", () => {
 });
 
 describe("resolveReport", () => {
-  it("falls back to the default preset on a bare URL, without marking it chosen", async () => {
+  it("falls back to the default preset on a bare URL and marks it active", async () => {
     const r = await resolveReport(1, {}, CATALOG, {
       fallbackPreset: DEFAULT_PRESET,
     });
     expect(r.selected).toEqual(slayingCore.metrics);
     expect(r.sort).toBe(slayingCore.defaultSort);
-    // The fallback seeds the report; only a URL-named preset is "active".
-    expect(r.activePreset).toBeUndefined();
+    expect(r.activePreset?.id).toBe(DEFAULT_PRESET);
   });
 
   it("treats an explicitly empty metrics key as a cleared report, not a fallback", async () => {
@@ -149,16 +148,33 @@ describe("resolveReport", () => {
     expect(some.years).toEqual([2018]);
   });
 
+  it("defaults to the latest covered season, and reads years=all as every season", async () => {
+    expect((await resolveReport(1, { metrics: "kd" }, CATALOG)).years).toEqual([2019]);
+    expect((await resolveReport(1, { metrics: "kd", years: "all" }, CATALOG)).years).toEqual([]);
+    expect((await resolveReport(1, { metrics: "kd", years: "" }, CATALOG)).years).toEqual([]);
+    // A stale pick that no longer matches any covered season lands on the latest.
+    expect((await resolveReport(1, { metrics: "kd", years: "2011" }, CATALOG)).years).toEqual([2019]);
+  });
+
   it("drops years outside the selected columns' coverage", async () => {
     const r = await resolveReport(1, { metrics: "kd", years: "2016,2018" }, CATALOG);
     expect(r.years).toEqual([2018]);
   });
 
-  it("shows every column on a bare team visit", async () => {
+  it("shows every column on a bare team visit without a fallback preset", async () => {
     const teamCatalog = [entry("map_win_rate"), entry("series_win_rate")];
     const r = await resolveReport(1, { entity: "teams" }, teamCatalog);
     expect(r.entity).toBe("teams");
     expect(r.selected).toEqual(["map_win_rate", "series_win_rate"]);
+  });
+
+  it("resolves a team preset only on the team side", async () => {
+    const teamCatalog = [entry("map_win_rate"), entry("series_win_rate")];
+    const team = await resolveReport(1, { entity: "teams", preset: "team-results" }, teamCatalog);
+    expect(team.activePreset?.id).toBe("team-results");
+    expect(team.selected).toEqual(["map_win_rate", "series_win_rate"]);
+    const player = await resolveReport(1, { preset: "team-results" }, teamCatalog);
+    expect(player.activePreset).toBeUndefined();
   });
 
   it("resolves nothing from a bare URL without a fallback preset", async () => {
@@ -202,7 +218,8 @@ describe("resolveReport gate and view", () => {
     const r = await resolveReport(1, { metrics: "kd", view: "pctl" }, CATALOG);
     expect(r.view).toBe("pctl");
     expect(r.query.view).toBe("pctl");
-    expect((await resolveReport(1, { metrics: "kd", view: "bogus" }, CATALOG)).view).toBe("value");
+    expect((await resolveReport(1, { metrics: "kd", view: "bogus" }, CATALOG)).view).toBe("pctl");
+    expect((await resolveReport(1, { metrics: "kd", view: "value" }, CATALOG)).query.view).toBe("value");
   });
 });
 
@@ -215,9 +232,10 @@ describe("resolveReportForUrl", () => {
     expect(r.query.metrics).toEqual(slayingCore.metrics);
   });
 
-  it("shows the whole catalog on a bare team URL", async () => {
+  it("applies the team landing preset to a bare team URL", async () => {
     const teamCatalog = [entry("map_win_rate"), entry("series_win_rate")];
     const r = await resolveReportForUrl(1, { entity: "teams" }, teamCatalog);
+    expect(r.activePreset?.id).toBe("team-results");
     expect(r.selected).toEqual(["map_win_rate", "series_win_rate"]);
   });
 
