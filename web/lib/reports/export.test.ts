@@ -18,7 +18,7 @@ function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
     modeSlug: undefined,
     modeMix: [],
     span: false,
-    content: { tier: null, maps: [], from: null, to: null },
+    content: { tier: null, venue: null, maps: [], from: null, to: null },
     aggregated: false,
     mapsFloor: 8,
     minMaps: 8,
@@ -109,6 +109,7 @@ describe("buildExportMatrix", () => {
       players: "all",
       teams: "all",
       tier: "all",
+      venue: "all",
       maps: "all",
       from: null,
       to: null,
@@ -173,7 +174,7 @@ describe("content filters in the export", () => {
       modeSlug: "hardpoint",
       years: [2018],
       aggregated: true,
-      content: { tier: "1", maps: ["gibraltar"], from: "2018-01-01", to: null },
+      content: { tier: "1", venue: "lan", maps: ["gibraltar"], from: "2018-01-01", to: null },
     });
     const m = buildExportMatrix(r, [kdColumn], [row()], RUN);
     expect(m.meta.cohort).toMatchObject({
@@ -183,6 +184,7 @@ describe("content filters in the export", () => {
       to: null,
       aggregated: true,
     });
-    expect(cohortSlug(r)).toBe("hardpoint-2018-tier1-gibraltar-2018-01-01-to-end");
+    expect(m.meta.cohort.venue).toBe("lan");
+    expect(cohortSlug(r)).toBe("hardpoint-2018-tier1-lan-gibraltar-2018-01-01-to-end");
   });
 });

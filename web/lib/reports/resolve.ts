@@ -67,7 +67,7 @@ export type ResolvedReport = {
   modeMix: string[];
   /** One row per player over every picked season (`?rows=span`). */
   span: boolean;
-  /** Tier, map and date filters on the maps; any one forces aggregation. */
+  /** Tier, venue, map and date filters on the maps; any one forces aggregation. */
   content: ContentFilters;
   /** Numbers re-aggregated from map rows rather than read from season rows. */
   aggregated: boolean;

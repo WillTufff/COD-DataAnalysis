@@ -302,12 +302,12 @@ SELECT (SELECT count(*) FROM players),
 # Brooklyn while every LPDB match under it is recorded Online.
 VENUE_SQL = """
 SELECT se.year, e.name, e.is_lan, e.location,
-       count(g.id) AS maps
+       count(g.id) AS maps, e.liquipedia_page IS NOT NULL AS on_lpdb
 FROM events e
 LEFT JOIN seasons se ON se.id = e.season_id
 LEFT JOIN series s   ON s.event_id = e.id
 LEFT JOIN games g    ON g.series_id = s.id
-GROUP BY se.year, e.name, e.is_lan, e.location
+GROUP BY se.year, e.name, e.is_lan, e.location, e.liquipedia_page
 ORDER BY se.year, e.name
 """
 
@@ -399,9 +399,18 @@ def venue_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any
     are applied, so the only thing keeping them honest is being printed.
     """
     rules = venue.VenueRules.load()
+    wiki_types = venue.codwiki_types()
     events: list[dict[str, Any]] = []
-    for year, name, is_lan, location, maps in conn.execute(VENUE_SQL).fetchall():
+    for year, name, is_lan, location, maps, on_lpdb in conn.execute(VENUE_SQL).fetchall():
         curated = rules.get(cast("int | None", year), cast(str, name))
+        if curated:
+            source = venue.SOURCE_CURATED
+        elif is_lan is None:
+            source = venue.SOURCE_UNDECIDED
+        elif not on_lpdb and cast(str, name) in wiki_types:
+            source = venue.SOURCE_CODWIKI
+        else:
+            source = venue.SOURCE_LPDB
         events.append(
             {
                 "season": year,
@@ -409,7 +418,7 @@ def venue_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any
                 "is_lan": is_lan,
                 "location": location,
                 "maps": maps,
-                "source": venue.SOURCE_CURATED if curated else venue.SOURCE_LPDB,
+                "source": source,
                 "reviewed": bool(curated.get("reviewed", False)) if curated else True,
                 "reason": curated.get("reason") if curated else None,
             }
@@ -417,7 +426,10 @@ def venue_payload(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, Any
     undecided = [e for e in events if e["is_lan"] is None]
     provisional = [e for e in events if e["source"] == venue.SOURCE_CURATED and not e["reviewed"]]
     return {
-        "rule": "curated verdict, else LPDB tournament type; location is never consulted",
+        "rule": (
+            "curated verdict, else LPDB tournament type, else the CoD wiki's event type; "
+            "location is never consulted"
+        ),
         "events": events,
         "maps_lan": sum(e["maps"] for e in events if e["is_lan"] is True),
         "maps_online": sum(e["maps"] for e in events if e["is_lan"] is False),

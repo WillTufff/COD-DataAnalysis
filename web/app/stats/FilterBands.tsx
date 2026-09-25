@@ -12,11 +12,13 @@ import type { MapOption } from "@/lib/reports/aggregate";
 import {
   type ContentFilters,
   type EventTier,
+  type Venue,
   dateRangeLabel,
   hasContent,
   mapsLabel,
   parseDay,
   tierLabel,
+  venueLabel,
 } from "@/lib/reports/content";
 import { fuzzyRank } from "@/lib/reports/fuzzy";
 import type { ReportEntity } from "@/lib/reports/resolve";
@@ -239,7 +241,7 @@ function AddFilter<Id extends string>({
 }
 
 type RowFilter = "season" | "players" | "teams" | "minmaps" | "where" | "top";
-type MapsFilter = "tier" | "map" | "dates";
+type MapsFilter = "tier" | "venue" | "map" | "dates";
 
 const TIERS: { tier: EventTier; note: string }[] = [
   { tier: "1", note: "Premier events: championships, the CWL Pro League, the CDL" },
@@ -274,6 +276,45 @@ function TierMenu({
       ))}
       <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
         Events with no tier (qualifiers and minors before 2017) are in neither.
+      </p>
+    </div>
+  );
+}
+
+const VENUES: { venue: Venue; note: string }[] = [
+  { venue: "lan", note: "Played in person at a venue" },
+  { venue: "online", note: "Played remotely, as most of the 2020 CDL season was" },
+];
+
+/** LAN or online, as each event's venue is recorded. */
+function VenueMenu({
+  venue,
+  pick,
+}: {
+  venue: Venue | null;
+  pick: (next: Venue) => void;
+}) {
+  return (
+    <div className="w-72 max-w-full py-1">
+      {VENUES.map((v) => (
+        <button
+          key={v.venue}
+          type="button"
+          role="menuitemradio"
+          aria-checked={venue === v.venue}
+          onClick={() => pick(v.venue)}
+          className={`${MENU_ROW} items-start`}
+        >
+          <Check on={venue === v.venue} />
+          <span className="flex flex-col">
+            <span className={venue === v.venue ? "text-ink" : ""}>{venueLabel(v.venue)}</span>
+            <span className="text-[0.66rem] leading-snug text-ink-muted">{v.note}</span>
+          </span>
+        </button>
+      ))}
+      <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
+        Every map from 2017 to 2019 is LAN. The 2026 regular season mixes both
+        and is in neither.
       </p>
     </div>
   );
@@ -607,22 +648,25 @@ export function FilterBands({
     [mapOptions],
   );
   const tierOn = content.tier !== null;
+  const venueOn = content.venue !== null;
   const mapOn = content.maps.length > 0;
   const datesOn = content.from !== null || content.to !== null;
   const contentOn = hasContent(content);
   const addableMaps: { id: MapsFilter; label: string }[] = [];
   if (!tierOn) addableMaps.push({ id: "tier", label: "Event tier" });
+  if (!venueOn) addableMaps.push({ id: "venue", label: "LAN / online" });
   if (!mapOn && mapOptions.length > 0) addableMaps.push({ id: "map", label: "Map" });
   if (!datesOn) addableMaps.push({ id: "dates", label: "Date range" });
 
   const filterCount =
-    rowFilterCount + [tierOn, mapOn, datesOn].filter(Boolean).length;
+    rowFilterCount + [tierOn, venueOn, mapOn, datesOn].filter(Boolean).length;
 
   const summary = [
     modeText,
     seasonLabel(seasons, years),
     ...(span ? ["combined span"] : []),
     ...(tierOn ? [tierLabel(content.tier!)] : []),
+    ...(venueOn ? [venueLabel(content.venue!)] : []),
     ...(mapOn ? [mapsLabel(content.maps, mapNameBySlug)] : []),
     ...(datesOn ? [dateRangeLabel(content.from, content.to)] : []),
   ].join(" · ");
@@ -741,6 +785,24 @@ export function FilterBands({
             </Chip>
           )}
 
+          {shown("venue", venueOn) && (
+            <Chip
+              label="Venue"
+              value={content.venue ? venueLabel(content.venue) : "any"}
+              open={openChip === "venue"}
+              setOpen={opener("venue")}
+              onClear={venueOn ? () => push({ venue: null }) : undefined}
+            >
+              <VenueMenu
+                venue={content.venue}
+                pick={(next) => {
+                  push({ venue: next });
+                  setOpenChip(null);
+                }}
+              />
+            </Chip>
+          )}
+
           {shown("map", mapOn) && (
             <Chip
               label="Map"
@@ -783,7 +845,9 @@ export function FilterBands({
           {contentOn && (
             <button
               type="button"
-              onClick={() => push({ tier: null, map: null, from: null, to: null })}
+              onClick={() =>
+                push({ tier: null, venue: null, map: null, from: null, to: null })
+              }
               className="px-1 text-xs text-ink-muted underline-offset-2 hover:text-accent hover:underline"
             >
               Clear

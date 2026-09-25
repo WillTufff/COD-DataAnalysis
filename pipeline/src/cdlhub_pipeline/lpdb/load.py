@@ -771,6 +771,7 @@ class LpdbLoader:
         loses its flag rather than keeping what a loader once put there.
         """
         rules = venue.VenueRules.load()
+        wiki_types = venue.codwiki_types()
         events = self.conn.execute(
             "SELECT e.id, se.year, e.name FROM events e "
             "LEFT JOIN seasons se ON se.id = e.season_id ORDER BY se.year, e.name"
@@ -781,7 +782,13 @@ class LpdbLoader:
                 cast("int | None", row[1]),
                 cast(str, row[2]),
             )
-            verdict = venue.derive(rules, season_year, event_name, lpdb_types.get(event_id))
+            verdict = venue.derive(
+                rules,
+                season_year,
+                event_name,
+                lpdb_types.get(event_id),
+                wiki_types.get(event_name),
+            )
             self.conn.execute(
                 "UPDATE events SET is_lan = %s WHERE id = %s", (verdict.is_lan, event_id)
             )

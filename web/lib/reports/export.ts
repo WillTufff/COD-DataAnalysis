@@ -41,6 +41,7 @@ export type ExportMeta = {
     teams: string[] | "all";
     /** Content filters: which maps were summed, beyond season and mode. */
     tier: "1" | "2" | "all";
+    venue: "lan" | "online" | "all";
     maps: string[] | "all";
     from: string | null;
     to: string | null;
@@ -153,6 +154,7 @@ export function buildExportMatrix(
           resolved.playerSlugs.length > 0 ? resolved.playerSlugs : "all",
         teams: resolved.teamSlugs.length > 0 ? resolved.teamSlugs : "all",
         tier: resolved.content.tier ?? "all",
+        venue: resolved.content.venue ?? "all",
         maps: resolved.content.maps.length > 0 ? resolved.content.maps : "all",
         from: resolved.content.from,
         to: resolved.content.to,

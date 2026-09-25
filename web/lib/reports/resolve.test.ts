@@ -326,7 +326,7 @@ describe("content filters", () => {
       modes: ["hardpoint"],
       years: [2018],
       span: false,
-      content: { tier: "1", maps: [], from: null, to: null },
+      content: { tier: "1", venue: null, maps: [], from: null, to: null },
     });
   });
 
@@ -344,6 +344,7 @@ describe("content filters", () => {
     );
     expect(r.content).toEqual({
       tier: null,
+      venue: null,
       maps: ["raid", "standoff"],
       from: "2018-01-01",
       to: "2018-06-01",

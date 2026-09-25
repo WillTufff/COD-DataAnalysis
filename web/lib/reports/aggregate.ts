@@ -33,7 +33,7 @@ export type AggregateQuery = {
   span: boolean;
   players?: string[];
   teams?: string[];
-  /** Tier, map and date filters on the maps summed; absent = none. */
+  /** Tier, venue, map and date filters on the maps summed; absent = none. */
   content?: ContentFilters;
 };
 
@@ -112,6 +112,7 @@ function mapFilter(q: Pick<AggregateQuery, "years" | "modes" | "content">): SQL 
   }
   const c = q.content ?? NO_CONTENT;
   if (c.tier) conditions.push(sql`ev.tier = ${c.tier}`);
+  if (c.venue) conditions.push(sql`ev.is_lan = ${c.venue === "lan"}`);
   if (c.maps.length > 0) {
     conditions.push(sql`${MAP_SLUG} IN (${sql.join(c.maps.map((m) => sql`${m}`), sql`, `)})`);
   }

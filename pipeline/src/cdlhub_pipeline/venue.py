@@ -17,8 +17,14 @@ The derivation, in precedence order:
    missing from LPDB only because the tournament pull was scoped to the premier
    circuit, and rule 2 answers them now.
 2. **LPDB's tournament `type`** — `Offline` is LAN, `Online` is not.
-3. **Undecided**, which is what a mixed `Online/Offline` event and an event with
-   no LPDB page both get. The column stays NULL and the reason is published.
+3. **The CoD wiki's `EventType`**, for an event with no LPDB type at all. Every
+   2013-2016 event is named for its wiki page and none has an LPDB page, so
+   without this the whole era was undecided. The wiki splits the 2016 CWL
+   regions into online regular seasons and LAN playoffs, which is the same
+   split LPDB records as `Online & Offline` on the combined page.
+4. **Undecided**, which is what a mixed `Online/Offline` event and an event with
+   no page in either wiki get. The column stays NULL and the reason is
+   published.
 
 **`location` is never consulted, and that is the point.** Nine of the 2020
 regular-season weeks kept their host-city branding after March 2020 moved them
@@ -37,9 +43,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
-__all__ = ["MIXED_TYPES", "Verdict", "VenueRules", "derive"]
+__all__ = ["MIXED_TYPES", "Verdict", "VenueRules", "codwiki_types", "derive"]
 
 # LPDB tournament `type` values that decide the question on their own.
 LPDB_TYPES: dict[str, bool] = {"Offline": True, "Online": False}
@@ -50,6 +57,7 @@ MIXED_TYPES = frozenset({"Online/Offline", "Offline & Online"})
 
 SOURCE_CURATED = "curated"
 SOURCE_LPDB = "lpdb_tournament_type"
+SOURCE_CODWIKI = "codwiki_event_type"
 SOURCE_UNDECIDED = "undecided"
 
 
@@ -77,11 +85,28 @@ class VenueRules:
         return self.events.get(f"{season_year}:{event_name}")
 
 
+CODWIKI_TOURNAMENTS = (
+    Path(__file__).resolve().parents[2] / "snapshots" / "codwiki" / "tournaments.json"
+)
+
+
+def codwiki_types(path: Path = CODWIKI_TOURNAMENTS) -> dict[str, str]:
+    """The CoD wiki's `EventType` per tournament page, where it decides."""
+    if not path.exists():
+        return {}
+    return {
+        str(row["OverviewPage"]): str(row["EventType"])
+        for row in json.loads(path.read_text())
+        if str(row.get("EventType") or "") in LPDB_TYPES
+    }
+
+
 def derive(
     rules: VenueRules,
     season_year: int | None,
     event_name: str,
     lpdb_type: str | None,
+    wiki_type: str | None = None,
 ) -> Verdict:
     """The venue verdict for one event, and the evidence behind it."""
     curated = rules.get(season_year, event_name)
@@ -109,8 +134,15 @@ def derive(
                 "event-level flag cannot say which maps were which"
             ),
         )
+    wiki = (wiki_type or "").strip()
+    if not kind and wiki in LPDB_TYPES:
+        return Verdict(
+            is_lan=LPDB_TYPES[wiki],
+            source=SOURCE_CODWIKI,
+            reason=f"no LPDB tournament type; the CoD wiki's event type is {wiki}",
+        )
     return Verdict(
         is_lan=None,
         source=SOURCE_UNDECIDED,
-        reason="no LPDB tournament page and no curated verdict",
+        reason="no tournament type in either wiki and no curated verdict",
     )

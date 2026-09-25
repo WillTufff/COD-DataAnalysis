@@ -15,6 +15,13 @@ describe("parseContent", () => {
     expect(hasContent(parseContent({}))).toBe(false);
   });
 
+  it("keeps lan and online and drops anything else", () => {
+    expect(parseContent({ venue: "lan" }).venue).toBe("lan");
+    expect(parseContent({ venue: "online" }).venue).toBe("online");
+    expect(parseContent({ venue: "offline" }).venue).toBeNull();
+    expect(hasContent(parseContent({ venue: "online" }))).toBe(true);
+  });
+
   it("keeps tier 1 and 2 and drops anything else", () => {
     expect(parseContent({ tier: "1" }).tier).toBe("1");
     expect(parseContent({ tier: "2" }).tier).toBe("2");
@@ -40,9 +47,16 @@ describe("parseContent", () => {
 
 describe("labels", () => {
   it("names what each filter keeps", () => {
-    const c = { tier: "1" as const, maps: ["raid"], from: "2024-01-05", to: null };
+    const c = {
+      tier: "1" as const,
+      venue: "lan" as const,
+      maps: ["raid"],
+      from: "2024-01-05",
+      to: null,
+    };
     expect(contentParts(c, new Map([["raid", "Raid"]]))).toEqual([
       "tier 1 events",
+      "lan only",
       "Raid",
       "from 2024-01-05",
     ]);
@@ -53,8 +67,14 @@ describe("labels", () => {
   it("builds a filename part, empty with no filter", () => {
     expect(contentSlug(NO_CONTENT)).toBe("");
     expect(
-      contentSlug({ tier: "2", maps: ["a", "b", "c", "d"], from: null, to: "2019-08-18" }),
-    ).toBe("-tier2-4-maps-start-to-2019-08-18");
+      contentSlug({
+        tier: "2",
+        venue: "online",
+        maps: ["a", "b", "c", "d"],
+        from: null,
+        to: "2019-08-18",
+      }),
+    ).toBe("-tier2-online-4-maps-start-to-2019-08-18");
   });
 });
 

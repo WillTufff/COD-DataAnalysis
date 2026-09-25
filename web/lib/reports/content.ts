@@ -9,9 +9,14 @@ import { teamSlug } from "@/lib/slug";
 /** The numeric event tier the title rule reads. */
 export type EventTier = "1" | "2";
 
+/** Where an event was played, as `events.is_lan` records it. */
+export type Venue = "lan" | "online";
+
 export type ContentFilters = {
   /** Keep maps from events of this tier; null keeps every event. */
   tier: EventTier | null;
+  /** Keep maps from LAN or from online events; null keeps both, and unknown. */
+  venue: Venue | null;
   /** Map-name slugs, any title; empty keeps every map. */
   maps: string[];
   /** Inclusive ISO days on the series date; null leaves that end open. */
@@ -21,6 +26,7 @@ export type ContentFilters = {
 
 export const NO_CONTENT: ContentFilters = {
   tier: null,
+  venue: null,
   maps: [],
   from: null,
   to: null,
@@ -43,8 +49,8 @@ export function parseDay(raw: string | undefined): string | null {
 }
 
 /**
- * `?tier=1|2`, `?map=` as a CSV of map slugs, `?from=` and `?to=` as ISO days.
- * An unreadable tier or day is dropped. Unknown map slugs are kept: they match
+ * `?tier=1|2`, `?venue=lan|online`, `?map=` as a CSV of map slugs, `?from=`
+ * and `?to=` as ISO days. An unreadable tier, venue or day is dropped. Unknown map slugs are kept: they match
  * no maps, so a stale link shows an empty view, never the unfiltered one. A
  * reversed range is read the right way round.
  */
@@ -52,6 +58,9 @@ export function parseContent(sp: SearchParams): ContentFilters {
   const tierRaw = one(sp, "tier");
   const tier: EventTier | null =
     tierRaw === "1" || tierRaw === "2" ? tierRaw : null;
+  const venueRaw = one(sp, "venue");
+  const venue: Venue | null =
+    venueRaw === "lan" || venueRaw === "online" ? venueRaw : null;
   const seen = new Set<string>();
   const maps: string[] = [];
   for (const part of (one(sp, "map") ?? "").split(",")) {
@@ -64,18 +73,28 @@ export function parseContent(sp: SearchParams): ContentFilters {
   let from = parseDay(one(sp, "from"));
   let to = parseDay(one(sp, "to"));
   if (from && to && from > to) [from, to] = [to, from];
-  return { tier, maps, from, to };
+  return { tier, venue, maps, from, to };
 }
 
 export function hasContent(c: ContentFilters): boolean {
-  return c.tier !== null || c.maps.length > 0 || c.from !== null || c.to !== null;
+  return (
+    c.tier !== null ||
+    c.venue !== null ||
+    c.maps.length > 0 ||
+    c.from !== null ||
+    c.to !== null
+  );
 }
 
 /** The URL keys content filters own, for links that carry or clear them. */
-export const CONTENT_KEYS = ["tier", "map", "from", "to"] as const;
+export const CONTENT_KEYS = ["tier", "venue", "map", "from", "to"] as const;
 
 export function tierLabel(tier: EventTier): string {
   return `Tier ${tier} events`;
+}
+
+export function venueLabel(venue: Venue): string {
+  return venue === "lan" ? "LAN only" : "Online only";
 }
 
 /** "2024-01-05 to 2024-06-30", "from 2024-01-05", "to 2024-06-30". */
@@ -100,15 +119,17 @@ export function contentParts(
 ): string[] {
   const out: string[] = [];
   if (c.tier) out.push(tierLabel(c.tier).toLowerCase());
+  if (c.venue) out.push(venueLabel(c.venue).toLowerCase());
   if (c.maps.length > 0) out.push(mapsLabel(c.maps, mapNames));
   if (c.from || c.to) out.push(dateRangeLabel(c.from, c.to));
   return out;
 }
 
-/** The filename part: `-tier1-raid-2024-01-05-to-2024-06-30`. */
+/** The filename part: `-tier1-lan-raid-2024-01-05-to-2024-06-30`. */
 export function contentSlug(c: ContentFilters): string {
   const parts: string[] = [];
   if (c.tier) parts.push(`tier${c.tier}`);
+  if (c.venue) parts.push(c.venue);
   if (c.maps.length > 0) {
     parts.push(c.maps.length <= 3 ? c.maps.join("-") : `${c.maps.length}-maps`);
   }

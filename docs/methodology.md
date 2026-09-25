@@ -442,8 +442,8 @@ agree to the precision the published cells are stored at.
 
 #### Content filters
 
-The stats page can also narrow the maps under a number by event tier, by map, and by
-date. Each filter is one more condition on which map rows are summed, so a filtered
+The stats page can also narrow the maps under a number by event tier, by venue, by map,
+and by date. Each filter is one more condition on which map rows are summed, so a filtered
 number goes through the same arithmetic and the same scoring as a mix of modes, and it
 is compared only with the other rows under the same filters. Any one of them sends the
 page down the second path, even for a single mode shown season by season. A filter
@@ -455,7 +455,8 @@ maps with box scores, per era.
 | Maps | 5,079 | 6,870 | 6,540 |
 | Tier 1 events | 2,549 | 3,516 | 6,527 |
 | Tier 2 events | 176 | 3,270 | 13 |
-| Venue known | 0 | 6,786 | 6,467 |
+| LAN | 3,055 | 6,870 | 2,074 |
+| Online | 2,024 | 0 | 4,393 |
 | Round label | 0 | 5,091 | 6,540 |
 
 Event tier is the numeric tier the title rule reads, set from Liquipedia from 2017 on and
@@ -466,10 +467,13 @@ qualifier and the championship are tier 1, so the tier 1 field is the whole fiel
 filters by name across titles, so a map remade in a later game counts both versions.
 Dates are whole days on the series date, both ends included, and every map carries one.
 
-Three filters are held back. Venue is unknown for every map before 2017, so a LAN
-filter would silently drop an era that was mostly played on LAN. The CoD wiki's
-tournament table records whether each event was online or offline, so the gap can be
-closed from data already held. Playoffs against regular play reads the round label,
+Venue is the event's flag, from the derivation under match context below. Before 2017 it
+comes from the CoD wiki, where the 2016 World League regular seasons and two small 2014
+events are online and everything else is LAN. Every map from 2017 to 2019 is LAN. The 73 maps of the 2026 CDL
+regular season are in neither, because Liquipedia records that event as both and an
+event-level flag cannot say which maps were which.
+
+Two filters are held back. Playoffs against regular play reads the round label,
 which the earlier wiki data never records. Opponent tier has no definition that
 travels. The opponent adjustment rates strength without cutting it into tiers, and a
 rank or rating cut means one thing in a twelve-team league and another in a hundred-team
@@ -2596,7 +2600,8 @@ which teams qualify, and which stage is played there are all selected.
 `events.is_lan` was once two assertions wearing one column: the CWL archive importer stamped
 `true` on everything it created, and the Liquipedia loader mapped a tournament `type` it only
 sometimes had. The derivation is now stated: a curated verdict, else Liquipedia's tournament
-`type`, else undecided. And **`location` is never consulted**, because nine of the 2020
+`type`, else the CoD wiki's event type for an event with no Liquipedia type at all, else
+undecided. And **`location` is never consulted**, because nine of the 2020
 regular-season weeks kept their host-city branding after March 2020 moved them online. A venue
 string is what an event was called, not where it was played.
 
@@ -2617,7 +2622,10 @@ The two eras are not symmetric, and this bounds every claim in this section.
 
 The years before the CDL carry **no venue contrast at all**: every event that can be
 classified was played on LAN, and the rest are wiki-era events whose venue no source
-records. Every LAN/online comparison here is identified inside the Call of Duty League era,
+recorded when this model ran. The CoD wiki's event type has since been added to the
+derivation, and it settles all of them. The 2016 Call of Duty World League regular seasons
+were played online, as were two small 2014 events, so a refit would find an online contrast
+before the CDL, almost all of it in one season. The table above is the fitted run's. Every LAN/online comparison here is identified inside the Call of Duty League era,
 and era and venue are perfectly confounded across the seam between them.
 
 Inside that era, venue is half a stage term: LAN is where the Major bracket is played and

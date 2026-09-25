@@ -34,6 +34,7 @@ function matrix(overrides: Partial<ExportMatrix> = {}): ExportMatrix {
         players: "all",
         teams: "all",
         tier: "all",
+        venue: "all",
         maps: "all",
         from: null,
         to: null,
@@ -101,12 +102,18 @@ describe("toXml", () => {
 
   it("writes the content filters on the meta element, dates only when set", () => {
     const plain = toXml(matrix());
-    expect(plain).toContain('tier="all" maps="all"');
+    expect(plain).toContain('tier="all" venue="all" maps="all"');
     expect(plain).not.toContain("from=");
     const m = matrix();
-    m.meta.cohort = { ...m.meta.cohort, tier: "1", maps: ["raid", "hacienda"], to: "2024-06-30" };
+    m.meta.cohort = {
+      ...m.meta.cohort,
+      tier: "1",
+      venue: "online",
+      maps: ["raid", "hacienda"],
+      to: "2024-06-30",
+    };
     const xml = toXml(m);
-    expect(xml).toContain('tier="1" maps="raid,hacienda" to="2024-06-30"');
+    expect(xml).toContain('tier="1" venue="online" maps="raid,hacienda" to="2024-06-30"');
   });
 
   it("aligns cell field attributes to the headers", () => {

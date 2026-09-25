@@ -1810,8 +1810,8 @@ def test_content_filter_coverage_fails_when_a_count_moves() -> None:
     pinned = evalspec.PUBLISHED_FIGURES["content_filter_coverage"]
     measured = {era: dict(counts) for era, counts in pinned.items()}
     assert gates.content_coverage_failures(measured) == []
-    measured["2013-2016"]["venue"] = 5006
+    measured["2013-2016"]["lan"] = 3054
     del measured["2020-2026"]
     moved = gates.content_coverage_failures(measured)
-    assert any("2013-2016 venue" in m for m in moved)
+    assert any("2013-2016 lan" in m for m in moved)
     assert sum("2020-2026" in m for m in moved) == len(pinned["2020-2026"])
