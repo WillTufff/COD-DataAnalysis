@@ -1,361 +1,285 @@
 import Link from "next/link";
-import { DistributionStrip } from "@/components/charts/DistributionStrip";
 import { EloHistory } from "@/components/charts/EloHistory";
-import { PaceByMode } from "@/components/charts/PaceByMode";
-import { Sparkline } from "@/components/charts/Sparkline";
-import { Leaderboard } from "@/components/Leaderboard";
 import {
   getArchiveStats,
-  getEloTimelines,
+  getCareerRankLeaderboard,
   getEraSpans,
-  getFeedHighlights,
-  getBacktestCards,
-  getPaceByMode,
+  getFeed,
   getPlayerLeaderboard,
-  getSeasonEras,
   getSeasonChampions,
-  getSeasonKdSpread,
-  getSeriesRecords,
   getTeamHistories,
-  getTeamStandings,
+  queryMetric,
+  latestCareerRankRun,
+  latestRatingRun,
   latestRun,
-  teamSlug,
+  playerSlug,
 } from "@/lib/analytics";
-import { kindLabel } from "@/lib/insightKinds";
+import { CareerBoard } from "./_home/CareerBoard";
+import { FindingCards } from "./_home/FindingCards";
+import {
+  getCurrentSeason,
+  getSearchIndex,
+  getSeasonEvents,
+  getSeasonLeaders,
+  getSeasonRace,
+  getSeasonRatings,
+  getSiteCounts,
+  getTeamModes,
+} from "./_home/queries";
+import { Search } from "./_home/Search";
+import { SeasonLeaders } from "./_home/SeasonLeaders";
+import { SeasonRace } from "./_home/SeasonRace";
+import { TeamModes } from "./_home/TeamModes";
 
-// The archive is frozen and the models only change on a rerun, so this page is
-// prerendered and revalidated on a timer rather than queried per request.
 export const revalidate = 3600;
 
-function SectionHeader({ title, note }: { title: string; note?: string }) {
+function H2({ children }: { children: React.ReactNode }) {
+  return <h2 className="lower-third">{children}</h2>;
+}
+
+function Part({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <h2 className="lower-third">
-      {title}
-      {note && <span className="lt-note">{note}</span>}
-    </h2>
+    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-hairline pb-4">
+      <div>
+        <h2 className="font-display text-4xl font-bold uppercase leading-none sm:text-5xl">{title}</h2>
+      </div>
+      {children}
+    </div>
   );
 }
 
 export default async function Home() {
-  const [eloRun, glickoRun, eraRun, insightsRun] = await Promise.all([
+  const [eloRun, glickoRun, eraRun, insightsRun, careerRun, ratingRun, season] = await Promise.all([
     latestRun("elo"),
     latestRun("glicko2"),
     latestRun("era_adjust"),
     latestRun("insights"),
+    latestCareerRankRun(),
+    latestRatingRun(),
+    getCurrentSeason(),
   ]);
+  if (!eloRun || !eraRun) return <main className="p-10">No model runs.</main>;
 
-  if (!eloRun || !eraRun) {
-    return (
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
-          Competitive Call of Duty
-        </h1>
-        <p className="mt-4 text-sm text-ink-secondary">
-          No model runs found. Run the analytics pipeline (
-          <code className="font-mono text-xs">
-            uv run python -m cdlhub_analytics.run_all
-          </code>
-          ) to populate this page.
-        </p>
-      </main>
-    );
-  }
-
+  const kinds = ["profile_extreme", "intangible_outlier", "what_wins", "h2h_edge"];
   const [
     stats,
+    counts,
+    events,
+    race,
+    leaders,
+    teamModes,
+    ratings,
+    search,
+    career,
+    seasons,
     eras,
-    pace,
-    standings,
-    leaderboard,
-    cards,
+    eloHistory,
+    glickoHistory,
+    ringTimes,
     findings,
-    records,
-    kdSpread,
-    seasonEras,
-    champions,
   ] = await Promise.all([
-      getArchiveStats(),
-      getEraSpans(),
-      getPaceByMode(),
-      getTeamStandings(eloRun.id, glickoRun?.id ?? eloRun.id),
-      getPlayerLeaderboard(eraRun.id),
-      getBacktestCards(
-        [eloRun.id, glickoRun?.id].filter((x): x is number => x != null),
-      ),
-      insightsRun ? getFeedHighlights(insightsRun.id, 8) : Promise.resolve([]),
-      getSeriesRecords(),
-      getSeasonKdSpread(eraRun.id),
-      getSeasonEras(),
-      getSeasonChampions(),
-    ]);
-  const topTeams = standings.slice(0, 10);
-  const topTeamIds = topTeams.map((t) => t.teamId);
-  // Top-10 timelines feed the standings sparklines; full histories feed the chart.
-  const [timelines, eloHistory, glickoHistory] = await Promise.all([
-    getEloTimelines(eloRun.id, topTeamIds),
+    getArchiveStats(),
+    getSiteCounts(insightsRun?.id ?? null),
+    getSeasonEvents(season.id),
+    getSeasonRace(eloRun.id, season.id),
+    getSeasonLeaders(season.id),
+    getTeamModes(season.id),
+    ratingRun ? getSeasonRatings(ratingRun.id, season.id) : Promise.resolve(new Map<string, number>()),
+    getSearchIndex(),
+    careerRun ? getCareerRankLeaderboard(careerRun.id, 12) : Promise.resolve([]),
+    getPlayerLeaderboard(eraRun.id),
+    getEraSpans(),
     getTeamHistories(eloRun.id),
     glickoRun ? getTeamHistories(glickoRun.id) : Promise.resolve([]),
+    getSeasonChampions(),
+    insightsRun
+      ? Promise.all(kinds.map((k) => getFeed(insightsRun.id, 40, k, 0, false))).then((x) =>
+          x.flatMap((list) => {
+            if (list[0]?.detail.year === undefined) return list.slice(0, 1);
+            const year = Math.max(...list.map((f) => Number(f.detail.year)));
+            const latest = list.filter((f) => Number(f.detail.year) === year);
+            return list[0].kind === "what_wins" ? latest : latest.slice(0, 2);
+          }),
+        )
+      : Promise.resolve([]),
   ]);
-  const sparkByTeam = new Map(timelines.map((tl) => [tl.teamId, tl.points]));
-  const allSpark = timelines.flatMap((tl) => tl.points.map((p) => p.rating));
-  const sparkDomain: [number, number] =
-    allSpark.length > 0 ? [Math.min(...allSpark), Math.max(...allSpark)] : [1400, 1600];
-  const kdAll = kdSpread.flatMap((s) => s.values);
-  const kdDomain: [number, number] =
-    kdAll.length > 0 ? [Math.min(...kdAll), Math.max(...kdAll)] : [0.6, 1.6];
+
+  const hero = findings.find((f) => f.kind === "profile_extreme");
+  const cohort = hero
+    ? await queryMetric(
+        Number(hero.detail.metric_run_id),
+        {
+          metric: String(hero.detail.metric),
+          year: Number(hero.detail.year),
+          modeSlug: String(hero.detail.mode).toLowerCase().replace(/&/g, "and").replace(/\s+/g, "-"),
+          qualifiedOnly: true,
+          dir: "desc",
+        },
+        { offset: 0, limit: 500 },
+      )
+    : [];
 
   const fmt = (n: number) => n.toLocaleString("en-US");
+  for (const l of leaders) l.rating = ratings.get(l.handle) ?? null;
+  const champ = events.find((e) => /championship/i.test(e.name))?.winner ?? null;
+  const topSeasons = [...seasons].sort((a, b) => (b.kdZ ?? 0) - (a.kdZ ?? 0)).slice(0, 8);
+  const zMax = topSeasons[0]?.kdZ ?? 3;
+
+  const sections: [string, string, string, string][] = [
+    ["/teams", "Teams", fmt(counts.teams), "records, rosters and head-to-head"],
+    ["/players", "Players", fmt(stats.players), "career and season ratings"],
+    ["/stats", "Stats", fmt(stats.statRows), "box-score lines, one per player per map"],
+    ["/maps", "Maps", fmt(stats.maps), "maps played, win rates by map and mode"],
+    ["/rounds", "Rounds", fmt(counts.rounds), "Search & Destroy rounds, round by round"],
+    ["/meta", "Loadouts", fmt(counts.weapons), "weapons, with usage by event"],
+  ];
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
-      <header>
-        <p className="font-mono text-xs text-ink-muted">
-          CWL + CDL {stats.span} · {fmt(stats.seriesCount)} series ·{" "}
-          {fmt(stats.maps)} maps · {fmt(stats.statRows)} stat lines ·{" "}
-          {fmt(stats.players)} players
-          {eloRun.dataThrough && <> · data through {eloRun.dataThrough}</>}
-        </p>
-        <h1 className="mt-3 font-display text-4xl font-bold uppercase leading-[0.95] tracking-tight sm:text-6xl">
-          Competitive Call of Duty
-          <br />
-          {stats.span}
-        </h1>
-        <p className="mt-4 max-w-2xl text-sm leading-relaxed text-ink-secondary">
-          Competitive Call of Duty ran on a different game almost every season,
-          so raw stats from {stats.firstYear} and {stats.lastYear}{" "}
-          don&rsquo;t compare directly. This site scores every player-season
-          against its own year and mode, and rates teams from their series
-          results across both the World League and the Call of Duty League. The
-          ratings, the model specifications, and the sources behind them are
-          published here.
-        </p>
+    <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+      {/* What this site is */}
+      <header className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px] lg:items-end">
+        <div>
+          <h1 className="font-display text-4xl font-bold uppercase leading-[0.95] tracking-tight sm:text-6xl">
+            Competitive Call of Duty
+            <br />
+            <span className="text-ink-muted">{stats.span}</span>
+          </h1>
+          <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-secondary">
+            Results, box scores and ratings from pro Call of Duty: {fmt(stats.seriesCount)} series, {fmt(counts.events)} events and{" "}
+            {fmt(stats.players)} players.
+          </p>
+        </div>
+        <Search index={search} />
       </header>
 
-      <section className="mt-14">
-        <SectionHeader
-          title={`Team ratings, ${stats.span}`}
-          note="after every rated series · every team, by game"
-        />
+      <section className="mt-10">
+        <H2>Team ratings</H2>
         <div className="mt-4">
-          <EloHistory
-            elo={eloHistory}
-            glicko={glickoHistory}
-            eras={eras}
-            champions={champions}
-          />
+          <EloHistory elo={eloHistory} glicko={glickoHistory} eras={eras} champions={ringTimes} />
         </div>
       </section>
 
-      <section className="mt-14 grid grid-cols-1 gap-10 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <SectionHeader title="Standings" note="final Elo · full table on /teams" />
-          <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-hairline text-xs text-ink-muted">
-                <th className="py-2 pr-3 font-normal">#</th>
-                <th className="py-2 pr-4 font-normal">Team</th>
-                <th className="py-2 pr-4 font-normal">Trajectory</th>
-                <th className="py-2 pr-4 text-right font-normal">Elo</th>
-                <th className="py-2 text-right font-normal">Series W–L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topTeams.map((t, i) => {
-                const rec = records.get(t.teamId);
-                const pts = sparkByTeam.get(t.teamId);
-                return (
-                  <tr key={t.teamId} className="border-b border-hairline/60">
-                    <td className="py-1.5 pr-3 font-mono text-xs tabular-nums text-ink-muted">
-                      {i + 1}
-                    </td>
-                    <td className="py-1.5 pr-4 font-medium">
-                      <Link
-                        href={`/teams/${teamSlug(t.team)}`}
-                        className="hover:text-accent hover:underline"
-                      >
-                        {t.team}
-                      </Link>
-                    </td>
-                    <td className="py-1 pr-4">
-                      {pts && pts.length > 1 && (
-                        <Sparkline
-                          values={pts.map((p) => p.rating)}
-                          domain={sparkDomain}
-                          label={`${t.team} Elo trajectory`}
-                        />
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right font-mono tabular-nums">
-                      {t.finalElo.toFixed(0)}
-                    </td>
-                    <td className="py-1.5 text-right font-mono tabular-nums text-ink-secondary">
-                      {rec ? `${rec.wins}–${rec.losses}` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
-          <p className="mt-3 text-sm">
-            <Link
-              href="/teams"
-              className="text-accent underline underline-offset-4 hover:text-ink"
-            >
-              All {standings.length} teams, with records and head-to-head →
-            </Link>
-          </p>
-        </div>
-        <div className="lg:col-span-2">
-          <SectionHeader title="Backtests" note="walk-forward, every decided series" />
-          <p className="mb-4 mt-3 text-sm leading-relaxed text-ink-secondary">
-            Each system predicts every series before seeing its result, and the
-            probabilities are scored afterward. A coin flip scores Brier 0.2500;
-            lower is better.
-          </p>
-          <div className="space-y-3">
-            {cards.map((c) => (
-              <div
-                key={c.runId}
-                className="flex flex-wrap items-baseline justify-between gap-y-2 border-b border-hairline pb-3"
-              >
-                <div>
-                  <div className="font-display text-lg font-semibold uppercase">
-                    {c.model === "glicko2" ? "Glicko-2" : "Elo"}
-                  </div>
-                  <div className="font-mono text-[11px] text-ink-muted">
-                    {c.n} series · {c.windowFrom} → {c.windowTo}
-                  </div>
-                </div>
-                <div className="flex gap-6 text-right">
-                  <div>
-                    <div className="font-mono text-xl tabular-nums">
-                      {c.brier?.toFixed(4) ?? "—"}
-                    </div>
-                    <div className="text-[11px] text-ink-muted">Brier</div>
-                  </div>
-                  <div>
-                    <div className="font-mono text-xl tabular-nums">
-                      {c.accuracy !== null
-                        ? `${(c.accuracy * 100).toFixed(1)}%`
-                        : "—"}
-                    </div>
-                    <div className="text-[11px] text-ink-muted">accuracy</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {cards.length === 0 && (
-              <p className="text-sm text-ink-muted">No backtests recorded yet.</p>
-            )}
-          </div>
-          <p className="mt-3 text-xs text-ink-muted">
-            Calibration plots and full model specs are on the{" "}
-            <Link href="/methodology" className="underline hover:text-ink-secondary">
-              methodology
-            </Link>{" "}
-            page.
-          </p>
-        </div>
-      </section>
+      <nav className="mt-10 grid grid-cols-2 gap-px border border-hairline bg-hairline md:grid-cols-3 lg:grid-cols-6">
+        {sections.map(([href, label, n, sub]) => (
+          <Link key={href} href={href} className="group bg-background p-4 transition-colors hover:bg-surface">
+            <span className="eyebrow text-[10px] text-ink-muted group-hover:text-accent">{label} →</span>
+            <span className="mt-1 block font-display text-3xl font-bold tabular-nums">{n}</span>
+            <span className="block text-xs leading-snug text-ink-muted">{sub}</span>
+          </Link>
+        ))}
+      </nav>
 
-      <section className="mt-14">
-        <SectionHeader
-          title="Era adjustment"
-          note="each season scored against its own cohort"
-        />
-        <div className="mt-6 grid grid-cols-1 gap-10 lg:grid-cols-2">
-          <div>
-            <p className="text-sm leading-relaxed text-ink-secondary">
-              Each strip below is every player-season of at least 30 maps in one
-              title, plotted by raw K/D on a shared axis. The league average
-              shifts from year to year, so a 1.10 K/D in one season and a 1.10 in another
-              are not the same performance. The cohort the z-scores are measured
-              against is wider than this — qualification there is 8 maps.
+      {/* Current season */}
+      <section className="mt-20">
+        <Part title={`${season.year} · ${season.titleName}`}>
+          {champ && (
+            <p className="text-sm text-ink-secondary">
+              <span className="text-accent">{champ}</span> won the Championship
+              {race[0] && (
+                <>
+                  {" "}
+                  · <span className="text-ink">{race[0].team}</span> had the best Elo
+                </>
+              )}
             </p>
-            <div className="mt-5 space-y-6">
-              {kdSpread.map((s) => (
-                <div key={s.year}>
-                  <div className="eyebrow mb-1 text-[10px] text-ink-secondary">
-                    {s.year} {s.title} · {s.values.length} players ≥ 30 maps
-                  </div>
-                  <DistributionStrip
-                    values={s.values}
-                    domain={kdDomain}
-                    unit="raw K/D"
-                  />
-                </div>
-              ))}
+          )}
+        </Part>
+
+        <div className="mt-8">
+          <H2>The title race</H2>
+          <div className="mt-4">
+            <SeasonRace teams={race} events={events} />
+          </div>
+        </div>
+
+        <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-2">
+          <div>
+            <H2>Player leaders</H2>
+            <div className="mt-4">
+              <SeasonLeaders rows={leaders} />
             </div>
           </div>
           <div>
-            <p className="mb-4 text-sm leading-relaxed text-ink-secondary">
-              Engagement pace is part of the reason: kills per player per 10
-              minutes moved by double-digit percentages between titles, and
-              between modes within a title. So each player-season is scored
-              against its own season and mode, and percentiles line up across
-              years.
-            </p>
-            <PaceByMode cells={pace} seasons={seasonEras} />
+            <H2>Teams by mode</H2>
+            <div className="mt-4">
+              <TeamModes modes={teamModes.modes} rows={teamModes.rows} />
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="mt-14">
-        <SectionHeader
-          title="Season leaderboard"
-          note="qualified player-seasons, ≥30 maps"
-        />
-        <div className="mt-4">
-          <Leaderboard rows={leaderboard} limit={10} />
+      {/* All time */}
+      <section className="mt-20">
+        <Part title="All time" />
+
+        {career.length > 0 && (
+          <div className="mt-8">
+            <H2>Career ranking</H2>
+            <div className="mt-4">
+              <CareerBoard
+                rows={career.map((r) => ({
+                  handle: r.handle,
+                  slug: playerSlug(r.handle),
+                  total: r.total,
+                  nSeasons: r.nSeasons,
+                  peakYear: r.peakSeasonYear,
+                  parts: r.careerComponents,
+                }))}
+              />
+            </div>
+            <p className="mt-3 text-sm">
+              <Link href="/players" className="text-accent hover:text-ink">
+                Full ranking →
+              </Link>
+            </p>
+          </div>
+        )}
+
+        <div className="mt-14">
+          <H2>Best single seasons</H2>
+          <p className="mt-3 max-w-2xl text-sm text-ink-secondary">
+            K/D in standard deviations above that season&rsquo;s mean (right column). Raw K/D in
+            grey.
+          </p>
+          <ol className="mt-4 grid grid-cols-1 gap-x-10 gap-y-1 md:grid-cols-2">
+            {topSeasons.map((r, i) => (
+              <li
+                key={`${r.playerId}-${r.year}`}
+                className="flex items-center gap-3 border-b border-hairline/60 py-2 text-sm"
+              >
+                <span className="w-4 font-mono text-[11px] text-ink-muted">{i + 1}</span>
+                <Link href={`/players/${r.slug}`} className="w-24 font-medium hover:text-accent">
+                  {r.handle}
+                </Link>
+                <span className="w-20 font-mono text-[11px] text-ink-muted">
+                  {r.year} {r.title}
+                </span>
+                <span className="relative h-1.5 flex-1 bg-surface">
+                  <span
+                    className="absolute inset-y-0 left-0 bg-accent-dim"
+                    style={{ width: `${((r.kdZ ?? 0) / zMax) * 100}%` }}
+                  />
+                </span>
+                <span className="w-10 text-right font-mono text-xs tabular-nums text-ink-muted">
+                  {r.kdRaw?.toFixed(2)}
+                </span>
+                <span className="w-12 text-right font-mono tabular-nums">+{r.kdZ?.toFixed(2)}</span>
+              </li>
+            ))}
+          </ol>
         </div>
-        <p className="mt-3 text-sm">
-          <Link
-            href="/players"
-            className="text-accent underline underline-offset-4 hover:text-ink"
-          >
-            Filter every player-season by year, mode and minimum maps →
-          </Link>
-        </p>
       </section>
 
       {findings.length > 0 && (
-        <section className="mt-14">
-          <SectionHeader
-            title="Findings"
-            note="current model run · fixed thresholds"
-          />
-          <ul className="mt-4 divide-y divide-hairline/60">
-            {findings.map((f) => (
-              <li key={f.id} className="flex items-baseline gap-4 py-2.5">
-                <span className="eyebrow w-28 flex-none text-[10px] leading-snug text-ink-muted">
-                  {kindLabel(f.kind)}
-                </span>
-                <span className="text-sm leading-snug">{f.headline}</span>
-                <Link
-                  href={
-                    f.subjectSlug
-                      ? f.subjectType === "team"
-                        ? `/teams/${f.subjectSlug}`
-                        : `/players/${f.subjectSlug}`
-                      : "/methodology"
-                  }
-                  className="ml-auto flex-none font-mono text-xs text-accent underline underline-offset-2 hover:text-ink"
-                >
-                  evidence
-                </Link>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-sm">
-            <Link
-              href="/findings"
-              className="text-accent underline underline-offset-4 hover:text-ink"
-            >
-              All findings →
+        <section className="mt-20">
+          <Part title="Findings">
+            <Link href="/findings" className="text-sm text-accent hover:text-ink">
+              All {fmt(counts.findings)} findings →
             </Link>
-          </p>
+          </Part>
+          <div className="mt-8">
+            <FindingCards items={findings} cohort={cohort} />
+          </div>
         </section>
       )}
     </main>

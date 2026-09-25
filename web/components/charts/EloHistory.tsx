@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EraSpan, SeasonChampion, TeamHistory } from "@/lib/analytics";
 
 // Series slots minus the two greens, which read as the accent.
@@ -19,7 +19,28 @@ const DAY = 86400_000;
 const BREAK_DAYS = 60;
 const ERA_GAP = 10;
 const ERA_MIN_W = 44;
-const M = { top: 54, right: 96, bottom: 12, left: 46 };
+const M = { top: 54, right: 12, bottom: 12, left: 46 };
+// Below this container width the chart draws at 1:1 instead of scaling down.
+const NARROW = 720;
+
+const LEAGUES = [
+  { key: "cdl", label: "CDL", from: 2020, to: Infinity },
+  { key: "cwl", label: "CWL", from: 2016, to: 2019 },
+  { key: "mlg", label: "MLG", from: 0, to: 2015 },
+  { key: "all", label: "All", from: 0, to: Infinity },
+] as const;
+type LeagueKey = (typeof LEAGUES)[number]["key"];
+const leagueOf = (year: number) =>
+  LEAGUES.find((l) => l.key !== "all" && year >= l.from && year <= l.to)!;
+
+// Each history trimmed to the visible eras' time range.
+function trim(histories: TeamHistory[], a: number, b: number): TeamHistory[] {
+  return histories.flatMap((h) => {
+    const ks = h.t.flatMap((t, k) => (t >= a && t <= b ? [k] : []));
+    if (ks.length < 2) return [];
+    return [{ ...h, t: ks.map((k) => h.t[k]), r: ks.map((k) => h.r[k]), rd: ks.map((k) => h.rd[k]) }];
+  });
+}
 
 type Leader = { era: number; teamId: number; team: string; mean: number };
 type EraRun = { teamId: number; team: string; first: number; last: number };
@@ -65,10 +86,23 @@ function eraLeaders(histories: TeamHistory[], eras: EraSpan[]): Leader[] {
   return out;
 }
 
+// The view's strongest teams by mean rating, among those that played a real
+// share of it (a quarter of the busiest team's series, and at least 10).
+function topTeams(histories: TeamHistory[], n: number): number[] {
+  const maxN = Math.max(0, ...histories.map((h) => h.r.length));
+  const floor = Math.max(10, 0.25 * maxN);
+  return histories
+    .filter((h) => h.r.length >= floor)
+    .map((h) => ({ id: h.teamId, mean: h.r.reduce((s, v) => s + v, 0) / h.r.length }))
+    .sort((a, b) => b.mean - a.mean)
+    .slice(0, n)
+    .map((t) => t.id);
+}
+
 export function EloHistory({
-  elo,
-  glicko,
-  eras,
+  elo: allElo,
+  glicko: allGlicko,
+  eras: allEras,
   champions = [],
   height = 440,
 }: {
@@ -80,7 +114,31 @@ export function EloHistory({
   height?: number;
 }) {
   const [system, setSystem] = useState<"elo" | "glicko">("elo");
+  const [league, setLeague] = useState<LeagueKey>("cdl");
+  const [boxW, setBoxW] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBoxW(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const lg = LEAGUES.find((l) => l.key === league)!;
+  const eras = useMemo(
+    () => allEras.filter((e) => e.year >= lg.from && e.year <= lg.to),
+    [allEras, lg],
+  );
+  const [elo, glicko] = useMemo(() => {
+    if (!eras.length) return [allElo, allGlicko];
+    const a = Date.parse(eras[0].from);
+    const b = Date.parse(eras[eras.length - 1].to);
+    return [trim(allElo, a, b), allGlicko && trim(allGlicko, a, b)];
+  }, [allElo, allGlicko, eras]);
   const [picked, setPicked] = useState<number[]>([]);
+  // Color slot per picked team, held until it is unpicked.
+  const [slot, setSlot] = useState<Record<number, number>>({});
   const [extras, setExtras] = useState<number[]>([]);
   const [hover, setHover] = useState<{ teamId: number; k: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -90,8 +148,10 @@ export function EloHistory({
   const source = showBand ? glicko! : elo;
   const byId = useMemo(() => new Map(source.map((h) => [h.teamId, h])), [source]);
 
-  const W = 960;
-  const H = height;
+  // A single league fits a phone at 1:1; all thirteen games scroll sideways.
+  const narrow = boxW > 0 && boxW < NARROW && league !== "all";
+  const W = narrow ? Math.max(boxW, 320) : 960;
+  const H = narrow ? 360 : height;
   const iw = W - M.left - M.right;
   const ih = H - M.top - M.bottom;
 
@@ -119,24 +179,6 @@ export function EloHistory({
     return last ? last.x + last.w : M.left;
   };
 
-  // Domain: the grey field's 0.5–99.5% range, widened to hold every picked
-  // team (and its band); the few extreme newcomers are clipped.
-  const [r0, r1] = useMemo(() => {
-    const all = source.flatMap((h) => h.r).sort((a, b) => a - b);
-    let lo = all[Math.floor(all.length * 0.005)] ?? 1400;
-    let hi = all[Math.ceil(all.length * 0.995) - 1] ?? 1600;
-    for (const id of picked) {
-      const h = source.find((s) => s.teamId === id);
-      h?.r.forEach((r, k) => {
-        const rd = showBand ? (h.rd[k] ?? 0) : 0;
-        lo = Math.min(lo, r - rd);
-        hi = Math.max(hi, r + rd);
-      });
-    }
-    return [Math.floor(Math.min(lo, 1400) / 100) * 100, Math.ceil(Math.max(hi, 1600) / 100) * 100];
-  }, [source, showBand, picked]);
-  const y = (r: number) => M.top + ih - ((r - r0) / (r1 - r0)) * ih;
-
   const leaders = useMemo(() => eraLeaders(elo, eras), [elo, eras]);
   const leaderMode = picked.length === 0;
   const leaderRuns = useMemo(() => runsOf(leaders), [leaders]);
@@ -148,30 +190,66 @@ export function EloHistory({
       }),
     [champions, eras],
   );
-  // A thin season, by series count, is flagged in the header as partial.
-  const medianSeries = useMemo(() => {
-    const n = eras.map((e) => e.seriesCount).sort((a, b) => a - b);
-    return n.length ? n[Math.floor(n.length / 2)] : 0;
-  }, [eras]);
 
-  // Pill order fixes each team's color slot: era leaders first, then any team
-  // added by clicking its line. A slot never changes once assigned.
+  // Each era's stretch of a team's line, as point indices [from, to).
+  const eraSlice = (h: TeamHistory, era: number) => {
+    const c = cols[era];
+    const from = h.t.findIndex((t) => t >= c.a);
+    let to = h.t.findIndex((t) => t > c.b);
+    if (to === -1) to = h.t.length;
+    return from === -1 || to <= from ? null : { from, to };
+  };
+
+  // Domain: the grey field's 2–99.5% range, widened to hold every highlighted
+  // line (and its band) and every champion; only the weakest teams are cut off.
+  const [r0, r1] = useMemo(() => {
+    const all = source.flatMap((h) => h.r).sort((a, b) => a - b);
+    let lo = all[Math.floor(all.length * 0.02)] ?? 1400;
+    let hi = all[Math.ceil(all.length * 0.995) - 1] ?? 1600;
+    const hold = (h: TeamHistory | undefined, from: number, to: number) => {
+      if (!h) return;
+      for (let k = from; k < to; k++) {
+        const rd = showBand ? (h.rd[k] ?? 0) : 0;
+        lo = Math.min(lo, h.r[k] - rd);
+        hi = Math.max(hi, h.r[k] + rd);
+      }
+    };
+    if (leaderMode) {
+      for (const l of [...leaders, ...champs]) {
+        const h = byId.get(l.teamId);
+        const sl = h && eraSlice(h, l.era);
+        if (sl) hold(h, sl.from, sl.to);
+      }
+    }
+    for (const c of champs) {
+      const h = byId.get(c.teamId);
+      if (!h) continue;
+      let k = -1;
+      for (let j = 0; j < h.t.length && h.t[j] <= c.t; j++) k = j;
+      if (k !== -1) hold(h, k, k + 1);
+    }
+    for (const id of picked) {
+      const h = source.find((s) => s.teamId === id);
+      h?.r.forEach((r, k) => {
+        const rd = showBand ? (h.rd[k] ?? 0) : 0;
+        lo = Math.min(lo, r - rd);
+        hi = Math.max(hi, r + rd);
+      });
+    }
+    return [Math.floor(Math.min(lo, 1400) / 100) * 100, Math.ceil(Math.max(hi, 1600) / 100) * 100];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, showBand, picked, leaderMode, leaders, champs, byId, cols]);
+  const y = (r: number) => M.top + ih - ((r - r0) / (r1 - r0)) * ih;
+
+
+  // The view's top eight, then any team added by clicking its line.
   const pills = useMemo(() => {
-    const seen = new Set<number>();
-    const ids: number[] = [];
-    for (const l of leaders)
-      if (!seen.has(l.teamId)) {
-        seen.add(l.teamId);
-        ids.push(l.teamId);
-      }
-    for (const id of extras)
-      if (!seen.has(id)) {
-        seen.add(id);
-        ids.push(id);
-      }
+    const ids = topTeams(elo, 8);
+    for (const id of extras) if (!ids.includes(id)) ids.push(id);
     return ids;
-  }, [leaders, extras]);
-  const slotOf = (id: number) => SLOTS[Math.max(pills.indexOf(id), 0) % SLOTS.length];
+  }, [elo, extras]);
+  const slotOf = (id: number) =>
+    slot[id] != null ? SLOTS[slot[id] % SLOTS.length] : "var(--ink-muted)";
 
   // Path pieces for points k in [from, to), split wherever a team sat out.
   function pathOf(h: TeamHistory, from = 0, to = h.t.length) {
@@ -205,12 +283,8 @@ export function EloHistory({
   const runs = leaderMode
     ? leaders.flatMap((l) => {
         const h = byId.get(l.teamId);
-        if (!h) return [];
-        const c = cols[l.era];
-        const from = h.t.findIndex((t) => t >= c.a);
-        let to = h.t.findIndex((t) => t > c.b);
-        if (to === -1) to = h.t.length;
-        return from === -1 || to <= from ? [] : [{ h, from, to, color: "var(--accent)" }];
+        const sl = h && eraSlice(h, l.era);
+        return sl ? [{ h: h!, ...sl, color: "var(--accent)" }] : [];
       })
     : picked.flatMap((id) => {
         const h = byId.get(id);
@@ -273,7 +347,19 @@ export function EloHistory({
   }
 
   function toggle(id: number) {
-    setPicked((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+    const on = picked.includes(id);
+    setPicked((prev) => (on ? prev.filter((p) => p !== id) : [...prev, id]));
+    setSlot((prev) => {
+      const next = { ...prev };
+      if (on) delete next[id];
+      else {
+        const used = new Set(Object.values(prev));
+        let i = 0;
+        while (used.has(i)) i++;
+        next[id] = i;
+      }
+      return next;
+    });
     if (!pills.includes(id)) setExtras((prev) => [...prev, id]);
   }
 
@@ -285,23 +371,21 @@ export function EloHistory({
       const a = cols[run.first];
       const b = cols[run.last];
       const isLast = i === runs.length - 1 && run.last === cols.length - 1;
-      // The final run may spill into the right margin rather than truncate.
-      const span = b.x + b.w - a.x + (isLast ? M.right - 8 : 0);
-      const pad = 0;
-      const maxChars = Math.floor((span - pad + ERA_GAP - 4) / 5.6);
+      // The final run may spill left over the offseason gap, right-aligned to the edge.
+      const span = b.x + b.w - a.x + (isLast ? M.right + ERA_GAP : 0);
+      const maxChars = Math.floor((span + ERA_GAP - 4) / 5.6);
       const name =
         run.team.length > maxChars ? run.team.slice(0, Math.max(maxChars - 1, 1)) + "…" : run.team;
-      const tx = isLast ? a.x + pad / 2 : a.x + (b.x + b.w - a.x) / 2;
-      const anchor = isLast && run.team.length * 5.6 > b.x + b.w - a.x ? "start" : "middle";
+      const spill = isLast && name.length * 5.6 > b.x + b.w - a.x;
       return (
         <g key={`${ty}-${run.first}`}>
           {run.last > run.first && (
             <line x1={a.x + 4} x2={b.x + b.w - 4} y1={ty + 4} y2={ty + 4} stroke={fill} opacity={0.35} />
           )}
           <text
-            x={anchor === "start" ? a.x + pad : tx + pad / 2}
+            x={spill ? W - 2 : a.x + (b.x + b.w - a.x) / 2}
             y={ty}
-            textAnchor={anchor}
+            textAnchor={spill ? "end" : "middle"}
             fontSize={9.5}
             fill={fill}
             stroke="var(--background)"
@@ -319,13 +403,12 @@ export function EloHistory({
   // Each champion's point at its title, or its last rated series before it.
   const rings = champs.flatMap((c) => {
     const h = byId.get(c.teamId);
-    if (!h) return [];
+    if (!h || (!leaderMode && !picked.includes(c.teamId))) return [];
     let k = -1;
     for (let j = 0; j < h.t.length && h.t[j] <= c.t; j++) k = j;
     return k === -1 ? [] : [{ ...c, h, k }];
   });
 
-  const clipped = source.some((h) => h.r.some((r) => r < r0 || r > r1));
 
   const hh = hover ? byId.get(hover.teamId) : undefined;
   const hEra = hh ? cols.findIndex((c) => hh.t[hover!.k] <= c.b) : -1;
@@ -333,6 +416,21 @@ export function EloHistory({
   return (
     <figure>
       <div className="mb-3 flex flex-wrap items-center gap-1 text-xs">
+        {LEAGUES.map((l) => (
+          <button
+            key={l.key}
+            onClick={() => setLeague(l.key)}
+            aria-pressed={league === l.key}
+            className={`rounded border px-2 py-1 transition-colors ${
+              league === l.key
+                ? "border-hairline bg-surface-raised text-ink"
+                : "border-transparent text-ink-muted hover:text-ink-secondary"
+            }`}
+          >
+            {l.label}
+          </button>
+        ))}
+        {canToggle && <span className="mx-2 h-4 w-px bg-hairline" />}
         {canToggle &&
           (["elo", "glicko"] as const).map((s) => (
             <button
@@ -352,7 +450,10 @@ export function EloHistory({
 
       <div className="mb-3 flex flex-wrap gap-2">
         <button
-          onClick={() => setPicked([])}
+          onClick={() => {
+            setPicked([]);
+            setSlot({});
+          }}
           aria-pressed={leaderMode}
           className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-colors ${
             leaderMode
@@ -360,8 +461,14 @@ export function EloHistory({
               : "border-transparent text-ink-muted hover:text-ink-secondary"
           }`}
         >
-          <span className="inline-block h-2 w-2 rounded-full bg-accent" />
-          Highest-rated
+          <span className="inline-block h-0.5 w-4 bg-accent" />
+          Top Elo in each game
+          <span className="ml-2 inline-flex items-center">
+            <span className="inline-block h-0.5 w-2 bg-ink opacity-75" />
+            <span className="inline-block h-2 w-2 rounded-full border-[1.5px] border-ink bg-background" />
+            <span className="inline-block h-0.5 w-2 bg-ink opacity-75" />
+          </span>
+          World champion
         </button>
         {pills.map((id) => {
           const h = byId.get(id);
@@ -388,11 +495,11 @@ export function EloHistory({
         })}
       </div>
 
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div ref={boxRef} className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
-        className="w-full min-w-[720px] cursor-crosshair"
+        className={`w-full cursor-crosshair ${narrow ? "" : "min-w-[720px]"}`}
         role="img"
         aria-label="Rating of every team across every Call of Duty title, one column per game, with each game's highest-rated team, its world champion, or selected teams highlighted"
         onPointerMove={onMove}
@@ -427,19 +534,6 @@ export function EloHistory({
               >
                 {era.year}
               </text>
-              {era.seriesCount < medianSeries / 2 && (
-                <text
-                  x={c.x + c.w / 2}
-                  y={H - M.bottom - 6}
-                  textAnchor="middle"
-                  fontSize={9}
-                  fill="var(--ink-muted)"
-                  className="font-mono"
-                >
-                  <title>{`${era.seriesCount} rated series archived for this game`}</title>
-                  partial
-                </text>
-              )}
             </g>
           );
         })}
@@ -466,8 +560,39 @@ export function EloHistory({
             >
               {v}
             </text>
+            {v === 1500 && (
+              <text
+                x={M.left - 8}
+                y={y(v) + 13}
+                textAnchor="end"
+                fontSize={8.5}
+                fill="var(--ink-muted)"
+                className="font-mono"
+              >
+                avg
+              </text>
+            )}
           </g>
         ))}
+
+        {/* league changes, in the all-games view */}
+        {league === "all" &&
+          cols.map((c, i) => {
+            const l = leagueOf(eras[i].year);
+            if (i > 0 && leagueOf(eras[i - 1].year) === l) return null;
+            const gx = c.x - ERA_GAP / 2;
+            return (
+              <g key={`lg${l.key}`} pointerEvents="none">
+                {i > 0 && (
+                  <line x1={gx} x2={gx} y1={M.top} y2={H - M.bottom} stroke="var(--ink-muted)" strokeDasharray="3 3" opacity={0.6} />
+                )}
+                <text x={c.x + 4} y={M.top + 12} fontSize={9.5} fill="var(--ink-muted)" className="font-mono">
+                  {l.label}
+                </text>
+              </g>
+            );
+          })}
+
 
         <defs>
           <clipPath id="elo-history-plot">
@@ -494,19 +619,16 @@ export function EloHistory({
             const lead = leaders.find((l) => l.era === c.era);
             const h = byId.get(c.teamId);
             if (!h || lead?.teamId === c.teamId) return null;
-            const col = cols[c.era];
-            const from = h.t.findIndex((t) => t >= col.a);
-            let to = h.t.findIndex((t) => t > col.b);
-            if (to === -1) to = h.t.length;
-            if (from === -1 || to <= from) return null;
+            const sl = eraSlice(h, c.era);
+            if (!sl) return null;
             return (
               <path
                 key={`c${c.era}`}
-                d={pathOf(h, from, to).d}
+                d={pathOf(h, sl.from, sl.to).d}
                 fill="none"
-                stroke="var(--ink-secondary)"
+                stroke="var(--ink)"
                 strokeWidth={1.25}
-                opacity={0.8}
+                opacity={0.75}
                 pointerEvents="none"
               />
             );
@@ -550,36 +672,20 @@ export function EloHistory({
           const cx = xOf(c.h.t[c.k]);
           const cy = y(c.h.r[c.k]);
           return (
-            <g key={`ring${c.era}`} pointerEvents="none">
-              <circle cx={cx} cy={cy} r={5} fill="var(--background)" stroke="var(--ink)" strokeWidth={1.5} />
-              <text
-                x={Math.min(cx, W - M.right + 40)}
-                y={cy - 9}
-                textAnchor="middle"
-                fontSize={9}
-                fill="var(--ink-secondary)"
-                stroke="var(--background)"
-                strokeWidth={3}
-                paintOrder="stroke"
-              >
-                {c.team}
-              </text>
-            </g>
+            <circle
+              key={`ring${c.era}`}
+              cx={cx}
+              cy={cy}
+              r={5}
+              fill="var(--background)"
+              stroke="var(--ink)"
+              strokeWidth={1.5}
+              pointerEvents="none"
+            />
           );
         })}
 
-        {clipped && (
-          <text
-            x={W - M.right - 4}
-            y={H - M.bottom - 6}
-            textAnchor="end"
-            fontSize={9}
-            fill="var(--ink-muted)"
-            className="font-mono"
-          >
-            axis clipped at {r0}–{r1}
-          </text>
-        )}
+
 
         {!leaderMode &&
           picked.map((id) => {
@@ -588,11 +694,14 @@ export function EloHistory({
             const k = h.t.length - 1;
             const lx = xOf(h.t[k]);
             const ly = endLabels.get(id) ?? y(h.r[k]);
+            // Lines that run to the right edge get their label on the inside.
+            const inside = lx + 6 + h.team.length * 5.8 > W;
             return (
               <text
                 key={`l${id}`}
-                x={lx + 6}
+                x={inside ? lx - 8 : lx + 6}
                 y={ly + 3.5}
+                textAnchor={inside ? "end" : "start"}
                 fontSize={10.5}
                 fill="var(--ink-secondary)"
                 stroke="var(--background)"
@@ -652,9 +761,9 @@ export function EloHistory({
         {showBand
           ? "Series-level Glicko-2 after each rated series; the band is the rating deviation. "
           : "Series-level Elo after each rated series. "}
-        Grey lines are every team with five or more rated series; each column is
-        one game. Green marks the highest mean rating in each game, and a ring
-        marks the world champion. Click any line to follow it. Spec in{" "}
+        Grey lines are teams with five or more rated series; each column is one
+        game title, and the top Elo is the highest mean rating across it. Click
+        any line to follow it. Details in the{" "}
         <Link href="/methodology/elo" className="underline">
           methodology
         </Link>

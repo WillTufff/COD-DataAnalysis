@@ -54,7 +54,7 @@ export function SiteFooter() {
           , CC-BY-SA 3.0, retrieved through their API.
         </p>
         <p>
-          All models are educational analysis of historical play; the{" "}
+          Models describe past matches only. The{" "}
           <Link className="underline hover:text-ink-secondary" href="/methodology">
             methodology
           </Link>{" "}
