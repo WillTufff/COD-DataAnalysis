@@ -4,7 +4,7 @@
 // always matches the table it came from.
 
 import { type ReportColumn, type ReportRow } from "@/lib/analytics";
-import { contentSlug } from "./content";
+import { type Stage, contentSlug } from "./content";
 import { type ResolvedReport } from "./resolve";
 import { type ReportView, serializeWhere } from "./rows";
 
@@ -42,6 +42,7 @@ export type ExportMeta = {
     /** Content filters: which maps were summed, beyond season and mode. */
     tier: "1" | "2" | "all";
     venue: "lan" | "online" | "all";
+    stage: Stage | "all";
     maps: string[] | "all";
     from: string | null;
     to: string | null;
@@ -155,6 +156,7 @@ export function buildExportMatrix(
         teams: resolved.teamSlugs.length > 0 ? resolved.teamSlugs : "all",
         tier: resolved.content.tier ?? "all",
         venue: resolved.content.venue ?? "all",
+        stage: resolved.content.stage ?? "all",
         maps: resolved.content.maps.length > 0 ? resolved.content.maps : "all",
         from: resolved.content.from,
         to: resolved.content.to,

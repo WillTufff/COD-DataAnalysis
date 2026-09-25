@@ -38,6 +38,7 @@ def run_results(dsn: str, dry_run: bool) -> None:
     print("counts:", report["counts"])
     print("skipped:", report["skipped"])
     print("collisions:", len(report["collisions"]))
+    print("series stage:", report["stage"]["series"])
     print("unresolved players:", len(report["unresolved_players"]))
     print(f"report: {RESULTS_PATH}")
 

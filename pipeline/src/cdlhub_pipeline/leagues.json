@@ -1,0 +1,106 @@
+{
+  "_comment": [
+    "League events, keyed by event name. Every map of a listed event is league",
+    "play, except that where `playoffs` is true a bracket or final round label",
+    "keeps its class. Maps of every other event are group, bracket or final by",
+    "round label. Read by stage.py; the quality report lists entries no event",
+    "carries any more."
+  ],
+  "events": {
+    "CWL/2016 Season/Australia-New Zealand/Stage 1/Regular Season": {
+      "reason": "CWL 2016 regional stage regular season; its playoffs are a separate event"
+    },
+    "CWL/2016 Season/Australia-New Zealand/Stage 2/Regular Season": {
+      "reason": "CWL 2016 regional stage regular season; its playoffs are a separate event"
+    },
+    "CWL/2016 Season/Europe/Stage 1/Regular Season": {
+      "reason": "CWL 2016 regional stage regular season; its playoffs are a separate event"
+    },
+    "CWL/2016 Season/Europe/Stage 2/Regular Season": {
+      "reason": "CWL 2016 regional stage regular season; its playoffs are a separate event"
+    },
+    "CWL/2016 Season/North America/Stage 1/Regular Season": {
+      "reason": "CWL 2016 regional stage regular season; its playoffs are a separate event"
+    },
+    "CWL/2016 Season/North America/Stage 2/Regular Season": {
+      "reason": "CWL 2016 regional stage regular season; its playoffs are a separate event"
+    },
+    "CWL 2017 Global Pro League Stage 1": {
+      "reason": "Global Pro League group play; any stage playoff rounds keep their bracket class",
+      "playoffs": true
+    },
+    "CWL Pro League 2018 Stage 1": {
+      "reason": "Pro League divisions, with the stage playoffs held inside the same event",
+      "playoffs": true
+    },
+    "CWL 2017 Global Pro League Stage 2": {
+      "reason": "Global Pro League group play; any stage playoff rounds keep their bracket class",
+      "playoffs": true
+    },
+    "CWL Pro League 2018 Stage 2": {
+      "reason": "Pro League divisions, with the stage playoffs held inside the same event",
+      "playoffs": true
+    },
+    "CWL Pro League 2019": {
+      "reason": "Pro League weeks; the finals and the qualifier are separate events"
+    },
+    "CDL Launch Weekend": {
+      "reason": "2020 opening weekend of league matches"
+    },
+    "CDL Week 2: London": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 3: Atlanta": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 4: LA": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 5: Dallas": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 6: Chicago": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 7: Florida": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 8: Seattle": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 9: Minnesota": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 10: Paris": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 11: New York": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 12: London": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Week 13: Toronto": {
+      "reason": "2020 home series weekend: league play, labelled as a small tournament"
+    },
+    "CDL Major 1 Qualifiers": {
+      "reason": "online league matches that seed the Major"
+    },
+    "CDL Major 2 Qualifiers": {
+      "reason": "online league matches that seed the Major"
+    },
+    "CDL Major 3 Qualifiers": {
+      "reason": "online league matches that seed the Major"
+    },
+    "CDL Major 4 Qualifiers": {
+      "reason": "online league matches that seed the Major"
+    },
+    "CDL Major 5 Qualifiers": {
+      "reason": "online league matches that seed the Major"
+    },
+    "CDL Regular Season": {
+      "reason": "2026 catch-all: its Major qualifier and group rounds are league play; its bracket rounds are the Major 4 bracket",
+      "playoffs": true
+    }
+  }
+}

@@ -18,7 +18,7 @@ function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
     modeSlug: undefined,
     modeMix: [],
     span: false,
-    content: { tier: null, venue: null, maps: [], from: null, to: null },
+    content: { tier: null, venue: null, stage: null, maps: [], from: null, to: null },
     aggregated: false,
     mapsFloor: 8,
     minMaps: 8,
@@ -110,6 +110,7 @@ describe("buildExportMatrix", () => {
       teams: "all",
       tier: "all",
       venue: "all",
+      stage: "all",
       maps: "all",
       from: null,
       to: null,
@@ -174,7 +175,14 @@ describe("content filters in the export", () => {
       modeSlug: "hardpoint",
       years: [2018],
       aggregated: true,
-      content: { tier: "1", venue: "lan", maps: ["gibraltar"], from: "2018-01-01", to: null },
+      content: {
+        tier: "1",
+        venue: "lan",
+        stage: "final",
+        maps: ["gibraltar"],
+        from: "2018-01-01",
+        to: null,
+      },
     });
     const m = buildExportMatrix(r, [kdColumn], [row()], RUN);
     expect(m.meta.cohort).toMatchObject({
@@ -185,6 +193,7 @@ describe("content filters in the export", () => {
       aggregated: true,
     });
     expect(m.meta.cohort.venue).toBe("lan");
-    expect(cohortSlug(r)).toBe("hardpoint-2018-tier1-lan-gibraltar-2018-01-01-to-end");
+    expect(m.meta.cohort.stage).toBe("final");
+    expect(cohortSlug(r)).toBe("hardpoint-2018-tier1-lan-final-gibraltar-2018-01-01-to-end");
   });
 });

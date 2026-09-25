@@ -442,8 +442,8 @@ agree to the precision the published cells are stored at.
 
 #### Content filters
 
-The stats page can also narrow the maps under a number by event tier, by venue, by map,
-and by date. Each filter is one more condition on which map rows are summed, so a filtered
+The stats page can also narrow the maps under a number by event tier, by venue, by stage,
+by map, and by date. Each filter is one more condition on which map rows are summed, so a filtered
 number goes through the same arithmetic and the same scoring as a mix of modes, and it
 is compared only with the other rows under the same filters. Any one of them sends the
 page down the second path, even for a single mode shown season by season. A filter
@@ -457,7 +457,10 @@ maps with box scores, per era.
 | Tier 2 events | 176 | 3,270 | 13 |
 | LAN | 3,055 | 6,870 | 2,074 |
 | Online | 2,024 | 0 | 4,393 |
-| Round label | 0 | 5,091 | 6,540 |
+| League play | 2,001 | 1,940 | 4,077 |
+| Event groups | 936 | 2,602 | 110 |
+| Brackets | 1,913 | 2,156 | 2,111 |
+| Grand finals | 216 | 166 | 222 |
 
 Event tier is the numeric tier the title rule reads, set from Liquipedia from 2017 on and
 from the CoD wiki's Premier and Major before it. Maps from events with no tier (the
@@ -473,8 +476,24 @@ events are online and everything else is LAN. Every map from 2017 to 2019 is LAN
 regular season are in neither, because Liquipedia records that event as both and an
 event-level flag cannot say which maps were which.
 
-Two filters are held back. Playoffs against regular play reads the round label,
-which the earlier wiki data never records. Opponent tier has no definition that
+Stage is decided at the event first and by the round label second. A round label alone
+reads three eras wrong. The 2020 CDL home series were league play, but each weekend was
+labelled as a small tournament, with groups, a bracket and a grand final. The 2017 Global
+Pro League is labelled as groups. And 2013 to 2015 had no league at all. So a curated list
+of league events decides league play: the 2016 World League stage regular seasons, the 2017
+Global Pro League, the 2018 and 2019 Pro Leagues, the 2020 home series, and the CDL's Major
+qualifiers. A league that held its own playoffs inside the event, as the 2017 and 2018 stages
+did, keeps those bracket rounds as bracket play. Every other event splits into groups,
+brackets and grand finals by round label, and a round-robin day at an event counts as group
+play. The CoD wiki's round comes from its match schedule, the same row that scores the series.
+
+The choices are league play, event play (everything else), event groups, brackets (grand
+finals and league playoffs included), and grand finals alone. Before 2016 there is no league
+play to keep, so that choice shows dashes. The table leaves out 39 maps with no stage,
+from series with no round in any source. Twenty are 2021 Major rounds that Cito records as
+unknown, and the rest are wiki series whose schedule row is missing.
+
+One filter is held back. Opponent tier has no definition that
 travels. The opponent adjustment rates strength without cutting it into tiers, and a
 rank or rating cut means one thing in a twelve-team league and another in a hundred-team
 open.
@@ -2632,6 +2651,12 @@ Inside that era, venue is half a stage term: LAN is where the Major bracket is p
 online is where the qualifier is. Regressing the venue flag on the stage classes returns
 R² ≈ 0.51, leaving a residual standard deviation of 0.33 against 0.47 raw. The question is
 answerable, at roughly twice the variance the raw split suggests.
+
+The stakes classes have also changed since the fitted run. They now come from the series
+stage the stats page filters on (see content filters above), so the 2020 home series and the
+2017 Global Pro League read as regular play, the wiki series before 2017 carry a stage, and a
+losers final is no longer read as a grand final. The ablation table below is the fitted run's,
+and a refit would read different stakes.
 
 #### The ablation table, declared before anything was fitted
 

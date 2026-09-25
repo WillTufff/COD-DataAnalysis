@@ -164,6 +164,8 @@ class Series:
     games: list[Game] = field(default_factory=list)
     # (team1, team2) from the schedule; map wins stand in where it is absent.
     score: tuple[int, int] | None = None
+    # The schedule's `Round`, else its `Tab`; None where no row matched.
+    round_label: str | None = None
 
     @property
     def team1_score(self) -> int:
@@ -420,6 +422,7 @@ def transform(
         found = schedule.match(series_id, first["TournamentPage"], team1, team2, s.played_on)
         if found is not None:
             planned, s.score, how = found
+            s.round_label = _round(planned)
             counts[f"scored by the schedule, matched on {how}"] += 1
             if _contradicts(s):
                 conflicts.append(_conflict(s, planned))
@@ -535,9 +538,19 @@ def _schedule_only(
                 team1=planned["Team1"],
                 team2=planned["Team2"],
                 score=(int(planned["Team1Score"]), int(planned["Team2Score"])),
+                round_label=_round(planned),
             )
         )
     return out
+
+
+def _round(planned: dict[str, Any]) -> str | None:
+    """`Round` (WR1, GF, Group B, Week 5), else `Tab`, which names a round only on some pages."""
+    for key in ("Round", "Tab"):
+        value = str(planned.get(key) or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _strip_one_sided(games: list[Game]) -> int:

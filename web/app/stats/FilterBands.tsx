@@ -12,11 +12,13 @@ import type { MapOption } from "@/lib/reports/aggregate";
 import {
   type ContentFilters,
   type EventTier,
+  type Stage,
   type Venue,
   dateRangeLabel,
   hasContent,
   mapsLabel,
   parseDay,
+  stageLabel,
   tierLabel,
   venueLabel,
 } from "@/lib/reports/content";
@@ -241,7 +243,7 @@ function AddFilter<Id extends string>({
 }
 
 type RowFilter = "season" | "players" | "teams" | "minmaps" | "where" | "top";
-type MapsFilter = "tier" | "venue" | "map" | "dates";
+type MapsFilter = "tier" | "venue" | "stage" | "map" | "dates";
 
 const TIERS: { tier: EventTier; note: string }[] = [
   { tier: "1", note: "Premier events: championships, the CWL Pro League, the CDL" },
@@ -315,6 +317,48 @@ function VenueMenu({
       <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
         Every map from 2017 to 2019 is LAN. The 2026 regular season mixes both
         and is in neither.
+      </p>
+    </div>
+  );
+}
+
+const STAGE_NOTES: { stage: Stage; note: string }[] = [
+  { stage: "league", note: "Pro League and CDL regular-season matches, and the 2016 CWL stages" },
+  { stage: "event", note: "Everything but league play: groups, brackets and finals" },
+  { stage: "group", note: "Groups and pools at events" },
+  { stage: "bracket", note: "Bracket rounds and finals, a league's own playoffs included" },
+  { stage: "final", note: "The deciding series of each bracket" },
+];
+
+/** League play or a part of an event, as each series' stage is recorded. */
+function StageMenu({
+  stage,
+  pick,
+}: {
+  stage: Stage | null;
+  pick: (next: Stage) => void;
+}) {
+  return (
+    <div className="w-72 max-w-full py-1">
+      {STAGE_NOTES.map((v) => (
+        <button
+          key={v.stage}
+          type="button"
+          role="menuitemradio"
+          aria-checked={stage === v.stage}
+          onClick={() => pick(v.stage)}
+          className={`${MENU_ROW} items-start`}
+        >
+          <Check on={stage === v.stage} />
+          <span className="flex flex-col">
+            <span className={stage === v.stage ? "text-ink" : ""}>{stageLabel(v.stage)}</span>
+            <span className="text-[0.66rem] leading-snug text-ink-muted">{v.note}</span>
+          </span>
+        </button>
+      ))}
+      <p className="border-t border-hairline px-2.5 pb-1 pt-1.5 text-[0.66rem] leading-snug text-ink-muted">
+        There was no league before 2016. The 2020 home series count as league
+        play.
       </p>
     </div>
   );
@@ -649,17 +693,19 @@ export function FilterBands({
   );
   const tierOn = content.tier !== null;
   const venueOn = content.venue !== null;
+  const stageOn = content.stage !== null;
   const mapOn = content.maps.length > 0;
   const datesOn = content.from !== null || content.to !== null;
   const contentOn = hasContent(content);
   const addableMaps: { id: MapsFilter; label: string }[] = [];
   if (!tierOn) addableMaps.push({ id: "tier", label: "Event tier" });
   if (!venueOn) addableMaps.push({ id: "venue", label: "LAN / online" });
+  if (!stageOn) addableMaps.push({ id: "stage", label: "League / playoffs" });
   if (!mapOn && mapOptions.length > 0) addableMaps.push({ id: "map", label: "Map" });
   if (!datesOn) addableMaps.push({ id: "dates", label: "Date range" });
 
   const filterCount =
-    rowFilterCount + [tierOn, venueOn, mapOn, datesOn].filter(Boolean).length;
+    rowFilterCount + [tierOn, venueOn, stageOn, mapOn, datesOn].filter(Boolean).length;
 
   const summary = [
     modeText,
@@ -667,6 +713,7 @@ export function FilterBands({
     ...(span ? ["combined span"] : []),
     ...(tierOn ? [tierLabel(content.tier!)] : []),
     ...(venueOn ? [venueLabel(content.venue!)] : []),
+    ...(stageOn ? [stageLabel(content.stage!)] : []),
     ...(mapOn ? [mapsLabel(content.maps, mapNameBySlug)] : []),
     ...(datesOn ? [dateRangeLabel(content.from, content.to)] : []),
   ].join(" · ");
@@ -803,6 +850,24 @@ export function FilterBands({
             </Chip>
           )}
 
+          {shown("stage", stageOn) && (
+            <Chip
+              label="Stage"
+              value={content.stage ? stageLabel(content.stage) : "any"}
+              open={openChip === "stage"}
+              setOpen={opener("stage")}
+              onClear={stageOn ? () => push({ stage: null }) : undefined}
+            >
+              <StageMenu
+                stage={content.stage}
+                pick={(next) => {
+                  push({ stage: next });
+                  setOpenChip(null);
+                }}
+              />
+            </Chip>
+          )}
+
           {shown("map", mapOn) && (
             <Chip
               label="Map"
@@ -846,7 +911,7 @@ export function FilterBands({
             <button
               type="button"
               onClick={() =>
-                push({ tier: null, venue: null, map: null, from: null, to: null })
+                push({ tier: null, venue: null, stage: null, map: null, from: null, to: null })
               }
               className="px-1 text-xs text-ink-muted underline-offset-2 hover:text-accent hover:underline"
             >

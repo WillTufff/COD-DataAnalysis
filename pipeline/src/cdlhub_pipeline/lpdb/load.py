@@ -29,7 +29,7 @@ from typing import Any, cast
 
 import psycopg
 
-from .. import venue
+from .. import stage, venue
 from ..identity import Aliases
 from .pull import (
     GAME_SEASONS,
@@ -1082,4 +1082,6 @@ def load(conn: psycopg.Connection[tuple[object, ...]]) -> tuple[dict[str, int], 
         for key, value in sorted(fixer.counts.items()):
             loader.counts[f"fix_{key}"] = value
         loader.report["series_fix"] = fixer.report
+    # Last, so series every loader in the run wrote carry a stage.
+    loader.report["stage"] = stage.apply(conn)
     return dict(sorted(loader.counts.items())), loader.report

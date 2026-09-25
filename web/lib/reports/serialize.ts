@@ -69,7 +69,7 @@ export function toXml(matrix: ExportMatrix): string {
       Array.isArray(meta.cohort.teams)
         ? meta.cohort.teams.join(",")
         : meta.cohort.teams,
-    )}" tier="${meta.cohort.tier}" venue="${meta.cohort.venue}" maps="${xmlEscape(
+    )}" tier="${meta.cohort.tier}" venue="${meta.cohort.venue}" stage="${meta.cohort.stage}" maps="${xmlEscape(
       Array.isArray(meta.cohort.maps)
         ? meta.cohort.maps.join(",")
         : meta.cohort.maps,

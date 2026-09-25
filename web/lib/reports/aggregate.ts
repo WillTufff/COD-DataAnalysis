@@ -16,7 +16,7 @@ import {
   teamMemberSeasons,
 } from "@/lib/analytics";
 import { playerSlug, teamSlug } from "@/lib/slug";
-import { type ContentFilters, NO_CONTENT } from "./content";
+import { type ContentFilters, NO_CONTENT, STAGE_VALUES } from "./content";
 import {
   type MapKeySource,
   type SeasonTotals,
@@ -33,7 +33,7 @@ export type AggregateQuery = {
   span: boolean;
   players?: string[];
   teams?: string[];
-  /** Tier, venue, map and date filters on the maps summed; absent = none. */
+  /** Tier, venue, stage, map and date filters on the maps summed; absent = none. */
   content?: ContentFilters;
 };
 
@@ -113,6 +113,10 @@ function mapFilter(q: Pick<AggregateQuery, "years" | "modes" | "content">): SQL 
   const c = q.content ?? NO_CONTENT;
   if (c.tier) conditions.push(sql`ev.tier = ${c.tier}`);
   if (c.venue) conditions.push(sql`ev.is_lan = ${c.venue === "lan"}`);
+  if (c.stage) {
+    const kept = STAGE_VALUES[c.stage].map((v) => sql`${v}`);
+    conditions.push(sql`s.stage IN (${sql.join(kept, sql`, `)})`);
+  }
   if (c.maps.length > 0) {
     conditions.push(sql`${MAP_SLUG} IN (${sql.join(c.maps.map((m) => sql`${m}`), sql`, `)})`);
   }

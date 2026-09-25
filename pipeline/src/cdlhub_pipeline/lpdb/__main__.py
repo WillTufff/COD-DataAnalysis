@@ -56,6 +56,11 @@ def run_load(dsn: str) -> None:
         f"{len(report['roster_unresolved'])} unresolved, "
         f"{len(report['roster_slots_held_elsewhere'])} already held by another source)"
     )
+    staged = report["stage"]
+    print(
+        f"series stage: {staged['series']} ({staged['changed']} changed; "
+        f"league entries absent: {len(staged['listed_but_absent'])})"
+    )
     fix = report.get("series_fix")
     if fix:
         print(

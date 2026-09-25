@@ -1180,7 +1180,7 @@ def aggregation_payloads(conn: psycopg.Connection[Any]) -> tuple[dict[str, Any],
 
 CONTENT_COVERAGE_SQL = """
 WITH m AS (
-    SELECT DISTINCT g.id, e.tier, e.is_lan, s.round_label, se.year
+    SELECT DISTINCT g.id, e.tier, e.is_lan, s.stage, se.year
     FROM game_player_stats gps
     JOIN games g    ON g.id = gps.game_id
     JOIN series s   ON s.id = g.series_id
@@ -1195,14 +1195,27 @@ SELECT CASE WHEN year <= 2016 THEN '2013-2016'
        count(*) FILTER (WHERE tier = '2'),
        count(*) FILTER (WHERE is_lan),
        count(*) FILTER (WHERE NOT is_lan),
-       count(*) FILTER (WHERE NULLIF(btrim(round_label), '') IS NOT NULL)
+       count(*) FILTER (WHERE stage = 'league'),
+       count(*) FILTER (WHERE stage = 'group'),
+       count(*) FILTER (WHERE stage = 'bracket'),
+       count(*) FILTER (WHERE stage = 'final')
 FROM m GROUP BY 1
 """
 
 
 def content_coverage(conn: psycopg.Connection[Any]) -> dict[str, dict[str, int]]:
     """Per era, the maps with box scores and what each content filter reads."""
-    fields = ("maps", "tier_1", "tier_2", "lan", "online", "round")
+    fields = (
+        "maps",
+        "tier_1",
+        "tier_2",
+        "lan",
+        "online",
+        "league",
+        "group",
+        "bracket",
+        "final",
+    )
     return {
         str(row[0]): dict(zip(fields, (int(v) for v in row[1:]), strict=True))
         for row in conn.execute(CONTENT_COVERAGE_SQL).fetchall()
@@ -1211,7 +1224,7 @@ def content_coverage(conn: psycopg.Connection[Any]) -> dict[str, dict[str, int]]
 
 def content_coverage_failures(measured: dict[str, dict[str, int]]) -> list[str]:
     """The methodology page prints, per era, how many maps each stats-page
-    content filter can reach and how thin the held-back one is. A reload
+    content filter can reach. A reload
     moves every one of those counts, so each is held against the database."""
     pinned = evalspec.PUBLISHED_FIGURES.get("content_filter_coverage") or {}
     bad: list[str] = []

@@ -610,9 +610,9 @@ PUBLISHED_FIGURES: dict[str, Any] = {
     # page began re-aggregating a mix of modes or a span of seasons from maps.
     "aggregation_parity": {"player_summed": 91, "team_summed": 4, "cells": 129083},
     # What the stats page's content filters can reach, per era: maps with box
-    # scores, how many sit at each event tier, on LAN and online, and how many
-    # carry a round label, the one filter held back for thin coverage. Pinned
-    # 2026-09-24 with the tier, map, date and venue filters.
+    # scores, how many sit at each event tier, on LAN and online, and at each
+    # series stage. Pinned 2026-09-24 with the tier, map, date and venue
+    # filters; the stage counts replaced the round-label count 2026-09-25.
     "content_filter_coverage": {
         "2013-2016": {
             "maps": 5079,
@@ -620,7 +620,10 @@ PUBLISHED_FIGURES: dict[str, Any] = {
             "tier_2": 176,
             "lan": 3055,
             "online": 2024,
-            "round": 0,
+            "league": 2001,
+            "group": 936,
+            "bracket": 1913,
+            "final": 216,
         },
         "2017-2019": {
             "maps": 6870,
@@ -628,7 +631,10 @@ PUBLISHED_FIGURES: dict[str, Any] = {
             "tier_2": 3270,
             "lan": 6870,
             "online": 0,
-            "round": 5091,
+            "league": 1940,
+            "group": 2602,
+            "bracket": 2156,
+            "final": 166,
         },
         "2020-2026": {
             "maps": 6540,
@@ -636,7 +642,10 @@ PUBLISHED_FIGURES: dict[str, Any] = {
             "tier_2": 13,
             "lan": 2074,
             "online": 4393,
-            "round": 6540,
+            "league": 4077,
+            "group": 110,
+            "bracket": 2111,
+            "final": 222,
         },
     },
     "forecast_brier": {

@@ -16,58 +16,46 @@ from cdlhub_analytics.ratings import opponent as op
 
 
 @pytest.mark.parametrize(
-    ("label", "expected"),
+    ("stage", "expected"),
     [
-        # Call of Duty League prose.
-        ("Major Qualifier", ctx.STAKES_REGULAR),
-        ("Week 3", ctx.STAKES_REGULAR),
-        ("Group Play A Winners Round 1", ctx.STAKES_GROUP),
-        ("Group Stage", ctx.STAKES_GROUP),
-        ("Winners Round 2", ctx.STAKES_BRACKET),
-        ("Elimination Finals", ctx.STAKES_BRACKET),
-        ("Grand Finals", ctx.STAKES_GRAND_FINAL),
-        # Short codes.
-        ("GF", ctx.STAKES_GRAND_FINAL),
-        ("QF", ctx.STAKES_BRACKET),
-        ("LR1", ctx.STAKES_BRACKET),
-        # CWL archive slugs.
-        ("champs-grand-finals-0", ctx.STAKES_GRAND_FINAL),
-        ("champs-winners-1-2", ctx.STAKES_BRACKET),
-        ("champs-losers-3-1", ctx.STAKES_BRACKET),
-        ("pool-B-4", ctx.STAKES_GROUP),
-        ("champs-pool-A-0", ctx.STAKES_GROUP),
-        ("pro1-a1-7", ctx.STAKES_REGULAR),
-        ("pro-w10-3", ctx.STAKES_REGULAR),
+        ("league", ctx.STAKES_REGULAR),
+        ("group", ctx.STAKES_GROUP),
+        ("bracket", ctx.STAKES_BRACKET),
+        ("final", ctx.STAKES_GRAND_FINAL),
     ],
 )
-def test_every_vocabulary_reaches_a_class(label: str, expected: str) -> None:
-    assert ctx.classify_stakes(label) == expected
+def test_every_stage_reaches_a_class(stage: str, expected: str) -> None:
+    assert ctx.stakes_of(stage) == expected
 
 
-def test_an_unknown_label_keeps_its_own_class() -> None:
-    """A label that says it does not know is not evidence for the largest bucket."""
-    assert ctx.classify_stakes("Unknown Round") == ctx.STAKES_UNCLASSIFIED
-    assert ctx.classify_stakes(None) == ctx.STAKES_UNCLASSIFIED
+def test_an_unknown_stage_keeps_its_own_class() -> None:
+    """A series with no stage is not evidence for the largest bucket."""
+    assert ctx.stakes_of(None) == ctx.STAKES_UNCLASSIFIED
+    assert ctx.stakes_of("playoffs") == ctx.STAKES_UNCLASSIFIED
 
 
 @pytest.mark.parametrize(
-    ("label", "facing"),
+    ("label", "stakes", "facing"),
     [
-        ("Elimination Round 2", True),
-        ("champs-losers-2-1", True),
-        ("plq-bracket-lr1-2", True),
-        ("Group Play A Lower Round 1", True),
-        ("Winners Round 1", False),
-        ("champs-winners-1-2", False),
-        ("Major Qualifier", False),
+        ("Elimination Round 2", ctx.STAKES_BRACKET, True),
+        ("champs-losers-2-1", ctx.STAKES_BRACKET, True),
+        ("plq-bracket-lr1-2", ctx.STAKES_BRACKET, True),
+        ("Group Play A Lower Round 1", ctx.STAKES_GROUP, True),
+        ("LR7", ctx.STAKES_BRACKET, True),
+        ("OLR8", ctx.STAKES_BRACKET, True),
+        ("LF", ctx.STAKES_BRACKET, True),
+        ("Winners Round 1", ctx.STAKES_BRACKET, False),
+        ("champs-winners-1-2", ctx.STAKES_BRACKET, False),
+        ("OWR4", ctx.STAKES_BRACKET, False),
+        ("Major Qualifier", ctx.STAKES_REGULAR, False),
         # Only the lower-bracket side faces elimination in a grand final, and a
         # series-level flag cannot say which side that is.
-        ("Grand Finals", False),
-        ("champs-grand-finals-0", False),
+        ("Grand Finals", ctx.STAKES_GRAND_FINAL, False),
+        ("champs-grand-finals-0", ctx.STAKES_GRAND_FINAL, False),
     ],
 )
-def test_elimination_facing(label: str, facing: bool) -> None:
-    assert ctx.elimination_facing(label) is facing
+def test_elimination_facing(label: str, stakes: str, facing: bool) -> None:
+    assert ctx.elimination_facing(label, stakes) is facing
 
 
 # ------------------------------------------------------- the curated host map

@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import psycopg
 
+from .. import stage
 from ..identity import Aliases
 from .transform import SEASON_LEAGUES, SOURCE, Series, TransformResult
 
@@ -135,13 +136,24 @@ class CodWikiLoader:
         series_id = self._one(
             """
             INSERT INTO series (event_id, team1_id, team2_id, team1_score, team2_score,
-                                played_at, source_uid, data_source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                played_at, round_label, source_uid, data_source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (source_uid) DO UPDATE SET
-              team1_score = EXCLUDED.team1_score, team2_score = EXCLUDED.team2_score
+              team1_score = EXCLUDED.team1_score, team2_score = EXCLUDED.team2_score,
+              round_label = EXCLUDED.round_label
             RETURNING id
             """,
-            (event_id, t1, t2, s.team1_score, s.team2_score, s.played_on, source_uid, SOURCE),
+            (
+                event_id,
+                t1,
+                t2,
+                s.team1_score,
+                s.team2_score,
+                s.played_on,
+                s.round_label,
+                source_uid,
+                SOURCE,
+            ),
         )
         self.counts["series"] += 1
 
@@ -214,6 +226,7 @@ def load(
     for series in result.series:
         loader.load_series(series)
     return {
+        "stage": stage.apply(conn),
         "counts": dict(loader.counts),
         "collisions": loader.collisions,
         "dropped": result.dropped,

@@ -83,60 +83,40 @@ STAKES_LEVELS: tuple[str, ...] = (
     STAKES_UNCLASSIFIED,
 )
 
-# `series.round_label` carries three vocabularies over 742 distinct values: CWL
-# archive slugs (`champs-winners-1-2`, `pool-B-4`, `pro1-a1-7`), Call of Duty
-# League prose (`Winners Round 1`, `Major Qualifier`) and short codes (`GF`,
-# `QF`, `LR1`). All three are matched here rather than one being treated as the
-# format and the others as exceptions.
-_SLUG_GRAND_FINAL = re.compile(r"^(champs?|pro\d?)-.*grand-finals-\d+$")
-_SLUG_BRACKET = re.compile(
-    r"^(champs?|pro\d?|rel|plq|playin)\b.*-(winners|losers|bracket|lr\d|wr\d|\d)"
-)
-_SLUG_POOL = re.compile(r"^(champs-)?pool-[a-z](-tie)?-\d+$")
-_SLUG_LEAGUE = re.compile(r"^pro\d?-([ab]\d|w\d+)-\d+$")
-
-_PROSE_GRAND_FINAL = frozenset({"grand finals", "gf", "finals", "lf"})
-_PROSE_GROUP = frozenset({"group stage", "play-in"})
-_CODE_BRACKET = frozenset({"wr1", "wr2", "wr3", "lr1", "lr2", "r1", "r2", "qf", "sf", "wf", "tb"})
+# `series.stage` is derived by the pipeline (cdlhub_pipeline/stage.py) from the
+# round label and a curated list of league events, so league play reads as the
+# base level in every era, including the 2020 home series and the 2017 Global
+# Pro League whose labels read as tournaments. A NULL stage stays unclassified.
+_STAGE_STAKES: dict[str, str] = {
+    "league": STAKES_REGULAR,
+    "group": STAKES_GROUP,
+    "bracket": STAKES_BRACKET,
+    "final": STAKES_GRAND_FINAL,
+}
 
 
-def classify_stakes(label: str | None) -> str:
-    """One of STAKES_LEVELS for a round label, in any of the three vocabularies."""
-    low = (label or "").strip().lower()
-    if not low:
-        return STAKES_UNCLASSIFIED
-    if low in _PROSE_GRAND_FINAL or _SLUG_GRAND_FINAL.match(low):
-        return STAKES_GRAND_FINAL
-    if low.startswith(("major qualifier", "week ", "day ")) or _SLUG_LEAGUE.match(low):
-        return STAKES_REGULAR
-    if _SLUG_POOL.match(low) or low.startswith(("group play", "group ")) or low in _PROSE_GROUP:
-        return STAKES_GROUP
-    if _SLUG_BRACKET.match(low):
-        return STAKES_BRACKET
-    if (
-        low.startswith(("winners ", "elimination ", "round "))
-        or low in _CODE_BRACKET
-        or low == "semifinals"
-    ):
-        return STAKES_BRACKET
-    return STAKES_UNCLASSIFIED
+def stakes_of(stage: str | None) -> str:
+    """One of STAKES_LEVELS for a `series.stage` value."""
+    return _STAGE_STAKES.get(stage or "", STAKES_UNCLASSIFIED)
 
 
 _ELIM_SLUG = re.compile(r"-(losers|lr\d)")
 _ELIM_PROSE = ("elimination ", "lower ")
-_ELIM_CODES = frozenset({"lr1", "lr2", "r1", "r2", "qf", "sf", "round 1", "round 2", "semifinals"})
+_ELIM_CODES = frozenset({"lf", "r1", "r2", "qf", "sf", "round 1", "round 2", "semifinals"})
+# LR1-LR11 and the open bracket's OLR5-OLR10.
+_ELIM_CODE = re.compile(r"^o?lr\d+$")
 
 
-def elimination_facing(label: str | None) -> bool:
+def elimination_facing(label: str | None, stakes: str) -> bool:
     """Both sides can be knocked out by losing this series.
 
     The grand final is excluded: only the lower-bracket side faces elimination
     there, and a series-level flag would be wrong for one of the two teams.
     """
-    low = (label or "").strip().lower()
-    if classify_stakes(low) == STAKES_GRAND_FINAL:
+    if stakes == STAKES_GRAND_FINAL:
         return False
-    if _ELIM_SLUG.search(low) or low in _ELIM_CODES:
+    low = (label or "").strip().lower()
+    if _ELIM_SLUG.search(low) or low in _ELIM_CODES or _ELIM_CODE.match(low):
         return True
     return any(marker in low for marker in _ELIM_PROSE)
 
@@ -186,7 +166,7 @@ class MapContext:
 CONTEXT_SQL = """
 SELECT s.source_uid || '#' || g.ordinal::text AS map_key,
        e.is_lan, s.round_label, m.name AS map_name, e.prize_pool,
-       se.year, e.name AS event_name
+       se.year, e.name AS event_name, s.stage
 FROM games g
 JOIN series s   ON s.id = g.series_id
 JOIN events e   ON e.id = s.event_id
@@ -214,10 +194,11 @@ def load_context(conn: Any) -> dict[str, MapContext]:
         prize = row[4]
         entry = markets.get(cast("int | None", row[5]), cast(str, row[6])) or {}
         hosts = frozenset(team_ids[name] for name in entry.get("teams", []) if name in team_ids)
+        stakes = stakes_of(cast("str | None", row[7]))
         out[map_key] = MapContext(
             is_lan=is_lan,
-            stakes=classify_stakes(cast("str | None", row[2])),
-            elimination=elimination_facing(cast("str | None", row[2])),
+            stakes=stakes,
+            elimination=elimination_facing(cast("str | None", row[2]), stakes),
             map_name=cast("str | None", row[3]),
             log_prize=math.log1p(float(prize)) if prize is not None else None,
             # A host market only means anything where the match was played at

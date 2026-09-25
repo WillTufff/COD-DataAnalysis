@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   NO_CONTENT,
+  STAGES,
+  STAGE_VALUES,
   contentParts,
   contentSlug,
   dateRangeLabel,
@@ -20,6 +22,22 @@ describe("parseContent", () => {
     expect(parseContent({ venue: "online" }).venue).toBe("online");
     expect(parseContent({ venue: "offline" }).venue).toBeNull();
     expect(hasContent(parseContent({ venue: "online" }))).toBe(true);
+  });
+
+  it("keeps each stage and drops anything else", () => {
+    for (const stage of ["league", "event", "group", "bracket", "final"]) {
+      expect(parseContent({ stage }).stage).toBe(stage);
+    }
+    expect(parseContent({ stage: "playoffs" }).stage).toBeNull();
+    expect(hasContent(parseContent({ stage: "league" }))).toBe(true);
+  });
+
+  it("keeps only values series.stage can hold", () => {
+    // The CHECK constraint in db/migrations/0041_series_stage.sql.
+    const column = new Set(["league", "group", "bracket", "final"]);
+    for (const stage of STAGES) {
+      for (const v of STAGE_VALUES[stage]) expect(column.has(v)).toBe(true);
+    }
   });
 
   it("keeps tier 1 and 2 and drops anything else", () => {
@@ -50,6 +68,7 @@ describe("labels", () => {
     const c = {
       tier: "1" as const,
       venue: "lan" as const,
+      stage: "bracket" as const,
       maps: ["raid"],
       from: "2024-01-05",
       to: null,
@@ -57,6 +76,7 @@ describe("labels", () => {
     expect(contentParts(c, new Map([["raid", "Raid"]]))).toEqual([
       "tier 1 events",
       "lan only",
+      "brackets",
       "Raid",
       "from 2024-01-05",
     ]);
@@ -70,11 +90,12 @@ describe("labels", () => {
       contentSlug({
         tier: "2",
         venue: "online",
+        stage: "league",
         maps: ["a", "b", "c", "d"],
         from: null,
         to: "2019-08-18",
       }),
-    ).toBe("-tier2-online-4-maps-start-to-2019-08-18");
+    ).toBe("-tier2-online-league-4-maps-start-to-2019-08-18");
   });
 });
 
