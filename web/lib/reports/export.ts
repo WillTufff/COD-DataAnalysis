@@ -5,7 +5,7 @@
 
 import { type ReportColumn, type ReportRow } from "@/lib/analytics";
 import { type ResolvedReport } from "./resolve";
-import { type ReportView } from "./rows";
+import { type ReportView, serializeWhere } from "./rows";
 
 // A hard ceiling so a pathological request can't stream an unbounded file. The
 // matrix records when it bit, so a truncated export is never silent.
@@ -38,7 +38,9 @@ export type ExportMeta = {
   sort: string;
   dir: "asc" | "desc";
   view: ReportView;
-  qualifiedOnly: boolean;
+  minMaps: number;
+  where: string | null; // the `?where=` value
+  top: number | null;
   detail: boolean;
   rowCount: number;
   truncated: boolean;
@@ -131,7 +133,9 @@ export function buildExportMatrix(
       sort: resolved.sort,
       dir: resolved.dir,
       view: resolved.view,
-      qualifiedOnly: resolved.qualifiedOnly,
+      minMaps: resolved.minMaps,
+      where: serializeWhere(resolved.where),
+      top: resolved.top,
       detail,
       rowCount: matrixRows.length,
       truncated,

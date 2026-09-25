@@ -13,11 +13,6 @@ import type { SeasonEra } from "@/lib/eras";
 import type { ModeCatalog } from "@/lib/modes";
 import { playerSlug, teamSlug } from "@/lib/slug";
 import {
-  type ReportView,
-  gateReportRows,
-  sortReportRows,
-} from "@/lib/reports/rows";
-import {
   backtests,
   eventPlacements,
   events,
@@ -2040,6 +2035,8 @@ export type ReportColumn = {
   higherIsBetter: boolean;
   denomKind: string;
   minDenom: number;
+  formula: string;
+  note: string | null;
 };
 
 /** One player in the cohort, with a sparse map of metric → cell. */
@@ -2050,28 +2047,38 @@ export type ReportRow = {
   year: number;
   title: string;
   mode: string | null;
+  /** Maps played in this season and mode, whichever columns are on screen. */
+  maps: number | null;
   cells: Record<string, ReportCell>;
 };
 
 export type ReportQuery = {
   metrics: string[]; // ordered column keys
+  mapsMetrics: string[]; // maps-denominated keys, whose denom is maps played
   years?: number[]; // empty/undefined = all covered seasons
   modeSlug?: string; // undefined = all-modes rows (mode_id IS NULL)
   players?: string[]; // player slugs; empty/undefined = everyone
   teams?: string[]; // team slugs; empty/undefined = every team
-  qualifiedOnly: boolean; // gate rows on the SORT metric's qualified flag
-  sort: string; // a metric key, or "player"
-  dir: "asc" | "desc";
-  view?: ReportView; // which cell field the sort reads; default the value
 };
+
+function reportColumn(m: MetricCatalogEntry): ReportColumn {
+  return {
+    key: m.key,
+    label: m.label,
+    unit: m.unit,
+    higherIsBetter: m.higher_is_better,
+    denomKind: m.denom_kind,
+    minDenom: m.min_denom,
+    formula: m.formula,
+    note: m.note ?? null,
+  };
+}
 
 /**
  * The wide report for a cohort: one query over all selected metrics, pivoted
- * in JS by `(playerId, year, mode)`, then sorted on the chosen column. Cells
- * are sparse; a player missing the sort metric sorts to the bottom in either
- * direction (an absent value is never "best" or "worst", just absent). Rows are
- * returned whole and unpaged — the client table pages and re-sorts them, like
- * the single-metric path's `FETCH_ALL`.
+ * in JS by `(playerId, year, mode)`. Cells are sparse. Rows come back whole,
+ * unsorted and without result filters: `applyResultFilters` does both, on the
+ * server for the export and on the client for the table.
  *
  * `catalog` is passed in rather than re-fetched: the caller already resolved it
  * to validate the requested keys, and it carries the column metadata (unit,
@@ -2088,14 +2095,7 @@ export async function queryReport(
   const columns: ReportColumn[] = q.metrics
     .map((k) => byKey.get(k))
     .filter((m): m is MetricCatalogEntry => m !== undefined)
-    .map((m) => ({
-      key: m.key,
-      label: m.label,
-      unit: m.unit,
-      higherIsBetter: m.higher_is_better,
-      denomKind: m.denom_kind,
-      minDenom: m.min_denom,
-    }));
+    .map(reportColumn);
   const keys = columns.map((c) => c.key);
   if (keys.length === 0) return { columns, rows: [] };
 
@@ -2142,6 +2142,7 @@ export async function queryReport(
         year: r.year,
         title: r.title,
         mode: r.mode,
+        maps: null,
         cells: {},
       };
       rowsById.set(id, row);
@@ -2153,6 +2154,33 @@ export async function queryReport(
       pctl: r.pctl,
       qualified: r.qualified,
     };
+  }
+
+  // Maps played: the largest denominator among the maps-denominated metrics,
+  // so min maps reads the same count whichever columns are on screen.
+  if (q.mapsMetrics.length > 0) {
+    const maps = await db
+      .select({
+        playerId: playerMetricSeason.playerId,
+        year: seasons.year,
+        mode: gameModes.slug,
+        maps: sql<number>`MAX(${playerMetricSeason.denom})`,
+      })
+      .from(playerMetricSeason)
+      .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+      .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+      .where(
+        and(
+          eq(playerMetricSeason.runId, metricRunId),
+          inArray(playerMetricSeason.metric, q.mapsMetrics),
+          ...cohortConditions(q),
+        ),
+      )
+      .groupBy(playerMetricSeason.playerId, seasons.year, gameModes.slug);
+    for (const m of maps) {
+      const row = rowsById.get(`${m.playerId}-${m.year}-${m.mode ?? "all"}`);
+      if (row) row.maps = Number(m.maps);
+    }
   }
   let rows = [...rowsById.values()];
 
@@ -2172,24 +2200,7 @@ export async function queryReport(
     rows = rows.filter((row) => members.has(`${row.playerId}-${row.year}`));
   }
 
-  return { columns, rows: gateAndSortReportRows(rows, q, keys, !!picked || teamPicked) };
-}
-
-/**
- * The report's shared tail, after the pivot and any row filters: the
- * qualified gate on the sort column, then the sort itself. An explicit row
- * filter (`filtered`) suspends the gate — asking for Scump, or for OpTic,
- * means seeing those rows (cells still grey themselves), not a table missing
- * whoever fell short of one column's sample floor.
- */
-function gateAndSortReportRows(
-  rows: ReportRow[],
-  q: ReportQuery,
-  keys: string[],
-  filtered: boolean,
-): ReportRow[] {
-  const gated = gateReportRows(rows, q.sort, keys, q.qualifiedOnly && !filtered);
-  return sortReportRows(gated, q.sort, q.dir, q.view ?? "value", keys);
+  return { columns, rows };
 }
 
 /**
@@ -2209,14 +2220,7 @@ export async function queryTeamReport(
   const columns: ReportColumn[] = q.metrics
     .map((k) => byKey.get(k))
     .filter((m): m is MetricCatalogEntry => m !== undefined)
-    .map((m) => ({
-      key: m.key,
-      label: m.label,
-      unit: m.unit,
-      higherIsBetter: m.higher_is_better,
-      denomKind: m.denom_kind,
-      minDenom: m.min_denom,
-    }));
+    .map(reportColumn);
   const keys = columns.map((c) => c.key);
   if (keys.length === 0) return { columns, rows: [] };
 
@@ -2259,6 +2263,7 @@ export async function queryTeamReport(
         year: r.year,
         title: r.title,
         mode: r.mode,
+        maps: null,
         cells: {},
       };
       rowsById.set(id, row);
@@ -2271,6 +2276,31 @@ export async function queryTeamReport(
       qualified: r.qualified,
     };
   }
+
+  if (q.mapsMetrics.length > 0) {
+    const maps = await db
+      .select({
+        teamId: teamMetricSeason.teamId,
+        year: seasons.year,
+        mode: gameModes.slug,
+        maps: sql<number>`MAX(${teamMetricSeason.denom})`,
+      })
+      .from(teamMetricSeason)
+      .innerJoin(seasons, eq(seasons.id, teamMetricSeason.seasonId))
+      .leftJoin(gameModes, eq(gameModes.id, teamMetricSeason.modeId))
+      .where(
+        and(
+          eq(teamMetricSeason.runId, metricRunId),
+          inArray(teamMetricSeason.metric, q.mapsMetrics),
+          ...teamCohortConditions(q),
+        ),
+      )
+      .groupBy(teamMetricSeason.teamId, seasons.year, gameModes.slug);
+    for (const m of maps) {
+      const row = rowsById.get(`${m.teamId}-${m.year}-${m.mode ?? "all"}`);
+      if (row) row.maps = Number(m.maps);
+    }
+  }
   let rows = [...rowsById.values()];
 
   const picked = q.teams && q.teams.length > 0 ? new Set(q.teams) : null;
@@ -2278,7 +2308,7 @@ export async function queryTeamReport(
     rows = rows.filter((row) => picked.has(row.slug));
   }
 
-  return { columns, rows: gateAndSortReportRows(rows, q, keys, !!picked) };
+  return { columns, rows };
 }
 
 /** `cohortConditions`, for the team metric table. */
@@ -2319,6 +2349,91 @@ export async function getReportPlayers(
   return rows
     .map((r) => ({ handle: r.handle, slug: playerSlug(r.handle) }))
     .sort((a, b) => a.handle.localeCompare(b.handle));
+}
+
+/** Where a player in view played: a team and the seasons they played for it. */
+export type ScopeStint = { team: string; years: number[] };
+
+/** A player the report's search offers, with the rosters that place them. */
+export type ScopeViewPlayer = ScopePlayer & { stints: ScopeStint[] };
+
+/**
+ * The players with a row in the seasons and mode on screen, each with the
+ * teams they played for in those seasons, latest first. This is the search
+ * list: a player outside the view has no row to find. Team membership is the
+ * same ground truth as the team filter, a stat line for that team that season.
+ */
+export async function getReportViewPlayers(
+  metricRunId: number,
+  q: { years?: number[]; modeSlug?: string },
+): Promise<ScopeViewPlayer[]> {
+  const inView = await db
+    .selectDistinct({
+      playerId: playerMetricSeason.playerId,
+      handle: players.handle,
+      year: seasons.year,
+    })
+    .from(playerMetricSeason)
+    .innerJoin(players, eq(players.id, playerMetricSeason.playerId))
+    .innerJoin(seasons, eq(seasons.id, playerMetricSeason.seasonId))
+    .leftJoin(gameModes, eq(gameModes.id, playerMetricSeason.modeId))
+    .where(
+      and(eq(playerMetricSeason.runId, metricRunId), ...cohortConditions(q)),
+    );
+  if (inView.length === 0) return [];
+
+  const ids = [...new Set(inView.map((r) => r.playerId))];
+  const years = [...new Set(inView.map((r) => r.year))];
+  const played = await db
+    .select({
+      playerId: gamePlayerStats.playerId,
+      year: seasons.year,
+      team: teams.name,
+    })
+    .from(gamePlayerStats)
+    .innerJoin(games, eq(games.id, gamePlayerStats.gameId))
+    .innerJoin(series, eq(series.id, games.seriesId))
+    .innerJoin(events, eq(events.id, series.eventId))
+    .innerJoin(seasons, eq(seasons.id, events.seasonId))
+    .innerJoin(teams, eq(teams.id, gamePlayerStats.teamId))
+    .where(
+      and(
+        inArray(gamePlayerStats.playerId, ids),
+        inArray(seasons.year, years),
+      ),
+    )
+    .groupBy(gamePlayerStats.playerId, seasons.year, teams.name);
+
+  const rowYears = new Set(inView.map((r) => `${r.playerId}-${r.year}`));
+  const stintsById = new Map<number, Map<string, number[]>>();
+  for (const p of played) {
+    if (!rowYears.has(`${p.playerId}-${p.year}`)) continue;
+    let byTeam = stintsById.get(p.playerId);
+    if (!byTeam) stintsById.set(p.playerId, (byTeam = new Map()));
+    const ys = byTeam.get(p.team) ?? [];
+    ys.push(p.year);
+    byTeam.set(p.team, ys);
+  }
+
+  // One entry per slug, as the URL knows players; two handles folding to one
+  // slug share an entry.
+  const bySlug = new Map<string, ScopeViewPlayer>();
+  for (const r of inView) {
+    const slug = playerSlug(r.handle);
+    let entry = bySlug.get(slug);
+    if (!entry) bySlug.set(slug, (entry = { handle: r.handle, slug, stints: [] }));
+    for (const [team, ys] of stintsById.get(r.playerId) ?? []) {
+      const have = entry.stints.find((st) => st.team === team);
+      if (have) have.years = [...new Set([...have.years, ...ys])];
+      else entry.stints.push({ team, years: [...new Set(ys)] });
+    }
+  }
+  const latest = (st: ScopeStint) => Math.max(...st.years);
+  for (const e of bySlug.values()) {
+    for (const st of e.stints) st.years.sort((a, b) => a - b);
+    e.stints.sort((a, b) => latest(b) - latest(a) || a.team.localeCompare(b.team));
+  }
+  return [...bySlug.values()].sort((a, b) => a.handle.localeCompare(b.handle));
 }
 
 /** A team the report's picker can offer. */

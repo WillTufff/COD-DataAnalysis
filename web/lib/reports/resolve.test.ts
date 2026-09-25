@@ -196,30 +196,56 @@ describe("resolveReport", () => {
   });
 });
 
-describe("resolveReport gate and view", () => {
-  it("gates unless small samples are on or a row filter is set", async () => {
-    expect((await resolveReport(1, { metrics: "kd" }, CATALOG)).gateActive).toBe(true);
-    expect((await resolveReport(1, { metrics: "kd", all: "1" }, CATALOG)).gateActive).toBe(false);
-    expect((await resolveReport(1, { metrics: "kd", players: "scump" }, CATALOG)).gateActive).toBe(false);
-    expect((await resolveReport(1, { metrics: "kd", teams: "optic" }, CATALOG)).gateActive).toBe(false);
+describe("resolveReport result filters and view", () => {
+  it("defaults min maps to the catalog's maps floor, and to any on a pick", async () => {
+    const bare = await resolveReport(1, { metrics: "kd" }, CATALOG);
+    expect(bare.mapsFloor).toBe(8);
+    expect(bare.minMaps).toBe(8);
+    expect((await resolveReport(1, { metrics: "kd", all: "1" }, CATALOG)).minMaps).toBe(0);
+    expect((await resolveReport(1, { metrics: "kd", players: "scump" }, CATALOG)).minMaps).toBe(0);
+    expect((await resolveReport(1, { metrics: "kd", teams: "optic" }, CATALOG)).minMaps).toBe(0);
+    expect(
+      (await resolveReport(1, { metrics: "kd", teams: "optic", minmaps: "20" }, CATALOG)).minMaps,
+    ).toBe(20);
   });
 
-  it("ignores a player filter on a team report when deciding the gate", async () => {
+  it("does not depend on the sort column", async () => {
+    const a = await resolveReport(1, { metrics: "kd,kills_p10", sort: "kd" }, CATALOG);
+    const b = await resolveReport(1, { metrics: "kd,kills_p10", sort: "player" }, CATALOG);
+    expect(a.filters).toEqual(b.filters);
+  });
+
+  it("ignores a player filter on a team report when defaulting min maps", async () => {
     const teamCatalog = [entry("map_win_rate")];
     const r = await resolveReport(
       1,
       { entity: "teams", metrics: "map_win_rate", players: "scump" },
       teamCatalog,
     );
-    expect(r.gateActive).toBe(true);
+    expect(r.minMaps).toBe(8);
   });
 
-  it("carries the view into the query the export sorts by", async () => {
-    const r = await resolveReport(1, { metrics: "kd", view: "pctl" }, CATALOG);
-    expect(r.view).toBe("pctl");
-    expect(r.query.view).toBe("pctl");
+  it("carries the maps-denominated keys into the query", async () => {
+    const mixed = [entry("kd"), { ...entry("snd_fb"), denom_kind: "rounds", min_denom: 50 }];
+    const r = await resolveReport(1, { metrics: "kd,snd_fb" }, mixed);
+    expect(r.query.mapsMetrics).toEqual(["kd"]);
+    expect(r.mapsFloor).toBe(8);
+  });
+
+  it("keeps thresholds only on columns on screen, and reads top", async () => {
+    const r = await resolveReport(
+      1,
+      { metrics: "kd", where: "kd:value:gte:1.1,gone:value:gte:1", top: "10" },
+      CATALOG,
+    );
+    expect(r.where).toEqual([{ metric: "kd", field: "value", op: "gte", n: 1.1 }]);
+    expect(r.filters.top).toBe(10);
+  });
+
+  it("resolves the view the export sorts by", async () => {
+    expect((await resolveReport(1, { metrics: "kd", view: "z" }, CATALOG)).view).toBe("z");
     expect((await resolveReport(1, { metrics: "kd", view: "bogus" }, CATALOG)).view).toBe("pctl");
-    expect((await resolveReport(1, { metrics: "kd", view: "value" }, CATALOG)).query.view).toBe("value");
+    expect((await resolveReport(1, { metrics: "kd", view: "value" }, CATALOG)).view).toBe("value");
   });
 });
 

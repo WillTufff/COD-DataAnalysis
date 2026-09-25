@@ -130,7 +130,7 @@ export function AddColumnMenu({
         <div
           ref={menuRef}
           style={anchor}
-          className="fixed z-30 w-72 max-w-[calc(100vw-1rem)] border border-hairline bg-surface shadow-lg"
+          className="fixed z-30 flex w-72 max-w-[calc(100vw-1rem)] flex-col border border-hairline bg-surface shadow-lg"
         >
           <input
             autoFocus
@@ -147,7 +147,7 @@ export function AddColumnMenu({
             }}
             className="w-full border-b border-hairline bg-background px-2.5 py-2 text-xs text-ink outline-none"
           />
-          <div className="max-h-72 overflow-y-auto py-1">
+          <div className="max-h-72 min-h-0 flex-1 overflow-y-auto py-1">
             {matches.length === 0 && (
               <p className="px-2.5 py-2 text-xs text-ink-muted">
                 No metric matches “{query.trim()}”.

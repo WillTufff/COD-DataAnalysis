@@ -12,22 +12,15 @@ import type { ReportEntity } from "@/lib/reports/resolve";
 import {
   DEFAULT_VIEW,
   type ReportView,
-  gateReportRows,
+  type ResultFilters,
+  applyResultFilters,
   sortReading,
 } from "@/lib/reports/rows";
 import { AddColumnMenu, type MetricOption } from "./AddColumnMenu";
-import { ColumnMenu } from "./ColumnMenu";
+import { ColumnMenu, definitionLine } from "./ColumnMenu";
+import { formatValue, formatZ } from "./format";
 import { ReportToolbar } from "./ReportToolbar";
 import { useReportUrl } from "./reportUrl";
-
-// Mirrors the single-metric table's formatting: shares render as percentages,
-// everything else scales its precision to its magnitude.
-function formatValue(v: number, unit: string): string {
-  if (unit.startsWith("share")) return `${(v * 100).toFixed(1)}%`;
-  if (Math.abs(v) >= 100) return v.toFixed(0);
-  if (Math.abs(v) >= 10) return v.toFixed(2);
-  return v.toFixed(3);
-}
 
 /** One metric cell, honouring the display mode and greying below-minimum samples. */
 function Cell({
@@ -46,8 +39,7 @@ function Cell({
   if (view === "pctl") {
     body = cell.pctl !== null ? <PctlBar pctl={cell.pctl} /> : "—";
   } else if (view === "z") {
-    body =
-      cell.z !== null ? `${cell.z >= 0 ? "+" : ""}${cell.z.toFixed(2)}σ` : "—";
+    body = cell.z !== null ? formatZ(cell.z) : "—";
   } else {
     body = formatValue(cell.value, col.unit);
   }
@@ -89,7 +81,7 @@ export function ReportTable({
   columns,
   rows,
   catalog,
-  gateActive,
+  filters,
   initialView,
   initialPer,
   initialPage,
@@ -100,7 +92,7 @@ export function ReportTable({
   columns: ReportColumn[];
   rows: ReportRow[];
   catalog: MetricOption[];
-  gateActive: boolean;
+  filters: ResultFilters;
   initialView: ReportView;
   initialPer: Per;
   initialPage: number;
@@ -128,8 +120,9 @@ export function ReportTable({
   );
 
   // The sort the table is showing. A header click re-sorts on the client, and
-  // the qualified gate follows it here, so the rows on screen are the rows the
-  // same URL gives on a reload or an export. A new server sort (after a column
+  // the result filters are re-applied under it here (top N follows the sort),
+  // so the rows on screen are the rows the same URL gives on a reload or an
+  // export. A new server sort (after a column
   // edit) replaces a client one.
   const serverSortKey = initialSort ? `${initialSort.id}:${initialSort.dir}` : "";
   const [clientSort, setClientSort] = useState<{
@@ -158,8 +151,16 @@ export function ReportTable({
 
   const selected = useMemo(() => columns.map((c) => c.key), [columns]);
   const shownRows = useMemo(
-    () => gateReportRows(rows, activeSort?.id ?? "player", selected, gateActive),
-    [rows, activeSort, selected, gateActive],
+    () =>
+      applyResultFilters(
+        rows,
+        filters,
+        activeSort?.id ?? "player",
+        activeSort?.dir ?? "asc",
+        view,
+        selected,
+      ),
+    [rows, filters, activeSort, view, selected],
   );
   const byKey = useMemo(
     () => new Map(columns.map((c) => [c.key, c])),
@@ -356,7 +357,7 @@ export function ReportTable({
       cols.push({
         id: col.key,
         header: (
-          <span title={col.higherIsBetter ? undefined : "Lower is better"}>
+          <span title={definitionLine(col)}>
             {col.label}
             {col.higherIsBetter ? "" : (
               <span className="ml-0.5 text-ink-secondary" aria-hidden="true">

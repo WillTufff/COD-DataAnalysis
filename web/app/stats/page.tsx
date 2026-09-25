@@ -18,6 +18,7 @@ import {
   getMetricCoverage,
   getReportPlayers,
   getReportTeams,
+  getReportViewPlayers,
   getTeamMetricCatalog,
   latestRun,
   queryReport,
@@ -25,7 +26,7 @@ import {
   getModeCatalog,
 } from "@/lib/analytics";
 import { categoryLabel } from "@/lib/reports/labels";
-import { gateReportRows } from "@/lib/reports/rows";
+import { applyResultFilters } from "@/lib/reports/rows";
 import { presetsFor } from "@/lib/reports/presets";
 import { parseEntity, resolveReportForUrl } from "@/lib/reports/resolve";
 import {
@@ -59,7 +60,16 @@ function yearSpan(years: number[]): string {
 }
 
 /** The row filters a preset link keeps, so switching presets keeps the view. */
-const CARRIED_PARAMS = ["years", "players", "teams", "all", "view"];
+const CARRIED_PARAMS = [
+  "years",
+  "players",
+  "teams",
+  "all",
+  "minmaps",
+  "where",
+  "top",
+  "view",
+];
 
 export default async function StatsPage({
   searchParams,
@@ -106,7 +116,7 @@ export default async function StatsPage({
   const resolved = await resolveReportForUrl(run.id, sp, metrics);
   const { selected, selectedEntries, activePreset, scope, rankedScope } =
     resolved;
-  const { years, playerSlugs, teamSlugs, modeSlug, qualifiedOnly } = resolved;
+  const { years, playerSlugs, teamSlugs, modeSlug } = resolved;
 
   // A metric is in view when it has rows for at least one season on screen in
   // the mode on screen. An empty `years` is every covered season.
@@ -171,8 +181,9 @@ export default async function StatsPage({
     <p className="mt-3 max-w-3xl text-xs text-ink-muted">
       Each cell is scored within the qualified {entity} of its own season and
       mode, so a column can qualify a {entity === "teams" ? "team" : "player"}{" "}
-      the next column does not. Those cells are greyed, never dropped. Full
-      definitions are on the{" "}
+      the next column does not. Those cells are greyed, never dropped. Min
+      maps hides whole rows, and defaults to the published floor. Each
+      column&apos;s ▾ gives its formula and floor; full definitions are on the{" "}
       <Link href="/methodology/metrics" className="underline">
         methodology
       </Link>{" "}
@@ -193,19 +204,38 @@ export default async function StatsPage({
     );
   }
 
-  const { gateActive, view, sort, dir, defaultSortKey, defaultDir } = resolved;
-  // Rows come back ungated: the table applies the qualified gate to whichever
-  // column it is sorted on, which a header click can change without a request.
-  const ungated = { ...resolved.query, qualifiedOnly: false };
-  const [{ columns, rows }, scopePlayers, scopeTeams] = await Promise.all([
-    entity === "teams"
-      ? queryTeamReport(run.id, ungated, selectedEntries)
-      : queryReport(run.id, ungated, selectedEntries),
-    // The player filter has no place on a team report: the rows are teams.
-    entity === "teams" ? Promise.resolve([]) : getReportPlayers(run.id),
-    getReportTeams(),
-  ]);
-  const handleBySlug = new Map(scopePlayers.map((p) => [p.slug, p.handle]));
+  const { view, sort, dir, defaultSortKey, defaultDir, filters } = resolved;
+  // Rows come back without result filters: the table applies them after its
+  // own sort, since top N follows whichever column a header click sorts on.
+  const [{ columns, rows }, viewPlayers, allPlayers, scopeTeams] =
+    await Promise.all([
+      entity === "teams"
+        ? queryTeamReport(run.id, resolved.query, selectedEntries)
+        : queryReport(run.id, resolved.query, selectedEntries),
+      // The player filter has no place on a team report: the rows are teams.
+      entity === "teams"
+        ? Promise.resolve([])
+        : getReportViewPlayers(run.id, { years, modeSlug }),
+      // Names for picks outside the view, which the chip still has to show.
+      entity === "teams" || playerSlugs.length === 0
+        ? Promise.resolve([])
+        : getReportPlayers(run.id),
+      getReportTeams(),
+    ]);
+  const handleBySlug = new Map(
+    [...allPlayers, ...viewPlayers].map((p) => [p.slug, p.handle]),
+  );
+  const playerNames = Object.fromEntries(
+    playerSlugs.map((s) => [s, handleBySlug.get(s) ?? s]),
+  );
+  const shownRows = applyResultFilters(
+    rows,
+    filters,
+    sort,
+    dir,
+    view,
+    resolved.selected,
+  );
   const teamNameBySlug = new Map(scopeTeams.map((t) => [t.slug, t.name]));
   // What the filter chips claim, reused by the print stamp and empty state.
   const playersText = pickLabel(playerSlugs, handleBySlug, "players");
@@ -224,11 +254,21 @@ export default async function StatsPage({
           modeCatalog={modeCatalog}
           allModes={rankedScope.allModes}
           modeSlug={modeSlug}
-          players={scopePlayers}
+          players={viewPlayers}
           pickedPlayers={playerSlugs}
+          playerNames={playerNames}
           teams={scopeTeams}
           pickedTeams={teamSlugs}
-          qualifiedOnly={qualifiedOnly}
+          mapsFloor={resolved.mapsFloor}
+          minMaps={resolved.minMaps}
+          minMapsSet={"minmaps" in sp || sp.all === "1"}
+          where={resolved.where}
+          top={resolved.top}
+          columns={columns.map((c) => ({
+            key: c.key,
+            label: c.label,
+            unit: c.unit,
+          }))}
         />
       </div>
 
@@ -241,11 +281,15 @@ export default async function StatsPage({
         {modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL)} ·{" "}
         {entity === "players" ? `${playersText.toLowerCase()} · ` : ""}
         {teamsText.toLowerCase()} ·{" "}
-        {qualifiedOnly ? "qualified only" : "including small samples"} · metric
-        layer v{run.version}
+        {resolved.minMaps > 0 ? `min ${resolved.minMaps} maps` : "any maps"}
+        {resolved.where.length > 0
+          ? ` · ${resolved.where.length} threshold${resolved.where.length > 1 ? "s" : ""}`
+          : ""}
+        {resolved.top !== null ? ` · top ${resolved.top}` : ""} · metric layer
+        v{run.version}
       </p>
 
-      {gateReportRows(rows, sort, resolved.selected, gateActive).length === 0 ? (
+      {shownRows.length === 0 ? (
         <p className="mt-8 text-sm text-ink-secondary">
           {playerSlugs.length > 0 || teamSlugs.length > 0
             ? `No rows for ${[
@@ -258,7 +302,7 @@ export default async function StatsPage({
                 .join(
                   " on ",
                 )} here. Try a different season or mode, or clear the row filters.`
-            : `No ${entity} match these filters. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or include small samples.`}
+            : `No ${entity} match these filters. The chosen columns may not cover ${seasonLabel(scope.seasons, years).toLowerCase()}${modeSlug ? ` in ${modeLabel(modeCatalog, modeSlug)}` : ""}. Try a different season or mode, or loosen the row filters.`}
         </p>
       ) : (
         <ReportTable
@@ -266,7 +310,7 @@ export default async function StatsPage({
           columns={columns}
           rows={rows}
           catalog={metricOptions}
-          gateActive={gateActive}
+          filters={filters}
           initialView={view}
           initialPer={parsePer(sp)}
           initialPage={parsePage(sp)}

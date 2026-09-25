@@ -1,8 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ScopePlayer, ScopeSeason, ScopeTeam } from "@/lib/analytics";
+import { useSearchParams } from "next/navigation";
+import type {
+  ScopeSeason,
+  ScopeStint,
+  ScopeTeam,
+  ScopeViewPlayer,
+} from "@/lib/analytics";
+import { fuzzyRank } from "@/lib/reports/fuzzy";
 import type { ReportEntity } from "@/lib/reports/resolve";
+import { type Threshold, parseView, serializeWhere } from "@/lib/reports/rows";
 import {
   type ModeCatalog,
   ALL_MODES_LABEL,
@@ -10,100 +18,67 @@ import {
   pickLabel,
   seasonLabel,
 } from "./cohortLabel";
+import { Check, Chip, MENU_ROW } from "./chips";
+import { formatThreshold } from "./format";
 import { useDismiss } from "./popover";
+import { CountMenu, type ThresholdColumn, ThresholdMenu } from "./ResultChips";
 import { useReportUrl } from "./reportUrl";
 
-/** A row in a chip menu: check mark gutter + label, hover fill. */
-const MENU_ROW =
-  "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-secondary hover:bg-surface-raised hover:text-ink";
-
-function Check({ on }: { on: boolean }) {
-  return (
-    <span aria-hidden="true" className={on ? "text-accent" : "text-transparent"}>
-      ✓
-    </span>
-  );
-}
-
 /**
- * A filter chip: `Label: value`, opening its menu underneath, with its own ✕
- * when the filter can be removed. Open state is an accent border.
+ * What a search menu offers: the slug that rides the URL, the name shown, a
+ * line of context beside it, and the extra text a search also matches.
  */
-function Chip({
-  label,
-  value,
-  open,
-  setOpen,
-  onClear,
-  children,
-}: {
+type SearchOption = {
+  slug: string;
   label: string;
-  value: string;
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  onClear?: () => void;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setOpen(false), [setOpen]);
-  useDismiss({ open, close, container: ref, button: buttonRef });
+  context?: string;
+  also?: string[];
+};
 
-  return (
-    <div
-      ref={ref}
-      className={`relative inline-flex items-stretch border text-xs transition-colors motion-reduce:transition-none ${
-        open ? "border-accent bg-surface-raised" : "border-hairline bg-surface hover:border-accent-dim"
-      }`}
-    >
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="px-2 py-1 text-left"
-      >
-        <span className="text-ink-muted">{label}:</span>{" "}
-        <span className="font-medium text-ink">{value}</span>
-      </button>
-      {onClear && (
-        <button
-          type="button"
-          aria-label={`Remove the ${label.toLowerCase()} filter`}
-          title={`Remove the ${label.toLowerCase()} filter`}
-          onClick={onClear}
-          className="border-l border-hairline px-1.5 text-ink-muted hover:text-accent"
-        >
-          ✕
-        </button>
-      )}
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 max-w-[calc(100vw-2rem)] border border-hairline bg-surface shadow-lg">
-          {children}
-        </div>
-      )}
-    </div>
-  );
+/** Consecutive years as ranges: 2019, 2021–23. */
+function yearRanges(years: number[]): string {
+  const out: string[] = [];
+  let lo = years[0];
+  let hi = years[0];
+  for (const y of [...years.slice(1), NaN]) {
+    if (y === hi + 1) {
+      hi = y;
+      continue;
+    }
+    out.push(lo === hi ? String(lo) : `${lo}–${String(hi).slice(-2)}`);
+    lo = hi = y;
+  }
+  return out.join(", ");
 }
 
-/** What a search menu offers: the slug that rides the URL, the name shown. */
-type SearchOption = { slug: string; label: string };
+/**
+ * Where a player in view played: team names, with their seasons when the view
+ * spans more than one. Two teams at most, then a count.
+ */
+function stintContext(stints: ScopeStint[], multiYear: boolean): string {
+  const shown = stints
+    .slice(0, 2)
+    .map((st) => (multiYear ? `${st.team} ${yearRanges(st.years)}` : st.team));
+  const more = stints.length - shown.length;
+  return shown.join(" · ") + (more > 0 ? ` +${more}` : "");
+}
 
 /**
- * The player/team menu: a search over the field, because rosters run to
- * hundreds where seasons run to a handful. Picked entries pin above the search
- * results so the current filter is always visible and un-pickable without
- * retyping a name.
+ * The player/team menu: a forgiving search over the field, because rosters run
+ * to hundreds where seasons run to a handful. Picked entries pin above the
+ * search results so the current filter is always visible and un-pickable
+ * without retyping a name.
  */
 function SearchMenu({
   options,
   picked,
+  pickedNames,
   noun,
   commit,
 }: {
   options: SearchOption[];
   picked: string[];
+  pickedNames: Map<string, string>;
   noun: "players" | "teams";
   commit: (next: string[]) => void;
 }) {
@@ -111,7 +86,7 @@ function SearchMenu({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
   }, []);
 
   const bySlug = useMemo(
@@ -121,10 +96,8 @@ function SearchMenu({
   const pickedSet = useMemo(() => new Set(picked), [picked]);
 
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const pool = options.filter((o) => !pickedSet.has(o.slug));
-    if (q === "") return pool;
-    return pool.filter((o) => o.label.toLowerCase().includes(q));
+    return fuzzyRank(pool, query, (o) => [o.label, ...(o.also ?? [])]);
   }, [options, pickedSet, query]);
 
   function toggle(slug: string) {
@@ -132,11 +105,11 @@ function SearchMenu({
       pickedSet.has(slug) ? picked.filter((s) => s !== slug) : [...picked, slug],
     );
     setQuery("");
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
   }
 
   return (
-    <div className="w-64 max-w-full">
+    <div className="w-72 max-w-full">
       <input
         ref={inputRef}
         type="text"
@@ -163,7 +136,10 @@ function SearchMenu({
             className={MENU_ROW}
           >
             <Check on />
-            <span className="text-ink">{bySlug.get(slug)?.label ?? slug}</span>
+            <span className="text-ink">
+              {bySlug.get(slug)?.label ?? pickedNames.get(slug) ?? slug}
+            </span>
+            <OptionContext text={bySlug.get(slug)?.context} />
           </button>
         ))}
         {picked.length > 0 && <div className="my-1 border-t border-hairline" />}
@@ -183,11 +159,21 @@ function SearchMenu({
             >
               <Check on={false} />
               {o.label}
+              <OptionContext text={o.context} />
             </button>
           ))
         )}
       </div>
     </div>
+  );
+}
+
+function OptionContext({ text }: { text?: string }) {
+  if (!text) return null;
+  return (
+    <span className="ml-auto truncate pl-2 text-[0.66rem] text-ink-muted">
+      {text}
+    </span>
   );
 }
 
@@ -242,7 +228,10 @@ function AddFilter({
   );
 }
 
-type RowFilter = "season" | "players" | "teams" | "samples";
+type RowFilter = "season" | "players" | "teams" | "minmaps" | "where" | "top";
+
+/** Top N quick picks. */
+const TOP_PICKS = [10, 25, 50, 100];
 
 /** A band: a caps label, its chips, and a one-line note on what it changes. */
 function Band({
@@ -275,7 +264,8 @@ function Band({
  * The filters, in two bands. "Maps from" holds the filters that change which
  * maps feed a number, so every value moves with them; today that is the mode.
  * "Show rows" holds the filters that only hide rows of the finished table:
- * season, player, team and small samples. Each change rewrites the URL.
+ * season, player, team, min maps, value thresholds and top N. Each change
+ * rewrites the URL.
  */
 export function FilterBands({
   entity,
@@ -287,9 +277,15 @@ export function FilterBands({
   modeSlug,
   players,
   pickedPlayers,
+  playerNames,
   teams,
   pickedTeams,
-  qualifiedOnly,
+  mapsFloor,
+  minMaps,
+  minMapsSet,
+  where,
+  top,
+  columns,
 }: {
   entity: ReportEntity;
   seasons: ScopeSeason[];
@@ -298,33 +294,55 @@ export function FilterBands({
   modeCatalog: ModeCatalog;
   allModes: boolean;
   modeSlug?: string;
-  players: ScopePlayer[];
+  /** The players with rows in view, with their rosters. */
+  players: ScopeViewPlayer[];
   pickedPlayers: string[];
+  /** Names for picked players, including any not in view. */
+  playerNames: Record<string, string>;
   teams: ScopeTeam[];
   pickedTeams: string[];
-  qualifiedOnly: boolean;
+  mapsFloor: number;
+  minMaps: number;
+  /** Whether the URL sets min maps, rather than it being the default. */
+  minMapsSet: boolean;
+  where: Threshold[];
+  top: number | null;
+  columns: ThresholdColumn[];
 }) {
   const push = useReportUrl();
-  const [openChip, setOpenChip] = useState<RowFilter | "mode" | null>(null);
+  const searchParams = useSearchParams();
+  const [openChip, setOpenChip] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const opener = (id: RowFilter | "mode") => (o: boolean) =>
-    setOpenChip(o ? id : null);
+  const opener = (id: string) => (o: boolean) => setOpenChip(o ? id : null);
+  // The view is read live: the table switches it in place, without a request.
+  const view = parseView({ view: searchParams.get("view") ?? "" });
 
+  const multiYear = years.length !== 1;
   const playerOptions = useMemo(
-    () => players.map((p) => ({ slug: p.slug, label: p.handle })),
-    [players],
+    () =>
+      players.map((p) => ({
+        slug: p.slug,
+        label: p.handle,
+        context: stintContext(p.stints, multiYear),
+        also: p.stints.map((st) => st.team),
+      })),
+    [players, multiYear],
   );
   const teamOptions = useMemo(
     () => teams.map((t) => ({ slug: t.slug, label: t.name })),
     [teams],
   );
   const playerNameBySlug = useMemo(
-    () => new Map(playerOptions.map((o) => [o.slug, o.label])),
-    [playerOptions],
+    () => new Map(Object.entries(playerNames)),
+    [playerNames],
   );
   const teamNameBySlug = useMemo(
     () => new Map(teamOptions.map((o) => [o.slug, o.label])),
     [teamOptions],
+  );
+  const columnByKey = useMemo(
+    () => new Map(columns.map((c) => [c.key, c])),
+    [columns],
   );
 
   // An empty `years` is every season; render it as every box ticked, which is
@@ -344,13 +362,18 @@ export function FilterBands({
     );
   }
 
+  function commitWhere(next: Threshold[]) {
+    push({ where: serializeWhere(next) });
+    setOpenChip(null);
+  }
+
   const seasonOn = years.length > 0;
   const playersOn = entity === "players" && pickedPlayers.length > 0;
   const teamsOn = pickedTeams.length > 0;
-  const samplesOn = !qualifiedOnly;
-  const rowFilterCount = [seasonOn, playersOn, teamsOn, samplesOn].filter(
-    Boolean,
-  ).length;
+  const topOn = top !== null;
+  const rowFilterCount =
+    [seasonOn, playersOn, teamsOn, minMapsSet, topOn].filter(Boolean).length +
+    where.length;
   const shown = (id: RowFilter, on: boolean) => on || openChip === id;
 
   const addable: { id: RowFilter; label: string }[] = [];
@@ -359,13 +382,24 @@ export function FilterBands({
     addable.push({ id: "players", label: "Player" });
   }
   if (!teamsOn && teams.length > 0) addable.push({ id: "teams", label: "Team" });
-  if (!samplesOn) addable.push({ id: "samples", label: "Include small samples" });
+  if (columns.length > 0) addable.push({ id: "where", label: "Value threshold" });
+  if (!topOn) addable.push({ id: "top", label: "Top N" });
 
   const modeClearable = modeSlug !== undefined && allModes;
   const summary = [
     modeLabel(modeCatalog, modeSlug, ALL_MODES_LABEL),
     seasonLabel(seasons, years),
   ].join(" · ");
+
+  const minMapsPicks = [
+    { n: 0, label: "Any" },
+    ...[mapsFloor, 20, 40, 80]
+      .filter((n, i, a) => n > 0 && a.indexOf(n) === i)
+      .map((n) => ({
+        n,
+        label: n === mapsFloor ? `${n} (published floor)` : String(n),
+      })),
+  ];
 
   return (
     <div className="print:hidden">
@@ -485,6 +519,7 @@ export function FilterBands({
               <SearchMenu
                 options={playerOptions}
                 picked={pickedPlayers}
+                pickedNames={playerNameBySlug}
                 noun="players"
                 commit={(next) =>
                   push({ players: next.length > 0 ? next.join(",") : null })
@@ -504,6 +539,7 @@ export function FilterBands({
               <SearchMenu
                 options={teamOptions}
                 picked={pickedTeams}
+                pickedNames={teamNameBySlug}
                 noun="teams"
                 commit={(next) =>
                   push({ teams: next.length > 0 ? next.join(",") : null })
@@ -512,30 +548,93 @@ export function FilterBands({
             </Chip>
           )}
 
-          {samplesOn && (
-            <span className="inline-flex items-stretch border border-hairline bg-surface text-xs">
-              <span className="px-2 py-1">
-                <span className="text-ink-muted">Small samples:</span>{" "}
-                <span className="font-medium text-ink">shown</span>
-              </span>
-              <button
-                type="button"
-                aria-label="Hide small samples"
-                title="Hide small samples"
-                onClick={() => push({ all: null })}
-                className="border-l border-hairline px-1.5 text-ink-muted hover:text-accent"
-              >
-                ✕
-              </button>
-            </span>
+          {mapsFloor > 0 && (
+            <Chip
+              label="Min maps"
+              value={minMaps > 0 ? String(minMaps) : "any"}
+              open={openChip === "minmaps"}
+              setOpen={opener("minmaps")}
+              onClear={minMapsSet ? () => push({ minmaps: null, all: null }) : undefined}
+            >
+              <CountMenu
+                value={minMaps}
+                picks={minMapsPicks}
+                suffix="maps"
+                inputLabel="Minimum maps"
+                commit={(n) => {
+                  push({ minmaps: String(n ?? 0), all: null });
+                  setOpenChip(null);
+                }}
+              />
+            </Chip>
           )}
 
-          <AddFilter
-            options={addable}
-            onPick={(id) =>
-              id === "samples" ? push({ all: "1" }) : setOpenChip(id)
-            }
-          />
+          {where.map((t, i) => {
+            const col = columnByKey.get(t.metric);
+            if (!col) return null;
+            const id = `where-${i}`;
+            return (
+              <Chip
+                key={`${t.metric}:${t.field}:${t.op}`}
+                label={col.label}
+                value={`${t.op === "gte" ? "≥" : "≤"} ${formatThreshold(t.n, t.field, col.unit)}`}
+                open={openChip === id}
+                setOpen={opener(id)}
+                onClear={() => commitWhere(where.filter((_, j) => j !== i))}
+              >
+                <ThresholdMenu
+                  columns={columns}
+                  initial={t}
+                  commit={(next) =>
+                    commitWhere(where.map((w, j) => (j === i ? next : w)))
+                  }
+                  remove={() => commitWhere(where.filter((_, j) => j !== i))}
+                />
+              </Chip>
+            );
+          })}
+
+          {openChip === "where" && columns.length > 0 && (
+            <Chip
+              label="Threshold"
+              value="new"
+              open
+              setOpen={opener("where")}
+            >
+              <ThresholdMenu
+                columns={columns}
+                initial={{ metric: columns[0].key, field: view, op: "gte", n: 0 }}
+                commit={(next) => commitWhere([...where, next])}
+              />
+            </Chip>
+          )}
+
+          {shown("top", topOn) && (
+            <Chip
+              label="Top"
+              value={top !== null ? String(top) : "all"}
+              open={openChip === "top"}
+              setOpen={opener("top")}
+              onClear={topOn ? () => push({ top: null }) : undefined}
+            >
+              <CountMenu
+                value={top}
+                picks={[
+                  { n: null, label: "all" },
+                  ...TOP_PICKS.map((n) => ({ n, label: String(n) })),
+                ]}
+                noneLabel="All rows"
+                suffix="rows"
+                inputLabel="Rows to keep"
+                commit={(n) => {
+                  push({ top: n !== null && n > 0 ? String(n) : null });
+                  setOpenChip(null);
+                }}
+              />
+            </Chip>
+          )}
+
+          <AddFilter options={addable} onPick={(id) => setOpenChip(id)} />
 
           {rowFilterCount > 0 && (
             <button
@@ -546,7 +645,10 @@ export function FilterBands({
                   year: null,
                   players: null,
                   teams: null,
+                  minmaps: null,
                   all: null,
+                  where: null,
+                  top: null,
                 })
               }
               className="px-1 text-xs text-ink-muted underline-offset-2 hover:text-accent hover:underline"

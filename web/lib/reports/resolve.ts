@@ -1,6 +1,6 @@
 // The one place URL params become a report. The page and the export route both
 // call this, so a downloaded file always matches the table it was exported from
-// — the cohort, the column order, the sort, and the qualified gate are resolved
+// — the cohort, the column order, the sort, and the result filters are resolved
 // exactly once.
 
 import {
@@ -18,7 +18,15 @@ import {
   presetById,
   sanitizePresetMetrics,
 } from "./presets";
-import { type ReportView, parseView } from "./rows";
+import {
+  type ReportView,
+  type ResultFilters,
+  type Threshold,
+  parseMinMaps,
+  parseTop,
+  parseView,
+  parseWhere,
+} from "./rows";
 
 export type ReportScope = {
   years: number[];
@@ -53,9 +61,12 @@ export type ResolvedReport = {
   playerSlugs: string[]; // empty = everyone
   teamSlugs: string[]; // empty = every team
   modeSlug?: string;
-  qualifiedOnly: boolean;
-  /** Whether the qualified gate applies: on, and no explicit row filter. */
-  gateActive: boolean;
+  /** The published maps floor: the min maps a bare URL applies. */
+  mapsFloor: number;
+  minMaps: number;
+  where: Threshold[];
+  top: number | null;
+  filters: ResultFilters;
   sort: string;
   dir: "asc" | "desc";
   view: ReportView;
@@ -193,15 +204,23 @@ export async function resolveReport(
           : [];
   const selectedEntries = selected.map((k) => byKey.get(k)!);
 
-  const qualifiedOnly = one(sp, "all") !== "1";
   const playerSlugs = parsePlayers(sp);
   const teamSlugs = parseTeams(sp);
   const view = parseView(sp);
   // The row filters that apply to this entity: a team report has no player
-  // filter, so a stray `players=` must not switch its gate off.
-  const filtered =
+  // filter, so a stray `players=` must not lower its min maps.
+  const picked =
     teamSlugs.length > 0 || (entity === "players" && playerSlugs.length > 0);
-  const gateActive = qualifiedOnly && !filtered;
+  // The min maps default is the floor the catalog publishes for its
+  // maps-denominated metrics, and those metrics are what carry a row's maps.
+  const mapsEntries = metrics.filter((m) => m.denom_kind === "maps");
+  const mapsMetrics = mapsEntries.map((m) => m.key);
+  const mapsFloor =
+    mapsEntries.length > 0 ? Math.min(...mapsEntries.map((m) => m.min_denom)) : 0;
+  const minMaps = parseMinMaps(sp, mapsFloor, picked);
+  const where = parseWhere(sp, selected);
+  const top = parseTop(sp);
+  const filters: ResultFilters = { minMaps, where, top };
 
   if (selected.length === 0) {
     return {
@@ -214,14 +233,17 @@ export async function resolveReport(
       years: [],
       playerSlugs,
       teamSlugs,
-      qualifiedOnly,
-      gateActive,
+      mapsFloor,
+      minMaps,
+      where,
+      top,
+      filters,
       sort: "player",
       dir: "asc",
       view,
       defaultSortKey: "",
       defaultDir: "asc",
-      query: { metrics: [], qualifiedOnly, sort: "player", dir: "asc", view },
+      query: { metrics: [], mapsMetrics },
     };
   }
 
@@ -302,8 +324,11 @@ export async function resolveReport(
     playerSlugs,
     teamSlugs,
     modeSlug,
-    qualifiedOnly,
-    gateActive,
+    mapsFloor,
+    minMaps,
+    where,
+    top,
+    filters,
     sort,
     dir,
     view,
@@ -311,14 +336,11 @@ export async function resolveReport(
     defaultDir,
     query: {
       metrics: selected,
+      mapsMetrics,
       years,
       modeSlug,
       players: playerSlugs,
       teams: teamSlugs,
-      qualifiedOnly,
-      sort,
-      dir,
-      view,
     },
   };
 }

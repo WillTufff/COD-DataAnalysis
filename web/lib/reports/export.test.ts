@@ -16,14 +16,17 @@ function resolved(overrides: Partial<ResolvedReport> = {}): ResolvedReport {
     playerSlugs: [],
     teamSlugs: [],
     modeSlug: undefined,
-    qualifiedOnly: true,
-    gateActive: true,
+    mapsFloor: 8,
+    minMaps: 8,
+    where: [],
+    top: null,
+    filters: { minMaps: 8, where: [], top: null },
     sort: "kd",
     dir: "desc",
     view: "value",
     defaultSortKey: "kd",
     defaultDir: "desc",
-    query: { metrics: ["kd"], qualifiedOnly: true, sort: "kd", dir: "desc" },
+    query: { metrics: ["kd"], mapsMetrics: ["kd"] },
     ...overrides,
   };
 }
@@ -35,6 +38,8 @@ const kdColumn: ReportColumn = {
   higherIsBetter: true,
   denomKind: "maps",
   minDenom: 8,
+  formula: "sum(kills) / max(sum(deaths), 1)",
+  note: null,
 };
 
 function row(overrides: Partial<ReportRow> = {}): ReportRow {
@@ -45,6 +50,7 @@ function row(overrides: Partial<ReportRow> = {}): ReportRow {
     year: 2018,
     title: "WWII",
     mode: "hardpoint",
+    maps: 40,
     cells: {
       kd: { value: 1.13, denom: 100, z: 1.2, pctl: 0.9, qualified: true },
     },

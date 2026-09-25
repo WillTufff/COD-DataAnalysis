@@ -8,9 +8,24 @@ import { type Anchor, anchorBelowOrAbove, useDismiss } from "./popover";
 const ROW =
   "flex w-full items-center justify-between gap-3 px-2.5 py-1.5 text-left text-xs text-ink-secondary hover:bg-surface-raised hover:text-ink disabled:pointer-events-none disabled:opacity-40";
 
+/** The sample a cell needs before it is scored: "8 maps". */
+function floorText(col: ReportColumn): string {
+  return `${col.minDenom} ${col.denomKind}`;
+}
+
+/** A column's definition on one line, for the header tooltip. */
+export function definitionLine(col: ReportColumn): string {
+  return [
+    `${col.label} = ${col.formula}`,
+    `Scored from ${floorText(col)}`,
+    col.higherIsBetter ? "Higher is better" : "Lower is better",
+  ].join(" · ");
+}
+
 /**
- * The ▾ on a metric header and the menu behind it: the column's sample floor
- * and direction, sort either way, move one place, and remove. Every column
+ * The ▾ on a metric header and the menu behind it: the column's definition
+ * (formula, unit, sample floor, direction), sort either way, move one place,
+ * and remove. Every column
  * edit here is also reachable by keyboard, which dragging the header is not.
  */
 export function ColumnMenu({
@@ -74,13 +89,25 @@ export function ColumnMenu({
           ref={menuRef}
           role="menu"
           style={anchor}
-          className="fixed z-30 w-56 border border-hairline bg-surface py-1 text-left font-sans normal-case tracking-normal shadow-lg"
+          className="fixed z-30 w-72 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain border border-hairline bg-surface py-1 text-left font-sans normal-case tracking-normal shadow-lg"
         >
-          <p className="px-2.5 pb-1.5 pt-1 text-[0.66rem] leading-snug text-ink-muted">
+          <div className="px-2.5 pb-1.5 pt-1 text-[0.66rem] leading-snug text-ink-muted">
             <span className="block text-xs text-ink">{col.label}</span>
-            {col.higherIsBetter ? "Higher is better" : "Lower is better"} · min{" "}
-            {col.minDenom} {col.denomKind}
-          </p>
+            <code className="mt-1 block whitespace-normal break-words font-mono text-[0.66rem] text-ink-secondary">
+              {col.formula}
+            </code>
+            <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+              <dt>Unit</dt>
+              <dd className="text-ink-secondary">{col.unit}</dd>
+              <dt>Sample floor</dt>
+              <dd className="text-ink-secondary">{floorText(col)}</dd>
+              <dt>Direction</dt>
+              <dd className="text-ink-secondary">
+                {col.higherIsBetter ? "Higher is better" : "Lower is better"}
+              </dd>
+            </dl>
+            {col.note && <p className="mt-1.5">{col.note}</p>}
+          </div>
           <div className="my-1 border-t border-hairline" />
           <button
             type="button"

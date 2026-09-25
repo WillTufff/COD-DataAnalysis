@@ -69,7 +69,7 @@ export function toXml(matrix: ExportMatrix): string {
       Array.isArray(meta.cohort.teams)
         ? meta.cohort.teams.join(",")
         : meta.cohort.teams,
-    )}" sort="${xmlEscape(meta.sort)}" dir="${meta.dir}" qualifiedOnly="${meta.qualifiedOnly}" rowCount="${meta.rowCount}"${meta.truncated ? ' truncated="true"' : ""}/>`,
+    )}" sort="${xmlEscape(meta.sort)}" dir="${meta.dir}" minMaps="${meta.minMaps}"${meta.where ? ` where="${xmlEscape(meta.where)}"` : ""}${meta.top !== null ? ` top="${meta.top}"` : ""} rowCount="${meta.rowCount}"${meta.truncated ? ' truncated="true"' : ""}/>`,
     "  <attribution>",
     `    <note>${xmlEscape(meta.attribution.derived)}</note>`,
     ...meta.attribution.sources.map((s) => `    <source>${xmlEscape(s)}</source>`),
